@@ -1,0 +1,23 @@
+{
+  "name": "flexoprint-erp",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace=@flexoprint/backend",
+    "db:push": "npm run db:push --workspace=@flexoprint/backend",
+    "db:migrate": "npm run db:migrate --workspace=@flexoprint/backend"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

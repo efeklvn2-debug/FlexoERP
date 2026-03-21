@@ -1,0 +1,404 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator seed {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  OPERATOR
+  VIEWER
+}
+
+model User {
+  id           String         @id @default(cuid())
+  username     String         @unique
+  passwordHash String
+  role         Role           @default(OPERATOR)
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model IdempotencyKey {
+  id        String   @id
+  response  Json
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  IN_PRODUCTION
+  COMPLETED
+  CANCELLED
+}
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String
+  code      String    @unique
+  email     String?
+  phone     String?
+  address   String?
+  colors    String[]  @default([])
+  notes     String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  orders    Order[]
+  transactions Transaction[]
+  printedRolls PrintedRoll[]
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  orderNumber  String      @unique
+  customerId   String
+  customer     Customer    @relation(fields: [customerId], references: [id])
+  status       OrderStatus @default(PENDING)
+  totalAmount  Decimal     @db.Decimal(12, 2)
+  notes        String?
+  dueDate      DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  createdById  String?
+  items        OrderItem[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([orderNumber])
+}
+
+model OrderItem {
+  id          String  @id @default(cuid())
+  orderId     String
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(12, 2)
+  totalPrice  Decimal @db.Decimal(12, 2)
+
+  @@index([orderId])
+}
+
+enum MaterialCategory {
+  PLAIN_ROLLS
+  INK_SOLVENTS
+  PACKAGING
+}
+
+enum MovementType {
+  IN
+  OUT
+  ADJUSTMENT
+  TRANSFER
+}
+
+model Material {
+  id            String           @id @default(cuid())
+  code          String           @unique
+  name          String
+  category      MaterialCategory
+  subCategory   String?          // e.g., "25microns", "IPA", "Packing Bag"
+  unitOfMeasure String           @default("pcs")
+  minStock      Int              @default(0)
+  costPrice     Decimal?         @db.Decimal(12, 2) // cost per unit
+  packSize      Int?             @default(1)        // for packaging: packs per bundle
+  drumSize      Int?             // for ink/solvents: liters per drum
+  coreWeight    Decimal?         @db.Decimal(6, 2)  // for plain rolls: weight of core in kg
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  stocks        Stock[]
+  movements     StockMovement[]
+  rolls         Roll[]
+  poLineItems   POLineItem[]
+  priceLists    PriceList[]
+}
+
+model Stock {
+  id          String   @id @default(cuid())
+  materialId  String
+  material    Material @relation(fields: [materialId], references: [id])
+  quantity    Int      @default(0)
+  location    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  movements   StockMovement[]
+
+  @@unique([materialId, location])
+  @@index([materialId])
+}
+
+model StockMovement {
+  id          String       @id @default(cuid())
+  materialId  String
+  material    Material     @relation(fields: [materialId], references: [id])
+  stockId     String?
+  stock       Stock?       @relation(fields: [stockId], references: [id])
+  type        MovementType
+  quantity    Int
+  reference   String?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  createdById String?
+
+  @@index([materialId])
+  @@index([createdAt])
+}
+
+enum RollStatus {
+  AVAILABLE
+  IN_PRODUCTION
+  CONSUMED
+  RETURNED
+}
+
+enum POStatus {
+  PENDING
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id            String     @id @default(cuid())
+  poNumber      String     @unique
+  supplier      String
+  status       POStatus   @default(PENDING)
+  expectedDate  DateTime?
+  receivedDate DateTime?
+  notes         String?
+  totalAmount  Decimal?   @db.Decimal(12, 2)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  createdById  String?
+  items        POLineItem[]
+  rolls        Roll[]
+
+  @@index([poNumber])
+  @@index([status])
+}
+
+model POLineItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId  String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  materialId       String
+  material        Material      @relation(fields: [materialId], references: [id])
+  quantity         Int           // number of rolls
+  totalWeight     Decimal       @db.Decimal(10, 2) // total kg
+  unitPrice       Decimal       @db.Decimal(12, 2) // price per kg
+  receivedQty     Int           @default(0)
+  rollWeights     Decimal[]     @db.Decimal(10, 2) // individual roll weights (for tracking)
+  createdAt       DateTime      @default(now())
+
+  @@index([purchaseOrderId])
+}
+
+model Roll {
+  id             String     @id @default(cuid())
+  rollNumber     String     @unique
+  materialId     String
+  material       Material   @relation(fields: [materialId], references: [id])
+  purchaseOrderId String?
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  weight         Decimal    @db.Decimal(10, 2)
+  remainingWeight Decimal   @db.Decimal(10, 2)
+  width         Decimal?   @db.Decimal(8, 2)
+  length         Decimal?   @db.Decimal(8, 2)
+  coreSize       String?
+  status         RollStatus @default(AVAILABLE)
+  receivedDate   DateTime?
+  notes          String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  productionJobs  PrintedRoll[]
+
+  @@index([materialId])
+  @@index([status])
+  @@index([rollNumber])
+}
+
+model ProductionJob {
+  id                  String   @id @default(cuid())
+  jobNumber           String   @unique
+  customerName        String?
+  status              String   @default("PENDING")
+  startDate           DateTime?
+  endDate             DateTime?
+  machine             String
+  wasteWeight         Decimal? @db.Decimal(10, 2)
+  notes               String?
+  parentRollIds       String[] 
+  printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  printedRolls        PrintedRoll[]
+
+  @@index([jobNumber])
+  @@index([status])
+}
+
+model PrintedRoll {
+  id              String        @id @default(cuid())
+  productionJobId String
+  productionJob   ProductionJob @relation(fields: [productionJobId], references: [id], onDelete: Cascade)
+  rollId          String
+  roll            Roll          @relation(fields: [rollId], references: [id])
+  weightUsed      Decimal       @db.Decimal(10, 2)
+  wasteWeight     Decimal?      @db.Decimal(10, 2)
+  status          String        @default("IN_STOCK") // IN_STOCK, PICKED_UP
+  isCombination   Boolean       @default(false)      // True if made from multiple parent rolls
+  customerId      String?
+  customer        Customer?     @relation(fields: [customerId], references: [id])
+  pickedUpAt      DateTime?     // Timestamp when picked up
+  createdAt       DateTime      @default(now())
+
+  @@unique([productionJobId, rollId])
+  @@index([rollId])
+  @@index([status])
+  @@index([customerId])
+}
+
+model Settings {
+  id                    String   @id @default("default")
+  coreWeight            Decimal  @default(0.7) @db.Decimal(5, 2)   // kg per plastic core
+  inkConsumptionRate    Decimal  @default(0.7) @db.Decimal(5, 2)  // kg ink per kg printed
+  ipaConsumptionRate   Decimal  @default(0.1) @db.Decimal(5, 2)   // L IPA per kg printed
+  butanolConsumptionRate Decimal @default(0.1) @db.Decimal(5, 2) // L Butanol per kg printed
+  coreDepositValue     Decimal  @default(150) @db.Decimal(10, 2) // Naira per core
+  walkInCustomerId     String?  // Default walk-in customer ID
+  vatRate               Decimal  @default(7.5) @db.Decimal(4, 2)  // Nigerian VAT rate (%)
+  updatedAt            DateTime @updatedAt
+}
+
+// ============================================================================
+// FINANCE MODULE
+// ============================================================================
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  COGS
+}
+
+model Account {
+  id            String      @id @default(cuid())
+  code          String      @unique  // e.g., "1000", "1100", "4000"
+  name          String      @unique  // e.g., "Cash", "Accounts Receivable"
+  type          AccountType
+  parentId      String?
+  parent        Account?    @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children      Account[]   @relation("AccountHierarchy")
+  isVatEnabled  Boolean     @default(false)  // For VAT tracking accounts
+  isActive      Boolean     @default(true)
+  description   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  journalLines  JournalLine[]
+  openingBalance Decimal    @default(0) @db.Decimal(15, 2)  // Opening balance for new accounts
+
+  @@index([code])
+  @@index([type])
+  @@index([parentId])
+}
+
+enum SourceModule {
+  SALES
+  PROCUREMENT
+  PRODUCTION
+  EXPENSE
+  PAYMENT
+  ADJUSTMENT
+  OPENING
+}
+
+model JournalEntry {
+  id            String      @id @default(cuid())
+  entryNumber   String      @unique  // Auto-generated: JE-2026-0001
+  date          DateTime    @default(now())
+  description   String
+  sourceModule  SourceModule
+  sourceId      String?     // ID of the triggering transaction
+  reference     String?     // External reference (invoice #, receipt #)
+  postedById    String?
+  postedAt      DateTime    @default(now())
+  isPosted      Boolean     @default(true)  // Always true for auto-posted entries
+  lines        JournalLine[]
+
+  @@index([entryNumber])
+  @@index([date])
+  @@index([sourceModule, sourceId])
+  @@index([postedById])
+}
+
+model JournalLine {
+  id              String      @id @default(cuid())
+  journalEntryId  String
+  journalEntry    JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId       String
+  account         Account     @relation(fields: [accountId], references: [id])
+  debit           Decimal     @default(0) @db.Decimal(15, 2)
+  credit          Decimal     @default(0) @db.Decimal(15, 2)
+  memo            String?
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+model PriceList {
+  id            String    @id @default(cuid())
+  materialId    String
+  material      Material  @relation(fields: [materialId], references: [id])
+  pricePerKg    Decimal?  @db.Decimal(12, 2)  // For PLAIN_ROLLS
+  pricePerPack  Decimal?  @db.Decimal(12, 2)  // For PACKAGING (price per pack)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([materialId, effectiveFrom])
+  @@index([materialId])
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  date        DateTime @default(now())
+  type        String   // PICKUP, PAYMENT, CORE_DEPOSIT
+  amount      Decimal? @db.Decimal(10, 2) // For PAYMENT, CORE_DEPOSIT
+  notes       String?
+  printedRollIds String[] @default([]) // For PICKUP - links to printed rolls
+  packingBags Int?     @default(0) // For PICKUP
+  amountPaid  Decimal? @db.Decimal(10, 2) // For PICKUP - amount paid at pickup
+  createdAt   DateTime @default(now())
+
+  @@index([customerId])
+  @@index([date])
+  @@index([type])
+}
