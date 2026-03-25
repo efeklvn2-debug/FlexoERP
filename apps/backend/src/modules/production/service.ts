@@ -6,11 +6,12 @@ import { inventoryService } from '../inventory/service'
 import { logger } from '../../logger'
 
 export const productionJobSchema = z.object({
+  salesOrderId: z.string().optional(),
   customerName: z.string().optional(),
   machine: z.string().min(1, 'Machine is required'),
   category: z.enum(['25microns', '27microns', '28microns', '30microns', 'Premium', 'SuPremium']).optional(),
   rollIds: z.array(z.string()).min(1, 'At least one parent roll is required'),
-  printedRollWeights: z.array(z.number().positive()).min(1).max(35),
+  printedRollWeights: z.array(z.number().positive()).min(1).max(200),
   wasteWeight: z.number().optional(),
   notes: z.string().optional()
 })
@@ -22,6 +23,7 @@ export const productionService = {
     const jobs = await prisma.productionJob.findMany({
       where: status ? { status } : undefined,
       include: {
+        salesOrder: true,
         printedRolls: {
           include: { roll: { include: { material: true } } }
         }
@@ -29,7 +31,6 @@ export const productionService = {
       orderBy: { createdAt: 'desc' }
     })
     
-    // Fetch parent roll details for each job
     const jobsWithParentRolls = await Promise.all(jobs.map(async (job) => {
       if (job.parentRollIds && job.parentRollIds.length > 0) {
         const parentRolls = await prisma.roll.findMany({
@@ -47,6 +48,7 @@ export const productionService = {
     const job = await prisma.productionJob.findUnique({
       where: { id },
       include: {
+        salesOrder: true,
         printedRolls: {
           include: { roll: { include: { material: true } } }
         }
@@ -54,7 +56,6 @@ export const productionService = {
     })
     if (!job) throw new AppError(404, 'NOT_FOUND', 'Production job not found')
     
-    // Fetch parent roll details
     if (job.parentRollIds && job.parentRollIds.length > 0) {
       const parentRolls = await prisma.roll.findMany({
         where: { id: { in: job.parentRollIds } }
@@ -78,24 +79,9 @@ export const productionService = {
       include: { material: true }
     })
 
-    logger.info({ parentRollsFound: parentRolls.length, inputRollIds: input.rollIds }, 'Parent rolls query')
-
     if (parentRolls.length !== input.rollIds.length) {
       throw new AppError(400, 'INVALID_ROLLS', 'Some rolls are not available for production')
     }
-
-    const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
-    const coreWeight = Number(settings?.coreWeight || 0.7)
-    
-    logger.info({ parentRolls: parentRolls.map(r => ({ id: r.id, weight: r.weight, remainingWeight: r.remainingWeight })) }, 'Parent rolls')
-
-    const totalParentWeight = parentRolls.reduce((sum, r) => sum + Number(r.remainingWeight), 0)
-    const totalPrintedWeight = input.printedRollWeights.reduce((sum, w) => sum + w, 0)
-    const numPrintedRolls = input.printedRollWeights.length
-
-    logger.info({ totalParentWeight, totalPrintedWeight }, 'Weight check')
-
-    const calculatedWaste = input.wasteWeight ?? 0
 
     const material = parentRolls[0]?.material
     if (!material) {
@@ -136,14 +122,13 @@ export const productionService = {
       return createdRolls
     })
 
-    logger.info({ newRollsCount: newRolls.length }, 'Transaction completed')
-
-    return prisma.productionJob.create({
+    const job = await prisma.productionJob.create({
       data: {
         jobNumber,
+        salesOrderId: input.salesOrderId,
         customerName: input.customerName,
         machine: input.machine,
-        wasteWeight: input.wasteWeight ?? calculatedWaste,
+        wasteWeight: input.wasteWeight ?? 0,
         notes: input.notes,
         parentRollIds: parentRolls.map(r => r.id),
         status: 'IN_PRODUCTION',
@@ -152,20 +137,21 @@ export const productionService = {
           create: newRolls.map((newRoll, idx) => ({
             rollId: newRoll.id,
             weightUsed: newRoll.weight,
-            wasteWeight: idx === 0 ? (input.wasteWeight ?? calculatedWaste) : 0,
+            wasteWeight: idx === 0 ? (input.wasteWeight ?? 0) : 0,
             status: 'IN_STOCK'
           }))
         }
       },
       include: {
+        salesOrder: true,
         printedRolls: {
           include: { roll: true }
         }
       }
     })
+
+    return job
     } catch (error: any) {
-      console.error('=== CREATE JOB ERROR ===')
-      console.error(error.stack || error)
       logger.error({ error, input }, 'Error in createJob')
       throw error
     }
@@ -179,13 +165,13 @@ export const productionService = {
     if (!job) throw new AppError(404, 'NOT_FOUND', 'Production job not found')
     if (job.status === 'COMPLETED') throw new AppError(400, 'INVALID_OPERATION', 'Job already completed')
 
-    const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
-    const coreWeight = Number(settings?.coreWeight || 0.7)
+    const firstRollId = job.printedRolls[0]?.rollId
+    if (!firstRollId) throw new AppError(400, 'INVALID', 'No roll found for this job')
 
-    const newPrintedRolls = await prisma.printedRoll.createManyAndReturn({
+    await prisma.printedRoll.createMany({
       data: weights.map(weight => ({
         productionJobId: jobId,
-        rollId: job.printedRolls[0]?.rollId || '',
+        rollId: firstRollId,
         weightUsed: weight,
         wasteWeight: 0
       }))
@@ -207,11 +193,8 @@ export const productionService = {
     if (!job) throw new AppError(404, 'NOT_FOUND', 'Production job not found')
     if (job.status === 'COMPLETED') throw new AppError(400, 'INVALID_OPERATION', 'Job already completed')
 
-    logger.info({ jobId, job: { parentRollIds: job.parentRollIds, printedRollsCount: job.printedRolls.length } }, 'Completing production job')
-
     let parentRollIds = job.parentRollIds || []
 
-    // If no parentRollIds stored (old job), try to infer from printed rolls
     if (parentRollIds.length === 0 && job.printedRolls.length > 0) {
       const firstRoll = job.printedRolls[0]?.roll
       if (firstRoll) {
@@ -229,11 +212,6 @@ export const productionService = {
       }
     }
 
-    if (parentRollIds.length === 0) {
-      logger.warn({ jobId }, 'No parent rolls found to update')
-    }
-
-    // Calculate which printed rolls are combinations (spanning multiple parent rolls)
     const comboPrintedRollIds: string[] = []
     const parentRollUpdates: { id: string; newRemainingWeight: number; newStatus: string }[] = []
     const printedRollMapping: Record<string, string> = {}
@@ -251,15 +229,11 @@ export const productionService = {
         const weightNeeded = Number(printedRoll.weightUsed)
         let isCombo = false
 
-        // Track which parent roll this printed roll starts from
         printedRollMapping[printedRoll.id] = parentRolls[parentRollIndex]?.id || ''
 
         while (weightNeeded > remainingInCurrentRoll && parentRollIndex < parentRolls.length - 1) {
-          // This printed roll spans to the next parent roll
           isCombo = true
           remainingInCurrentRoll = 0
-          
-          // Move to next parent roll
           parentRollIndex++
           remainingInCurrentRoll = Number(parentRolls[parentRollIndex]?.remainingWeight || 0)
         }
@@ -271,23 +245,13 @@ export const productionService = {
         if (isCombo) {
           comboPrintedRollIds.push(printedRoll.id)
         }
-
-        logger.info({
-          printedRollId: printedRoll.id,
-          weightNeeded,
-          isCombo,
-          parentRollIndex,
-          parentRollId: parentRolls[parentRollIndex]?.id
-        }, 'Printed roll consumption tracking')
       }
 
-      // Calculate final parent roll updates
       for (let i = 0; i < parentRolls.length; i++) {
         const roll = parentRolls[i]
         let newRemainingWeight: number
 
         if (i < parentRollIndex) {
-          // Already fully consumed
           newRemainingWeight = 0
         } else if (i === parentRollIndex) {
           newRemainingWeight = Math.max(0, remainingInCurrentRoll)
@@ -301,7 +265,6 @@ export const productionService = {
     }
 
     await prisma.$transaction(async (tx) => {
-      // Update parent rolls
       for (const update of parentRollUpdates) {
         await tx.roll.update({
           where: { id: update.id },
@@ -312,7 +275,6 @@ export const productionService = {
         })
       }
 
-      // Mark combo printed rolls
       if (comboPrintedRollIds.length > 0) {
         await tx.printedRoll.updateMany({
           where: { id: { in: comboPrintedRollIds } },
@@ -320,8 +282,6 @@ export const productionService = {
         })
       }
 
-      // Update job status with mapping
-      console.log('SAVING MAPPING:', JSON.stringify(printedRollMapping))
       await tx.productionJob.update({
         where: { id: jobId },
         data: { 
@@ -331,6 +291,16 @@ export const productionService = {
         }
       })
     })
+
+    const consumedRollsCount = parentRollUpdates.filter(u => u.newStatus === 'CONSUMED').length
+    if (consumedRollsCount > 0) {
+      const { inventoryService } = require('../inventory/service')
+      await inventoryService.recordCoreChange(
+        consumedRollsCount,
+        'CORE_RECOVERY',
+        job.jobNumber
+      )
+    }
 
     const totalPrintedWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed), 0)
 
@@ -377,9 +347,17 @@ export const productionService = {
             }
           }
         }
-
-        logger.info({ jobId, inkNeeded, ipaNeeded, butanolNeeded, colorCount, customerColors: customer.colors }, 'Deducted ink/solvents for job')
       }
+    }
+
+    // Deduct cores on production completion
+    const totalPrintedRolls = job.printedRolls.length
+    if (totalPrintedRolls > 0) {
+      await inventoryService.recordCoreChange(
+        -totalPrintedRolls,
+        'PRODUCTION_OUT',
+        job.jobNumber
+      )
     }
 
     return prisma.productionJob.update({
@@ -399,48 +377,46 @@ export const productionService = {
   async updateJob(jobId: string, input: Partial<ProductionJobInput>) {
     const job = await prisma.productionJob.findUnique({
       where: { id: jobId },
-      include: { printedRolls: { include: { roll: true } } }
+      include: {
+        printedRolls: {
+          include: {
+            roll: {
+              include: { material: true }
+            }
+          }
+        }
+      }
     })
     if (!job) throw new AppError(404, 'NOT_FOUND', 'Production job not found')
     if (job.status === 'COMPLETED') throw new AppError(400, 'INVALID_OPERATION', 'Cannot edit completed job')
-
+  
     const updates: any = {}
     if (input.customerName !== undefined) updates.customerName = input.customerName
     if (input.machine !== undefined) updates.machine = input.machine
     if (input.wasteWeight !== undefined) updates.wasteWeight = input.wasteWeight
     if (input.notes !== undefined) updates.notes = input.notes
-
-    // Only update printed rolls if explicitly provided and different
+  
     if (input.printedRollWeights && input.printedRollWeights.length > 0) {
-      // Check if weights actually changed
       const existingWeights = job.printedRolls.map(pr => Number(pr.weightUsed))
       const weightsChanged = JSON.stringify(existingWeights) !== JSON.stringify(input.printedRollWeights)
       
       if (weightsChanged) {
-        // Delete existing printed rolls
         await prisma.printedRoll.deleteMany({ where: { productionJobId: jobId } })
         
-        // Get material from existing printed rolls or parent rolls
-        let material = job.printedRolls[0]?.roll?.material
-        if (!material) {
-          // Try to get from parent rolls
-          if (job.parentRollIds && job.parentRollIds.length > 0) {
-            const parentRoll = await prisma.roll.findFirst({ where: { id: job.parentRollIds[0] }, include: { material: true } })
-            material = parentRoll?.material
-          }
+        if (job.printedRolls.length === 0) {
+          throw new AppError(400, 'INVALID', 'Job has no printed rolls')
         }
-        
-        if (!material) throw new AppError(400, 'INVALID_MATERIAL', 'No material found for this job')
-        
-        const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
-        const coreWeight = Number(settings?.coreWeight || 0.7)
+        const material = job.printedRolls[0]?.roll?.material
+        if (!material) {
+          throw new AppError(400, 'INVALID_MATERIAL', 'No material found for this job')
+        }
         
         const lastRoll = await prisma.roll.findFirst({
           where: { rollNumber: { startsWith: 'PR' } },
           orderBy: { rollNumber: 'desc' }
         })
         let rollCounter = lastRoll ? parseInt(lastRoll.rollNumber.replace(/^\D+/g, '')) || 0 : 0
-
+  
         const newRolls = []
         for (const weight of input.printedRollWeights) {
           rollCounter++
@@ -456,7 +432,7 @@ export const productionService = {
           })
           newRolls.push(newRoll)
         }
-
+        
         await prisma.printedRoll.createMany({
           data: newRolls.map((newRoll, idx) => ({
             productionJobId: jobId,
@@ -467,13 +443,17 @@ export const productionService = {
         })
       }
     }
-
+  
     return prisma.productionJob.update({
       where: { id: jobId },
       data: updates,
       include: {
         printedRolls: {
-          include: { roll: true }
+          include: {
+            roll: {
+              include: { material: true }
+            }
+          }
         }
       }
     })
@@ -486,10 +466,50 @@ export const productionService = {
     if (!job) throw new AppError(404, 'NOT_FOUND', 'Production job not found')
     if (job.status === 'COMPLETED') throw new AppError(400, 'INVALID_OPERATION', 'Cannot delete completed job')
 
-    await prisma.printedRoll.deleteMany({ where: { productionJobId: jobId } })
-    await prisma.productionJob.delete({ where: { id: jobId } })
+    // Get printed rolls before deletion to restore inventory
+    const printedRolls = await prisma.printedRoll.findMany({
+      where: { productionJobId: jobId }
+    })
+    const numPrintedRolls = printedRolls.length
 
-    return { success: true }
+    return prisma.$transaction(async (tx) => {
+      // Restore parent rolls to AVAILABLE
+      if (job.parentRollIds && job.parentRollIds.length > 0) {
+        await tx.roll.updateMany({
+          where: { id: { in: job.parentRollIds } },
+          data: { status: 'AVAILABLE' }
+        })
+      }
+
+      // Restore cores if production had started
+      if (numPrintedRolls > 0) {
+        await inventoryService.recordCoreChange(
+          numPrintedRolls,
+          'CORE_RECOVERY',
+          `Job ${job.jobNumber} deleted`
+        )
+      }
+
+      // Delete printed rolls
+      await tx.printedRoll.deleteMany({ where: { productionJobId: jobId } })
+
+      // Delete production job
+      await tx.productionJob.delete({ where: { id: jobId } })
+
+      // Sync back to sales order
+      if (job.salesOrderId) {
+        await tx.salesOrder.update({
+          where: { id: job.salesOrderId },
+          data: {
+            status: 'APPROVED',
+            productionJobId: null
+          }
+        })
+        logger.info({ salesOrderId: job.salesOrderId, jobId }, 'Sales order reverted after production deletion')
+      }
+
+      return { success: true }
+    })
   },
 
   async getAvailableRolls(category?: string) {
@@ -539,11 +559,9 @@ export const productionService = {
       for (const pr of job.printedRolls) {
         if (status && pr.status !== status) continue
         
-        // Get parent roll info for this printed roll
         let parentRollsDisplay: string[] = []
         
         if (pr.isCombination) {
-          // Combo roll - show all parent rolls
           parentRollsDisplay = (job.parentRollIds || [])
             .map(id => {
               const pr = parentRollsMap.get(id)
@@ -551,13 +569,11 @@ export const productionService = {
             })
             .filter(Boolean) as string[]
         } else if (mapping[pr.id]) {
-          // Single roll with mapping - show only the parent roll it came from
           const parentRoll = parentRollsMap.get(mapping[pr.id])
           if (parentRoll) {
             parentRollsDisplay = [`${parentRoll.rollNumber} (${parentRoll.weight}kg)`]
           }
         } else {
-          // Fallback for old data without mapping
           parentRollsDisplay = (job.parentRollIds || [])
             .map(id => {
               const pr = parentRollsMap.get(id)
