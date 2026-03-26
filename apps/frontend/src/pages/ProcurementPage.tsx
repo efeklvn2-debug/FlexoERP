@@ -106,6 +106,10 @@ export function ProcurementPage() {
   }
 
   const handleCreatePO = async () => {
+    if (!poForm.supplier.trim()) {
+      setError('Supplier is required')
+      return
+    }
     if (poLineItems.length === 0) {
       setError('Add at least one line item')
       return
@@ -149,9 +153,9 @@ export function ProcurementPage() {
     }
 
     if (currentItem.category === 'PLAIN_ROLLS') {
-      const weights = currentItem.rollWeights.split(',').map(w => parseFloat(w.trim())).filter(w => !isNaN(w) && w > 0)
+      const weights = currentItem.rollWeights.split(/[\s,]+/).map(w => parseFloat(w.trim())).filter(w => !isNaN(w) && w > 0)
       if (weights.length === 0 || weights.length > 35) {
-        setError('Enter 1-35 roll weights (comma-separated, kg)')
+        setError('Enter 1-35 roll weights (space or comma-separated, kg)')
         return
       }
       if (poLineItems.length >= 60) {
@@ -282,9 +286,9 @@ export function ProcurementPage() {
     }
 
     if (editCurrentItem.category === 'PLAIN_ROLLS') {
-      const weights = editCurrentItem.rollWeights.split(',').map(w => parseFloat(w.trim())).filter(w => !isNaN(w) && w > 0)
+      const weights = editCurrentItem.rollWeights.split(/[\s,]+/).map(w => parseFloat(w.trim())).filter(w => !isNaN(w) && w > 0)
       if (weights.length === 0 || weights.length > 35) {
-        setError('Enter 1-35 roll weights (comma-separated, kg)')
+        setError('Enter 1-35 roll weights (space or comma-separated, kg)')
         return
       }
       if (editLineItems.length >= 60) {
@@ -455,7 +459,7 @@ export function ProcurementPage() {
               
               <div className="space-y-4 mb-6">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Supplier</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Supplier <span className="text-red-500">*</span></label>
                   <div className="flex space-x-2">
                     <select 
                       value={poForm.supplier} 
@@ -579,7 +583,7 @@ export function ProcurementPage() {
                   {currentItem.category === 'PLAIN_ROLLS' && currentItem.materialId && (
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">
-                        Individual Roll Weights (comma-separated, kg) - max 35 rolls
+                        Individual Roll Weights (space or comma-separated, kg) - max 35 rolls
                       </label>
                       <input 
                         type="text" 
@@ -920,7 +924,7 @@ export function ProcurementPage() {
                   {editCurrentItem.category === 'PLAIN_ROLLS' && editCurrentItem.materialId && (
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">
-                        Individual Roll Weights (comma-separated, kg) - max 35 rolls
+                        Individual Roll Weights (space or comma-separated, kg) - max 35 rolls
                       </label>
                       <input 
                         type="text" 

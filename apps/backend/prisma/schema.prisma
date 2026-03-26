@@ -54,22 +54,7 @@ enum OrderStatus {
   CANCELLED
 }
 
-model Customer {
-  id        String    @id @default(cuid())
-  name      String
-  code      String    @unique
-  email     String?
-  phone     String?
-  address   String?
-  colors    String[]  @default([])
-  notes     String?
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  orders    Order[]
-  transactions Transaction[]
-  printedRolls PrintedRoll[]
-}
+
 
 model Order {
   id           String      @id @default(cuid())
@@ -113,6 +98,7 @@ enum MovementType {
   OUT
   ADJUSTMENT
   TRANSFER
+  INITIAL
 }
 
 model Material {
@@ -242,23 +228,26 @@ model Roll {
 }
 
 model ProductionJob {
-  id                  String   @id @default(cuid())
-  jobNumber           String   @unique
-  customerName        String?
-  status              String   @default("PENDING")
-  startDate           DateTime?
-  endDate             DateTime?
-  machine             String
-  wasteWeight         Decimal? @db.Decimal(10, 2)
-  notes               String?
-  parentRollIds       String[] 
-  printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  printedRolls        PrintedRoll[]
-
-  @@index([jobNumber])
-  @@index([status])
+   id                  String   @id @default(cuid())
+   jobNumber           String   @unique
+   customerName        String?
+   status              String   @default("PENDING")
+   startDate           DateTime?
+   endDate             DateTime?
+   machine             String
+   wasteWeight         Decimal? @db.Decimal(10, 2)
+   notes               String?
+   parentRollIds       String[] 
+   printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
+   createdAt           DateTime @default(now())
+   updatedAt           DateTime @updatedAt
+   printedRolls        PrintedRoll[]
+   salesOrderId        String?  @unique // Reference to sales order for bidirectional navigation
+   salesOrder          SalesOrder? @relation(fields: [salesOrderId], references: [id])
+ 
+   @@index([jobNumber])
+   @@index([status])
+   @@index([salesOrderId])
 }
 
 model PrintedRoll {
@@ -285,6 +274,7 @@ model PrintedRoll {
 model Settings {
   id                    String   @id @default("default")
   coreWeight            Decimal  @default(0.7) @db.Decimal(5, 2)   // kg per plastic core
+  rollWeight            Decimal  @default(15) @db.Decimal(5, 2)    // kg per roll
   inkConsumptionRate    Decimal  @default(0.7) @db.Decimal(5, 2)  // kg ink per kg printed
   ipaConsumptionRate   Decimal  @default(0.1) @db.Decimal(5, 2)   // L IPA per kg printed
   butanolConsumptionRate Decimal @default(0.1) @db.Decimal(5, 2) // L Butanol per kg printed
@@ -401,4 +391,260 @@ model Transaction {
   @@index([customerId])
   @@index([date])
   @@index([type])
+}
+
+// ============================================================================
+// MTO (MAKE-TO-ORDER) MODULE
+// ============================================================================
+
+enum DeliveryMethod {
+  PICKUP
+  SHIPPING
+}
+
+enum MTOOrderStatus {
+  PENDING           // Just created, awaiting approval
+  APPROVED         // Approved, ready for planning
+  MRP_PENDING      // Awaiting material availability
+  IN_PRODUCTION    // Production started
+  READY            // Completed, ready for pickup
+  PICKED_UP        // Customer collected goods
+  INVOICED         // Invoice generated
+  COMPLETED        // Fully paid and closed
+  CANCELLED        // Order cancelled
+}
+
+enum MTOPaymentStatus {
+  PENDING_PAYMENT
+  PARTIAL_DEPOSIT
+  DEPOSIT_COMPLETE
+  PARTIAL_PAYMENT
+  FULLY_PAID
+  OVERPAID
+}
+
+enum MTATransactionType {
+  DEPOSIT
+  PAYMENT
+  CORE_BUYBACK
+  CORE_CREDIT_APPLIED
+  REFUND
+}
+
+enum MTAPaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CORE_CREDIT
+}
+
+enum MTAInvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIAL
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum MTAPaymentType {
+  CASH
+  CREDIT
+}
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String
+  code      String    @unique
+  email     String?
+  phone     String?
+  address   String?
+  colors    String[]  @default([])
+  notes     String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  
+  // Payment Profile
+  paymentType           MTAPaymentType @default(CREDIT)
+  creditLimit           Decimal         @default(0) @db.Decimal(15, 2)
+  depositPercentDefault Decimal         @default(0) @db.Decimal(5, 2)
+  paymentTermsDays      Int             @default(0)  // 0 = at pickup, 7/15/30 = credit
+  
+  // Core Credit Balance
+  coreCreditBalance     Decimal         @default(0) @db.Decimal(15, 2)
+  
+  // Notification Preferences
+  notifyEmail           Boolean         @default(true)
+  notifyWhatsApp        Boolean         @default(true)
+  
+  // Relations
+  orders               Order[]
+  transactions         Transaction[]
+  printedRolls         PrintedRoll[]
+  salesOrders          SalesOrder[]
+  paymentTransactions   PaymentTransaction[]
+  invoices             Invoice[]
+  coreBuybacks          CoreBuyback[]
+}
+
+model SalesOrder {
+  id                    String           @id @default(cuid())
+  orderNumber           String           @unique  // SO-2026-0001
+  customerId            String
+  customer              Customer         @relation(fields: [customerId], references: [id])
+  
+  // Order Details
+  specsJson             Json             // { width, color, material, etc. }
+  quantityOrdered       Decimal          @db.Decimal(10, 2)
+  quantityProduced      Decimal?         @db.Decimal(10, 2)  // Set after production completes
+  quantityDelivered     Decimal          @default(0) @db.Decimal(10, 2)
+  unitPrice             Decimal          @db.Decimal(15, 2)
+  totalAmount           Decimal          @db.Decimal(15, 2)
+  
+  // Delivery
+  deliveryMethod        DeliveryMethod   @default(PICKUP)
+  shippingAddress       String?
+  
+  // Payment Tracking
+  depositRequired       Decimal          @default(0) @db.Decimal(15, 2)
+  depositPaid          Decimal          @default(0) @db.Decimal(15, 2)
+  balancePaid          Decimal          @default(0) @db.Decimal(15, 2)
+  totalPaid            Decimal          @default(0) @db.Decimal(15, 2)
+  paymentStatus         MTOPaymentStatus @default(PENDING_PAYMENT)
+  
+  // Core Credit
+  coreCreditApplied     Decimal          @default(0) @db.Decimal(15, 2)
+  
+  // Packing Bags Tracking
+  packingBagsQuantity  Int              @default(0)
+  packingBagsAmount    Decimal          @default(0) @db.Decimal(15, 2)
+  
+  // Status (State Machine)
+  status                MTOOrderStatus  @default(PENDING)
+  
+  // Production Link - Reference only (actual FK is on ProductionJob side)
+  productionJobId       String?
+  productionJob         ProductionJob?
+  
+  // Timestamps
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  approvedAt            DateTime?
+  cancelledAt           DateTime?
+  completedAt           DateTime?
+  
+  // Soft delete
+  isDeleted             Boolean         @default(false)
+  
+  // Relations
+  payments              PaymentTransaction[]
+  invoices              Invoice[]
+  
+  @@index([orderNumber])
+  @@index([customerId])
+  @@index([status])
+  @@index([paymentStatus])
+}
+
+model PaymentTransaction {
+  id                    String             @id @default(cuid())
+  salesOrderId          String?
+  salesOrder            SalesOrder?         @relation(fields: [salesOrderId], references: [id])
+  customerId            String?
+  customer              Customer?           @relation(fields: [customerId], references: [id])
+  
+  transactionType       MTATransactionType
+  paymentMethod         MTAPaymentMethod
+  paymentCategory       String?            // ROLL, BAG, BOTH
+  amount                Decimal            @db.Decimal(15, 2)
+  referenceNumber       String?
+  notes                 String?
+  
+  // For core buyback (random seller)
+  sellerName            String?   // if no customer (random person)
+  coresQuantity         Int?      // for core buyback
+  coreCreditBalance     Decimal?  // customer's new credit balance after transaction
+  
+  // Tracking
+  receivedById          String?
+  receivedAt            DateTime  @default(now())
+  createdAt             DateTime  @default(now())
+  
+  @@index([salesOrderId])
+  @@index([customerId])
+  @@index([receivedAt])
+  @@index([transactionType])
+}
+
+model Invoice {
+  id                    String           @id @default(cuid())
+  invoiceNumber         String           @unique  // INV-2026-0001
+  salesOrderId          String
+  salesOrder            SalesOrder      @relation(fields: [salesOrderId], references: [id])
+  customerId            String
+  customer              Customer        @relation(fields: [customerId], references: [id])
+  
+  // Line Items
+  quantityDelivered     Decimal          @db.Decimal(10, 2)
+  unitPrice             Decimal          @db.Decimal(15, 2)
+  subtotal              Decimal          @db.Decimal(15, 2)
+  vatAmount             Decimal          @default(0) @db.Decimal(15, 2)
+  totalAmount           Decimal          @db.Decimal(15, 2)
+  
+  // Adjustments
+  depositApplied        Decimal          @default(0) @db.Decimal(15, 2)
+  coreCreditApplied     Decimal          @default(0) @db.Decimal(15, 2)
+  previousPayments      Decimal          @default(0) @db.Decimal(15, 2)
+  balanceDue            Decimal          @db.Decimal(15, 2)
+  
+  // Core tracking
+  coresReturned         Int              @default(0)
+  
+  // Packing Bags Line Items
+  packingBagsQuantity  Int              @default(0)
+  packingBagsUnitPrice Decimal         @db.Decimal(15, 2)
+  packingBagsSubtotal  Decimal         @db.Decimal(15, 2)
+  packingBagsPaid      Decimal         @default(0) @db.Decimal(15, 2)
+  
+  // Status
+  status                MTAInvoiceStatus  @default(DRAFT)
+  issuedAt              DateTime?
+  dueDate               DateTime?
+  paidAt                DateTime?
+  
+  createdAt             DateTime        @default(now())
+  
+  @@index([invoiceNumber])
+  @@index([salesOrderId])
+  @@index([customerId])
+  @@index([status])
+}
+
+model CoreBuyback {
+  id                    String    @id @default(cuid())
+  date                  DateTime  @default(now())
+  
+  // Who sold the cores
+  customerId            String?
+  customer              Customer? @relation(fields: [customerId], references: [id])
+  sellerName            String?   // if random person (no customer account)
+  
+  // Core details
+  coresQuantity         Int
+  ratePerCore           Decimal   @db.Decimal(10, 2)
+  totalValue            Decimal   @db.Decimal(15, 2)
+  
+  // How handled
+  transactionType       MTATransactionType @default(CORE_BUYBACK)
+  paymentMethod         MTAPaymentMethod
+  paidAmount            Decimal   @default(0) @db.Decimal(15, 2)  // Cash paid (if random seller)
+  
+  // Tracking
+  recordedById          String?
+  notes                 String?
+  
+  createdAt             DateTime  @default(now())
+  
+  @@index([customerId])
+  @@index([date])
 }

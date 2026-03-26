@@ -360,6 +360,28 @@ export const productionService = {
       )
     }
 
+    // Update sales order to READY
+    if (job.salesOrderId) {
+      const actualWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed || 0), 0)
+      const salesOrder = await prisma.salesOrder.findUnique({
+        where: { id: job.salesOrderId }
+      })
+      if (salesOrder) {
+        const unitPrice = Number(salesOrder.unitPrice)
+        const totalAmount = actualWeight * unitPrice
+        
+        await prisma.salesOrder.update({
+          where: { id: job.salesOrderId },
+          data: {
+            status: 'READY',
+            quantityProduced: actualWeight,
+            totalAmount
+          }
+        })
+        logger.info({ salesOrderId: job.salesOrderId, actualWeight, totalAmount }, 'Sales order updated to READY after production completion')
+      }
+    }
+
     return prisma.productionJob.update({
       where: { id: jobId },
       data: {

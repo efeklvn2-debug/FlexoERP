@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { salesOrderApi, SalesOrder, PaymentTransaction, Invoice, CustomerBalance, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, DeliveryMethod } from '../api/salesOrders'
 import { salesApi, Customer as SalesCustomer } from '../api/sales'
 import { pricingApi } from '../api/pricing'
@@ -46,6 +47,7 @@ interface MaterialType {
 }
 
 export function SalesOrdersPage() {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<Tab>('orders')
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [payments, setPayments] = useState<PaymentTransaction[]>([])
@@ -185,6 +187,12 @@ export function SalesOrdersPage() {
 
   useEffect(() => {
     loadData()
+  }, [])
+
+  useEffect(() => {
+    const handleFocus = () => loadData()
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
   const loadPayments = async () => {
@@ -419,7 +427,8 @@ export function SalesOrdersPage() {
       loadData()
       if (showOrderDetails?.id === orderId) {
         const updated = await salesOrderApi.getOrderById(orderId)
-        if (updated.data) setShowOrderDetails(updated.data)
+        const order = (updated.data as any)?.data || updated.data
+        if (order) setShowOrderDetails(order)
       }
     } catch (err: any) {
       setError(err.message || `Failed to ${action} order`)
@@ -430,13 +439,17 @@ export function SalesOrdersPage() {
     try {
       const res = await salesOrderApi.createInvoice({ salesOrderId: orderId })
       if (res.error) { setError(res.error.message); return }
-      setCurrentInvoice(res.data?.data)
-      setShowInvoiceModal(true)
-      loadInvoices()
-      loadData()
-      if (showOrderDetails?.id === orderId) {
-        const updated = await salesOrderApi.getOrderById(orderId)
-        if (updated.data) setShowOrderDetails(updated.data)
+      const invoice = (res.data as any)?.data || res.data
+      if (invoice) {
+        setCurrentInvoice(invoice)
+        setShowInvoiceModal(true)
+        loadInvoices()
+        loadData()
+        if (showOrderDetails?.id === orderId) {
+          const updated = await salesOrderApi.getOrderById(orderId)
+          const order = (updated.data as any)?.data || updated.data
+          if (order) setShowOrderDetails(order)
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Failed to create invoice')
@@ -501,7 +514,9 @@ export function SalesOrdersPage() {
 
   const openPickupModal = (order: SalesOrder) => {
     setProductionOrder(order)
-    const remainingQty = Number(order.quantityOrdered) - Number(order.quantityDelivered)
+    const producedQty = Number(order.quantityProduced || 0)
+    const alreadyDelivered = Number(order.quantityDelivered || 0)
+    const remainingQty = producedQty - alreadyDelivered
     
     const pbagMaterial = materials.find((m: any) => m.code === 'PBAG')
     const defaultPrice = pbagMaterial?.pricePerPack || 0
@@ -561,7 +576,8 @@ export function SalesOrdersPage() {
       loadData()
       if (showOrderDetails?.id === productionOrder.id) {
         const updated = await salesOrderApi.getOrderById(productionOrder.id)
-        if (updated.data) setShowOrderDetails(updated.data)
+        const order = (updated.data as any)?.data || updated.data
+        if (order) setShowOrderDetails(order)
       }
     } catch (err: any) {
       setError(err.message || 'Failed to start production')
@@ -584,7 +600,8 @@ export function SalesOrdersPage() {
       loadData()
       if (showOrderDetails?.id === productionOrder.id) {
         const updated = await salesOrderApi.getOrderById(productionOrder.id)
-        if (updated.data) setShowOrderDetails(updated.data)
+        const order = (updated.data as any)?.data || updated.data
+        if (order) setShowOrderDetails(order)
       }
     } catch (err: any) {
       setError(err.message || 'Failed to record pickup')
@@ -604,6 +621,7 @@ export function SalesOrdersPage() {
         actions.push({ label: 'Cancel', action: 'cancel', variant: 'bg-red-600 hover:bg-red-700' })
         break
       case 'IN_PRODUCTION':
+        actions.push({ label: 'Go to Production', action: 'viewProduction', variant: 'bg-indigo-600 hover:bg-indigo-700' })
         break
       case 'READY':
         actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
@@ -621,6 +639,7 @@ export function SalesOrdersPage() {
       customerId: order?.customerId || '',
       transactionType: 'PAYMENT',
       paymentMethod: 'CASH',
+      paymentCategory: 'ROLL',
       amount: order ? order.totalAmount - order.totalPaid : 0,
       referenceNumber: '',
       notes: ''
@@ -700,10 +719,10 @@ export function SalesOrdersPage() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Order #</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Qty (Ord → Del)</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Payment</th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Total</th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Paid</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Balance</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
                       </tr>
@@ -713,13 +732,24 @@ export function SalesOrdersPage() {
                         <tr><td colSpan={9} className="px-6 py-8 text-center text-slate-500">No orders found</td></tr>
                       ) : (
                         filteredOrders.map(o => (
-                          <tr key={o.id} className={`hover:bg-slate-50 cursor-pointer ${o.status === 'CANCELLED' ? 'line-through text-slate-400' : ''}`} onClick={() => setShowOrderDetails(o)}>
+                          <tr key={o.id} className={`hover:bg-slate-50 cursor-pointer ${o.status === 'CANCELLED' ? 'line-through text-slate-400' : ''}`} onClick={async () => {
+                            const updated = await salesOrderApi.getOrderById(o.id)
+                            const order = (updated.data as any)?.data || updated.data
+                            if (order) setShowOrderDetails(order)
+                            else setShowOrderDetails(o)
+                          }}>
                             <td className="px-6 py-4 text-sm font-medium text-slate-900">{o.orderNumber}</td>
                             <td className="px-6 py-4 text-sm text-slate-600">{o.customer?.name || '-'}</td>
                             <td className="px-6 py-4">
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || 'bg-slate-100'}`}>
                                 {ORDER_STATUS_LABELS[o.status] || o.status}
                               </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm">
+                              <span className="text-slate-900">{Number(o.quantityOrdered).toFixed(1)}</span>
+                              <span className="text-slate-400 mx-1">→</span>
+                              <span className="text-teal-600 font-medium">{Number(o.quantityDelivered || 0).toFixed(1)}</span>
+                              <span className="text-slate-400 text-xs ml-1">kg</span>
                             </td>
                             <td className="px-6 py-4">
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[o.paymentStatus] || 'bg-slate-100'}`}>
@@ -728,7 +758,6 @@ export function SalesOrdersPage() {
                             </td>
                             <td className="px-6 py-4 text-sm text-slate-900 text-right">₦{Number(o.totalAmount).toLocaleString()}</td>
                             <td className="px-6 py-4 text-sm text-green-600 text-right">₦{Number(o.totalPaid).toLocaleString()}</td>
-                            <td className="px-6 py-4 text-sm text-red-600 text-right">₦{Math.max(0, o.totalAmount - o.totalPaid).toLocaleString()}</td>
                             <td className="px-6 py-4 text-sm text-slate-500">{new Date(o.createdAt).toLocaleDateString()}</td>
                             <td className="px-6 py-4" onClick={e => e.stopPropagation()}>
                               <div className="flex space-x-2">
@@ -739,6 +768,7 @@ export function SalesOrdersPage() {
                                       if (a.action === 'invoice') handleCreateInvoice(o.id)
                                       else if (a.action === 'startProduction') handleOrderAction(o.id, a.action as any, o)
                                       else if (a.action === 'pickup') openPickupModal(o)
+                                      else if (a.action === 'viewProduction') navigate('/production')
                                       else handleOrderAction(o.id, a.action as any)
                                     }}
                                     className={`px-2 py-1 text-white text-xs rounded ${a.variant}`}
@@ -1375,7 +1405,7 @@ export function SalesOrdersPage() {
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Printed Roll Weights (space-separated, kg) - max 35 <span className="text-red-500">*</span>
+                    Printed Roll Weights (space or comma-separated, kg) - max 35 <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -1385,7 +1415,7 @@ export function SalesOrdersPage() {
                       setCalculatedWaste(null)
                     }}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                    placeholder="e.g. 14.5 16 18.2 15.8 19.1"
+                    placeholder="e.g. 14.5, 16, 18.2 or 14.5 16 18.2"
                   />
                   {(() => {
                     const weights = productionForm.printedRollWeights.split(/[\s,]+/)
@@ -1464,12 +1494,24 @@ export function SalesOrdersPage() {
                     <span className="ml-2 font-medium">{Number(productionOrder.quantityOrdered).toFixed(1)} kg</span>
                   </div>
                   <div>
+                    <span className="text-slate-500">Produced:</span>
+                    <span className="ml-2 font-medium text-indigo-600">{Number(productionOrder.quantityProduced || 0).toFixed(1)} kg</span>
+                  </div>
+                  <div>
                     <span className="text-slate-500">Already Delivered:</span>
                     <span className="ml-2 font-medium">{Number(productionOrder.quantityDelivered).toFixed(1)} kg</span>
                   </div>
                   <div>
                     <span className="text-slate-500">Remaining:</span>
-                    <span className="ml-2 font-medium text-teal-600">{(Number(productionOrder.quantityOrdered) - Number(productionOrder.quantityDelivered)).toFixed(1)} kg</span>
+                    <span className="ml-2 font-medium text-teal-600">{((Number(productionOrder.quantityProduced || 0)) - Number(productionOrder.quantityDelivered)).toFixed(1)} kg</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Unit Price:</span>
+                    <span className="ml-2 font-medium">₦{Number(productionOrder.unitPrice).toLocaleString()}/kg</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Pickup Value:</span>
+                    <span className="ml-2 font-medium text-teal-600">₦{((productionOrder.unitPrice || 0) * pickupForm.quantityToPickup).toLocaleString()}</span>
                   </div>
                 </div>
               </div>
@@ -1483,7 +1525,7 @@ export function SalesOrdersPage() {
                     onChange={e => setPickupForm({...pickupForm, quantityToPickup: parseFloat(e.target.value) || 0})}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                     min="0.1"
-                    max={Number(productionOrder.quantityOrdered) - Number(productionOrder.quantityDelivered)}
+                    max={Number(productionOrder.quantityProduced || 0) - Number(productionOrder.quantityDelivered)}
                     step="0.1"
                     required
                   />
@@ -1569,18 +1611,37 @@ export function SalesOrdersPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-3 -mt-2">
                   <div>
-                    <p className="text-xs text-slate-500">Quantity</p>
-                    <p className="text-sm font-medium">
-                      {showOrderDetails.specsJson?.quantityInUnits 
-                        ? `${showOrderDetails.specsJson.quantityInUnits} ${showOrderDetails.specsJson.quantityType || 'rolls'}`
-                        : `${showOrderDetails.quantityOrdered} kg`}
+                    <p className="text-xs text-slate-500">Ordered</p>
+                    <p className="text-lg font-bold text-slate-900">
+                      {showOrderDetails.specsJson?.quantityInUnits && showOrderDetails.specsJson.quantityType?.includes('roll')
+                        ? `${showOrderDetails.specsJson.quantityInUnits} rolls (${showOrderDetails.specsJson.quantityInUnits! * rollWeight} kg)`
+                        : `${Number(showOrderDetails.quantityOrdered).toFixed(1)} kg`}
                     </p>
                   </div>
                   <div>
+                    <p className="text-xs text-slate-500">Produced</p>
+                    <p className="text-lg font-bold text-indigo-700">
+                      {Number(showOrderDetails.quantityProduced || 0).toFixed(1)} kg
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Delivered</p>
+                    <p className="text-lg font-bold text-teal-700">
+                      {Number(showOrderDetails.quantityDelivered || 0).toFixed(1)} kg
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mt-3">
+                  <div>
                     <p className="text-xs text-slate-500">Unit Price</p>
                     <p className="text-sm font-medium">₦{Number(showOrderDetails.unitPrice).toLocaleString()}/kg</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Packing Bags</p>
+                    <p className="text-sm font-medium">{Number(showOrderDetails.packingBagsQuantity || 0)} pcs</p>
                   </div>
                 </div>
 
@@ -1629,6 +1690,16 @@ export function SalesOrdersPage() {
                           <span className="text-green-600 font-medium">₦{Number(p.amount).toLocaleString()}</span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {showOrderDetails.quantityProduced && showOrderDetails.quantityProduced > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-slate-700 mb-2">Printed Rolls (Production)</h3>
+                    <div className="p-3 bg-indigo-50 rounded-lg">
+                      <p className="text-sm"><span className="text-slate-500">Total Produced:</span> <span className="font-medium">{Number(showOrderDetails.quantityProduced).toFixed(1)} kg</span></p>
+                      {showOrderDetails.productionJobId && <p className="text-xs text-slate-500 mt-1">Job ID: {showOrderDetails.productionJobId.slice(-8)}</p>}
                     </div>
                   </div>
                 )}
@@ -1741,7 +1812,7 @@ export function SalesOrdersPage() {
                         <td className="px-4 py-2 text-right">kg</td>
                         <td className="px-4 py-2 text-right">₦{(Number(currentInvoice.subtotal) || 0).toLocaleString()}</td>
                       </tr>
-                      {currentInvoice.packingBagsQuantity > 0 && (
+                      {currentInvoice.packingBagsQuantity && currentInvoice.packingBagsQuantity > 0 && (
                         <tr>
                           <td className="px-4 py-2">Packing Bags</td>
                           <td className="px-4 py-2 text-right">{currentInvoice.packingBagsQuantity}</td>
