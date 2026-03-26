@@ -23,6 +23,7 @@ export interface Customer {
   email?: string
   phone?: string
   address?: string
+  colors?: string[]
   paymentType: 'CASH' | 'CREDIT'
   creditLimit: number
   depositPercentDefault: number
@@ -247,6 +248,37 @@ export const salesOrderApi = {
   getCustomerBalance: (customerId: string) => api.get<CustomerBalance>(`/sales-orders/customers/${customerId}/balance`),
   getCustomerAging: (customerId: string) => api.get<CustomerAging>(`/sales-orders/customers/${customerId}/aging`),
   getAllCustomerBalances: () => api.get<CustomerBalance[]>('/sales-orders/customer-balances'),
+
+  // Customers (MTO)
+  getCustomers: () => api.get<Customer[]>('/sales-orders/customers'),
+  getCustomer: (id: string) => api.get<Customer>(`/sales-orders/customers/${id}`),
+  createCustomer: (data: {
+    name: string
+    code?: string
+    email?: string
+    phone?: string
+    address?: string
+    colors?: string[]
+    paymentType?: 'CASH' | 'CREDIT'
+    creditLimit?: number
+    depositPercentDefault?: number
+    paymentTermsDays?: number
+    notifyEmail?: boolean
+    notifyWhatsApp?: boolean
+  }) => api.post<Customer>('/sales-orders/customers', data),
+  updateCustomer: (id: string, data: Partial<{
+    name: string
+    email?: string
+    phone?: string
+    address?: string
+    colors?: string[]
+    paymentType: 'CASH' | 'CREDIT'
+    creditLimit: number
+    depositPercentDefault: number
+    paymentTermsDays: number
+    notifyEmail: boolean
+    notifyWhatsApp: boolean
+  }>) => api.patch<Customer>(`/sales-orders/customers/${id}`, data),
 
   // Packing Bag Sales
   sellPackingBags: (data: {

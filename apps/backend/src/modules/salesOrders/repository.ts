@@ -2,6 +2,21 @@ import { prisma } from '../../database'
 import { AppError } from '../../middleware/errorHandler'
 import { Prisma } from '@prisma/client'
 
+async function generateUniqueCustomerCode(): Promise<string> {
+  const prefix = 'C'
+  const lastCustomer = await prisma.customer.findFirst({
+    where: { code: { startsWith: prefix } },
+    orderBy: { code: 'desc' }
+  })
+  
+  if (!lastCustomer) {
+    return `${prefix}0001`
+  }
+  
+  const lastNum = parseInt(lastCustomer.code.replace(prefix, ''))
+  return `${prefix}${String(lastNum + 1).padStart(4, '0')}`
+}
+
 export const salesOrderRepository = {
   async findById(id: string) {
     return prisma.salesOrder.findUnique({
@@ -193,6 +208,79 @@ export const salesOrderRepository = {
     })
   },
 
+  // Customers
+  async getCustomers() {
+    return prisma.customer.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' }
+    })
+  },
+
+  async createCustomer(input: {
+    name: string
+    code?: string
+    email?: string
+    phone?: string
+    address?: string
+    colors?: string[]
+    paymentType?: 'CASH' | 'CREDIT'
+    creditLimit?: number
+    depositPercentDefault?: number
+    paymentTermsDays?: number
+    notifyEmail?: boolean
+    notifyWhatsApp?: boolean
+  }) {
+    const code = input.code || await generateUniqueCustomerCode()
+    return prisma.customer.create({
+      data: {
+        name: input.name,
+        code,
+        email: input.email,
+        phone: input.phone,
+        address: input.address,
+        colors: input.colors || [],
+        paymentType: input.paymentType || 'CASH',
+        creditLimit: input.creditLimit || 0,
+        depositPercentDefault: input.depositPercentDefault || 0,
+        paymentTermsDays: input.paymentTermsDays || 0,
+        notifyEmail: input.notifyEmail ?? true,
+        notifyWhatsApp: input.notifyWhatsApp ?? true,
+        isActive: true
+      }
+    })
+  },
+
+  async updateCustomer(customerId: string, input: {
+    name?: string
+    email?: string
+    phone?: string
+    address?: string
+    colors?: string[]
+    paymentType?: 'CASH' | 'CREDIT'
+    creditLimit?: number
+    depositPercentDefault?: number
+    paymentTermsDays?: number
+    notifyEmail?: boolean
+    notifyWhatsApp?: boolean
+  }) {
+    return prisma.customer.update({
+      where: { id: customerId },
+      data: {
+        ...(input.name && { name: input.name }),
+        ...(input.email !== undefined && { email: input.email }),
+        ...(input.phone !== undefined && { phone: input.phone }),
+        ...(input.address !== undefined && { address: input.address }),
+        ...(input.colors && { colors: input.colors }),
+        ...(input.paymentType && { paymentType: input.paymentType }),
+        ...(input.creditLimit !== undefined && { creditLimit: input.creditLimit }),
+        ...(input.depositPercentDefault !== undefined && { depositPercentDefault: input.depositPercentDefault }),
+        ...(input.paymentTermsDays !== undefined && { paymentTermsDays: input.paymentTermsDays }),
+        ...(input.notifyEmail !== undefined && { notifyEmail: input.notifyEmail }),
+        ...(input.notifyWhatsApp !== undefined && { notifyWhatsApp: input.notifyWhatsApp })
+      }
+    })
+  },
+
   // Customer balance
   async getCustomerBalance(customerId: string) {
     const customer = await prisma.customer.findUnique({
@@ -282,6 +370,43 @@ export const salesOrderRepository = {
       days90Plus,
       total: current + days31to60 + days61to90 + days90Plus
     }
+  },
+
+  async getAllCustomerBalances() {
+    const customers = await prisma.customer.findMany({
+      where: { isActive: true }
+    })
+
+    const balances = []
+    for (const customer of customers) {
+      const orders = await prisma.salesOrder.findMany({
+        where: {
+          customerId: customer.id,
+          status: { in: ['PENDING', 'APPROVED', 'MRP_PENDING', 'IN_PRODUCTION', 'READY', 'PICKED_UP', 'INVOICED'] }
+        }
+      })
+
+      let totalOutstanding = 0
+      let depositHeld = 0
+      let ordersCount = orders.length
+
+      for (const order of orders) {
+        totalOutstanding += Number(order.totalAmount) - Number(order.totalPaid)
+        depositHeld += Number(order.depositPaid)
+      }
+
+      balances.push({
+        customerId: customer.id,
+        customerName: customer.name,
+        totalOutstanding,
+        depositHeld,
+        coreCreditBalance: Number(customer.coreCreditBalance),
+        availableCredit: Number(customer.creditLimit) - totalOutstanding,
+        ordersCount
+      })
+    }
+
+    return balances
   }
 }
 

@@ -109,6 +109,48 @@ export const salesOrderController = {
     }
   },
 
+  async getCustomers(req: Request, res: Response) {
+    try {
+      const customers = await salesOrderService.getCustomers()
+      res.json({ data: customers })
+    } catch (error: any) {
+      logger.error(error, 'Error fetching customers')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch customers' })
+    }
+  },
+
+  async getCustomerById(req: Request, res: Response) {
+    try {
+      const { customerId } = req.params
+      const customer = await salesOrderService.getCustomerById(customerId)
+      res.json({ data: customer })
+    } catch (error: any) {
+      logger.error(error, 'Error fetching customer')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch customer' })
+    }
+  },
+
+  async createCustomer(req: Request, res: Response) {
+    try {
+      const customer = await salesOrderService.createCustomer(req.body, (req as any).user?.id)
+      res.status(201).json({ data: customer })
+    } catch (error: any) {
+      logger.error(error, 'Error creating customer')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create customer' })
+    }
+  },
+
+  async updateCustomer(req: Request, res: Response) {
+    try {
+      const { customerId } = req.params
+      const customer = await salesOrderService.updateCustomer(customerId, req.body)
+      res.json({ data: customer })
+    } catch (error: any) {
+      logger.error(error, 'Error updating customer')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update customer' })
+    }
+  },
+
   async getCustomerBalance(req: Request, res: Response) {
     try {
       const { customerId } = req.params

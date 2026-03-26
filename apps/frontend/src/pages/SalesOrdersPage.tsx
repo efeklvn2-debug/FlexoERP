@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { salesOrderApi, SalesOrder, PaymentTransaction, Invoice, CustomerBalance, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, DeliveryMethod } from '../api/salesOrders'
-import { salesApi, Customer as SalesCustomer } from '../api/sales'
+import { salesOrderApi, SalesOrder, PaymentTransaction, Invoice, CustomerBalance, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, DeliveryMethod, Customer } from '../api/salesOrders'
 import { pricingApi } from '../api/pricing'
 import { settingsApi } from '../api/settings'
 import { productionApi, ParentRoll } from '../api/production'
@@ -142,7 +141,7 @@ export function SalesOrdersPage() {
       console.log('Loading data...')
       const [ordersRes, customersRes, materialsRes] = await Promise.all([
         salesOrderApi.getOrders(),
-        salesApi.getCustomers(),
+        salesOrderApi.getCustomers(),
         pricingApi.getMaterialsWithPrices()
       ])
 

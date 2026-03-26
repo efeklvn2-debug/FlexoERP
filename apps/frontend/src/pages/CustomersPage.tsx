@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { salesApi, Customer } from '../api/sales'
+import { salesOrderApi, Customer } from '../api/salesOrders'
 import { Layout } from '../components/Layout'
 
 const INK_COLORS = ['Red', 'Yellow', 'White', 'RoyalBlue', 'VioletBlue', 'SkyBlue']
@@ -10,6 +10,7 @@ export function CustomersPage() {
   const [error, setError] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [search, setSearch] = useState('')
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
 
   const [form, setForm] = useState({
     name: '',
@@ -28,7 +29,7 @@ export function CustomersPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await salesApi.getCustomers()
+      const res = await salesOrderApi.getCustomers()
       setCustomers(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
     } catch (err: any) {
       setError(err.message || 'Failed to load customers')
@@ -50,16 +51,53 @@ export function CustomersPage() {
       return
     }
 
-    const code = 'CUST-' + form.name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 8) + '-' + Date.now().toString(36).toUpperCase()
-
-    const res = await salesApi.createCustomer({ ...form, code })
+    let res
+    if (editingCustomer) {
+      res = await salesOrderApi.updateCustomer(editingCustomer.id, {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        address: form.address,
+        colors: form.colors
+      })
+    } else {
+      const code = 'CUST-' + form.name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 8) + '-' + Date.now().toString(36).toUpperCase()
+      res = await salesOrderApi.createCustomer({ 
+        name: form.name,
+        code,
+        email: form.email,
+        phone: form.phone,
+        address: form.address,
+        colors: form.colors,
+        paymentType: 'CASH',
+        creditLimit: 0,
+        depositPercentDefault: 0,
+        paymentTermsDays: 0,
+        notifyEmail: true,
+        notifyWhatsApp: true
+      })
+    }
     if (res.error) {
       setError(res.error.message)
       return
     }
     setShowModal(false)
     setForm({ name: '', code: '', email: '', phone: '', address: '', colors: [] })
+    setEditingCustomer(null)
     loadCustomers()
+  }
+
+  const handleEdit = (customer: Customer) => {
+    setEditingCustomer(customer)
+    setForm({
+      name: customer.name,
+      code: customer.code || '',
+      email: customer.email || '',
+      phone: customer.phone || '',
+      address: customer.address || '',
+      colors: customer.colors || []
+    })
+    setShowModal(true)
   }
 
   const filteredCustomers = customers.filter(c =>
@@ -106,6 +144,7 @@ export function CustomersPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Email</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Phone</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Ink Colors</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -117,12 +156,17 @@ export function CustomersPage() {
                     <td className="px-6 py-4 text-sm text-slate-600">{c.phone || '-'}</td>
                     <td className="px-6 py-4">
                       <div className="flex flex-wrap gap-1">
-                        {(c as any).colors?.map((color: string) => (
+                        {c.colors?.map((color: string) => (
                           <span key={color} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-full">
                             {color}
                           </span>
                         )) || '-'}
                       </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <button onClick={() => handleEdit(c)} className="text-blue-600 hover:text-blue-800 text-sm">
+                        Edit
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -135,7 +179,7 @@ export function CustomersPage() {
         {showModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-2xl p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold mb-4">Add Customer</h2>
+              <h2 className="text-xl font-bold mb-4">{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h2>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Name <span className="text-red-500">*</span></label>
@@ -200,8 +244,8 @@ export function CustomersPage() {
                   )}
                 </div>
                 <div className="flex justify-end space-x-3 pt-4">
-                  <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
-                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg">Add</button>
+                  <button type="button" onClick={() => { setShowModal(false); setEditingCustomer(null); setForm({ name: '', code: '', email: '', phone: '', address: '', colors: [] }) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg">{editingCustomer ? 'Update' : 'Add'}</button>
                 </div>
               </form>
             </div>

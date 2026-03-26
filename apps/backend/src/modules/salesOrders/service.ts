@@ -98,7 +98,14 @@ export const salesOrderService = {
     return updated
   },
 
-  async startProduction(id: string, input: { productionJobId: string }, userId?: string) {
+  async startProduction(id: string, input: {
+    machine: string
+    category?: string
+    rollIds: string[]
+    printedRollWeights: number[]
+    wasteWeight?: number
+    notes?: string
+  }, userId?: string) {
     const order = await salesOrderRepository.findById(id)
     
     if (!order) {
@@ -109,14 +116,29 @@ export const salesOrderService = {
       throw new AppError(400, 'INVALID', 'Order is not ready for production')
     }
 
-    const updated = await salesOrderRepository.update(id, {
-      status: 'IN_PRODUCTION',
-      productionJobId: input.productionJobId
+    // Import production service dynamically to avoid circular imports
+    const { productionService } = await import('../production/service')
+    
+    // Create the production job
+    const productionJob = await productionService.createJob({
+      salesOrderId: id,
+      customerName: order.customer?.name || '',
+      machine: input.machine,
+      rollIds: input.rollIds,
+      printedRollWeights: input.printedRollWeights,
+      wasteWeight: input.wasteWeight,
+      notes: input.notes
     })
 
-    logger.info({ orderId: id, productionJobId: input.productionJobId }, 'Production started for sales order')
+    // Update sales order with production job
+    const updated = await salesOrderRepository.update(id, {
+      status: 'IN_PRODUCTION',
+      productionJobId: productionJob.id
+    })
 
-    return updated
+    logger.info({ orderId: id, productionJobId: productionJob.id }, 'Production started for sales order')
+
+    return { order: updated, productionJob }
   },
 
   async cancelOrder(id: string, userId?: string) {
@@ -446,6 +468,53 @@ export const salesOrderService = {
     }
   },
 
+  async getCustomers() {
+    return salesOrderRepository.getCustomers()
+  },
+
+  async getCustomerById(customerId: string) {
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId }
+    })
+    if (!customer) {
+      throw new AppError(404, 'NOT_FOUND', 'Customer not found')
+    }
+    return customer
+  },
+
+  async createCustomer(input: {
+    name: string
+    code?: string
+    email?: string
+    phone?: string
+    address?: string
+    colors?: string[]
+    paymentType?: 'CASH' | 'CREDIT'
+    creditLimit?: number
+    depositPercentDefault?: number
+    paymentTermsDays?: number
+    notifyEmail?: boolean
+    notifyWhatsApp?: boolean
+  }, userId?: string) {
+    return salesOrderRepository.createCustomer(input)
+  },
+
+  async updateCustomer(customerId: string, input: {
+    name?: string
+    email?: string
+    phone?: string
+    address?: string
+    colors?: string[]
+    paymentType?: 'CASH' | 'CREDIT'
+    creditLimit?: number
+    depositPercentDefault?: number
+    paymentTermsDays?: number
+    notifyEmail?: boolean
+    notifyWhatsApp?: boolean
+  }) {
+    return salesOrderRepository.updateCustomer(customerId, input)
+  },
+
   async getCustomerBalance(customerId: string) {
     return salesOrderRepository.getCustomerBalance(customerId)
   },
@@ -456,5 +525,153 @@ export const salesOrderService = {
 
   async getAllCustomerBalances() {
     return salesOrderRepository.getAllCustomerBalances()
+  }
+}
+
+// Payment Service
+export const paymentService = {
+  async recordPayment(input: {
+    salesOrderId?: string
+    customerId?: string
+    transactionType: string
+    paymentMethod: string
+    amount: number
+    referenceNumber?: string
+    notes?: string
+    paymentCategory?: 'ROLL' | 'BAG' | 'BOTH'
+  }, userId?: string) {
+    if (!input.salesOrderId && !input.customerId) {
+      throw new AppError(400, 'VALIDATION', 'Either salesOrderId or customerId is required')
+    }
+
+    const payment = await paymentRepository.create({
+      salesOrderId: input.salesOrderId,
+      customerId: input.customerId!,
+      transactionType: input.transactionType as any,
+      paymentMethod: input.paymentMethod as any,
+      amount: new Prisma.Decimal(String(input.amount)),
+      referenceNumber: input.referenceNumber,
+      notes: input.notes,
+      receivedById: userId,
+      paymentCategory: input.paymentCategory as any
+    })
+
+    // Update sales order if linked
+    if (input.salesOrderId) {
+      const order = await salesOrderRepository.findById(input.salesOrderId)
+      if (order) {
+        const newPaid = Number(order.totalPaid) + Number(input.amount)
+        let paymentStatus = 'PARTIAL_PAYMENT'
+        if (newPaid >= Number(order.totalAmount)) {
+          paymentStatus = 'FULLY_PAID'
+        } else if (newPaid >= Number(order.depositRequired)) {
+          paymentStatus = 'DEPOSIT_COMPLETE'
+        }
+
+        await salesOrderRepository.update(input.salesOrderId, {
+          totalPaid: newPaid,
+          balancePaid: newPaid,
+          paymentStatus: paymentStatus as any
+        })
+      }
+    }
+
+    logger.info({ paymentId: payment.id, amount: input.amount }, 'Payment recorded')
+    return payment
+  },
+
+  async getPayments(options?: { salesOrderId?: string; customerId?: string; dateFrom?: string; dateTo?: string }) {
+    const where: any = {}
+    if (options?.salesOrderId) where.salesOrderId = options.salesOrderId
+    if (options?.customerId) where.customerId = options.customerId
+    if (options?.dateFrom || options?.dateTo) {
+      where.receivedAt = {}
+      if (options.dateFrom) where.receivedAt.gte = new Date(options.dateFrom)
+      if (options.dateTo) where.receivedAt.lte = new Date(options.dateTo)
+    }
+
+    return prisma.paymentTransaction.findMany({
+      where,
+      include: { customer: true, salesOrder: true },
+      orderBy: { receivedAt: 'desc' }
+    })
+  },
+
+  async getPaymentsBySalesOrder(salesOrderId: string) {
+    return prisma.paymentTransaction.findMany({
+      where: { salesOrderId },
+      include: { customer: true },
+      orderBy: { receivedAt: 'desc' }
+    })
+  },
+
+  async getPaymentsByCustomer(customerId: string) {
+    return prisma.paymentTransaction.findMany({
+      where: { customerId },
+      include: { salesOrder: true },
+      orderBy: { receivedAt: 'desc' }
+    })
+  }
+}
+
+// Invoice Service  
+export const invoiceService = {
+  async createInvoice(input: { salesOrderId: string; quantityDelivered?: number; coresReturned?: number }, userId?: string) {
+    return salesOrderService.createInvoice(input, userId)
+  },
+
+  async getInvoices(options?: { status?: string; customerId?: string }) {
+    return invoiceRepository.findAll(options)
+  },
+
+  async getInvoiceById(id: string) {
+    return invoiceRepository.findById(id)
+  },
+
+  async issueInvoice(id: string) {
+    return invoiceRepository.update(id, { status: 'ISSUED' as any, issuedAt: new Date() })
+  }
+}
+
+// Core Buyback Service
+export const coreBuybackService = {
+  async recordBuyback(input: {
+    customerId?: string
+    sellerName: string
+    coresQuantity: number
+    ratePerCore: number
+    paymentMethod: string
+    paidAmount?: number
+  }) {
+    const totalValue = input.coresQuantity * input.ratePerCore
+    
+    const buyback = await coreBuybackRepository.create({
+      customerId: input.customerId,
+      sellerName: input.sellerName,
+      coresQuantity: input.coresQuantity,
+      ratePerCore: input.ratePerCore,
+      totalValue,
+      paymentMethod: input.paymentMethod as any,
+      paidAmount: input.paidAmount || totalValue
+    })
+
+    // Update customer core credit if applicable
+    if (input.customerId) {
+      const customer = await prisma.customer.findUnique({ where: { id: input.customerId } })
+      if (customer) {
+        const newBalance = Number(customer.coreCreditBalance) + totalValue
+        await prisma.customer.update({
+          where: { id: input.customerId },
+          data: { coreCreditBalance: new Prisma.Decimal(String(newBalance)) }
+        })
+      }
+    }
+
+    logger.info({ buybackId: buyback.id, cores: input.coresQuantity, value: totalValue }, 'Core buyback recorded')
+    return buyback
+  },
+
+  async getBuybacks(customerId?: string) {
+    return coreBuybackRepository.findAll(customerId)
   }
 }

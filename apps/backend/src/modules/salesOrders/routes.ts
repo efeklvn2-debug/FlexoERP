@@ -35,6 +35,10 @@ salesOrderRouter.get('/core-buyback', coreBuybackController.getCoreBuybacks)
 salesOrderRouter.get('/core-buyback/customer/:customerId', coreBuybackController.getCustomerCoreBalance)
 
 // Customer Balance & Aging
+salesOrderRouter.get('/customers', salesOrderController.getCustomers)
+salesOrderRouter.get('/customers/:customerId', salesOrderController.getCustomerById)
+salesOrderRouter.post('/customers', salesOrderController.createCustomer)
+salesOrderRouter.patch('/customers/:customerId', salesOrderController.updateCustomer)
 salesOrderRouter.get('/customers/:customerId/balance', salesOrderController.getCustomerBalance)
 salesOrderRouter.get('/customers/:customerId/aging', salesOrderController.getCustomerAging)
 salesOrderRouter.get('/customer-balances', salesOrderController.getAllCustomerBalances)
