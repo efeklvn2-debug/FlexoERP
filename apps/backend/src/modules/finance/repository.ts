@@ -53,11 +53,12 @@ export const financeRepository = {
     return prisma.account.update({ where: { id }, data })
   },
 
-  async getNextEntryNumber() {
+  async getNextEntryNumber(db?: Prisma.TransactionClient) {
+    const client = db || prisma
     const year = new Date().getFullYear()
     const prefix = `JE-${year}-`
     
-    const lastEntry = await prisma.journalEntry.findFirst({
+    const lastEntry = await client.journalEntry.findFirst({
       where: { entryNumber: { startsWith: prefix } },
       orderBy: { entryNumber: 'desc' }
     })

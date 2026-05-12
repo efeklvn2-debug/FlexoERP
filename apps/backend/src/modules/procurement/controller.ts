@@ -97,5 +97,37 @@ export const procurementController = {
       const rolls = await procurementService.createMultipleRolls(materialId, count, weights, purchaseOrderId)
       res.status(201).json({ data: rolls })
     } catch (error) { next(error) }
+  },
+
+  // Supplier Invoices
+  async getAllSupplierInvoices(req: Request, res: Response, next: NextFunction) {
+    try {
+      const status = req.query.status as string | undefined
+      const invoices = await procurementService.getAllSupplierInvoices(status)
+      res.json({ data: invoices })
+    } catch (error) { next(error) }
+  },
+
+  async getSupplierInvoiceById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const invoice = await procurementService.getSupplierInvoiceById(req.params.id)
+      res.json({ data: invoice })
+    } catch (error) { next(error) }
+  },
+
+  async createSupplierInvoice(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { poId, date, amount, invoiceNumber } = req.body
+      const invoice = await procurementService.createSupplierInvoice(poId, date, amount, invoiceNumber)
+      res.status(201).json({ data: invoice })
+    } catch (error) { next(error) }
+  },
+
+  async addPayment(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { amount, date, reference, notes } = req.body
+      const payment = await procurementService.addPayment(req.params.id, amount, new Date(date), reference, notes)
+      res.status(201).json({ data: payment })
+    } catch (error) { next(error) }
   }
 }

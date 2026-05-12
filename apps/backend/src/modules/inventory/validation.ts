@@ -10,7 +10,8 @@ export const materialSchema = z.object({
   subCategory: z.string().optional(),
   packSize: z.number().int().optional(),
   drumSize: z.number().int().optional(),
-  coreWeight: z.number().optional()
+  coreWeight: z.number().optional(),
+  totalStock: z.number().optional()
 })
 
 export const materialUpdateSchema = materialSchema.partial()

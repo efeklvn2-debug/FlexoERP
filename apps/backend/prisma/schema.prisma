@@ -113,6 +113,8 @@ model Material {
   packSize      Int?             @default(1)        // for packaging: packs per bundle
   drumSize      Int?             // for ink/solvents: liters per drum
   coreWeight    Decimal?         @db.Decimal(6, 2)  // for plain rolls: weight of core in kg
+  totalStock    Decimal?         @db.Decimal(12, 2) // current stock level
+  notes         String?          // for audit trail
   isActive      Boolean          @default(true)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -121,6 +123,7 @@ model Material {
   rolls         Roll[]
   poLineItems   POLineItem[]
   priceLists    PriceList[]
+  materialIssues MaterialIssue[]
 }
 
 model Stock {
@@ -182,6 +185,7 @@ model PurchaseOrder {
   createdById  String?
   items        POLineItem[]
   rolls        Roll[]
+  supplierInvoices SupplierInvoice[]
 
   @@index([poNumber])
   @@index([status])
@@ -239,11 +243,17 @@ model ProductionJob {
    notes               String?
    parentRollIds       String[] 
    printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
+   
+   // Job costing
+   materialCost        Decimal? @default(0) @db.Decimal(12, 2)  // Snapshot at completion
+   overheadCost        Decimal? @default(0) @db.Decimal(12, 2)  // Calculated from overhead rate
+   
    createdAt           DateTime @default(now())
    updatedAt           DateTime @updatedAt
    printedRolls        PrintedRoll[]
    salesOrderId        String?  @unique // Reference to sales order for bidirectional navigation
    salesOrder          SalesOrder? @relation(fields: [salesOrderId], references: [id])
+   materialIssues      MaterialIssue[]
  
    @@index([jobNumber])
    @@index([status])
@@ -278,10 +288,89 @@ model Settings {
   inkConsumptionRate    Decimal  @default(0.7) @db.Decimal(5, 2)  // kg ink per kg printed
   ipaConsumptionRate   Decimal  @default(0.1) @db.Decimal(5, 2)   // L IPA per kg printed
   butanolConsumptionRate Decimal @default(0.1) @db.Decimal(5, 2) // L Butanol per kg printed
+  inkCostPerKg          Decimal  @default(500) @db.Decimal(10, 2) // Cost per kg of ink/solvent mix
   coreDepositValue     Decimal  @default(150) @db.Decimal(10, 2) // Naira per core
+  overheadRatePerKg    Decimal  @default(0) @db.Decimal(10, 2)    // Overhead rate per kg (Naira)
   walkInCustomerId     String?  // Default walk-in customer ID
   vatRate               Decimal  @default(7.5) @db.Decimal(4, 2)  // Nigerian VAT rate (%)
   updatedAt            DateTime @updatedAt
+}
+
+// ============================================================================
+// OVERHEAD RATE HISTORY
+// ============================================================================
+
+model OverheadRateHistory {
+  id          String   @id @default(cuid())
+  month       String   // YYYY-MM format
+  ratePerKg   Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+  createdBy   String?
+  
+  @@unique([month])
+}
+
+// ============================================================================
+// MATERIAL ISSUE (for job costing)
+// ============================================================================
+
+model MaterialIssue {
+  id          String   @id @default(cuid())
+  jobId       String
+  job         ProductionJob @relation(fields: [jobId], references: [id])
+  materialId  String
+  material    Material @relation(fields: [materialId], references: [id])
+  quantityKg  Decimal  @db.Decimal(12, 2)
+  unitCost    Decimal  @db.Decimal(12, 2)
+  totalCost   Decimal  @db.Decimal(12, 2)
+  issuedAt    DateTime @default(now())
+  
+  @@index([jobId])
+}
+
+// ============================================================================
+// SUPPLIER INVOICES (Accounts Payable)
+// ============================================================================
+
+enum SupplierInvoiceStatus {
+  PENDING
+  PARTIAL
+  PAID
+}
+
+model SupplierInvoice {
+  id              String              @id @default(cuid())
+  poId            String
+  po              PurchaseOrder      @relation(fields: [poId], references: [id])
+  supplierId      String
+  supplier        Customer           @relation(fields: [supplierId], references: [id])
+  invoiceNumber   String             // Auto-generated: SI-YYYY-NNN
+  date            DateTime           @default(now())
+  dueDate         DateTime?
+  amount          Decimal            @db.Decimal(12, 2)
+  amountPaid      Decimal            @default(0) @db.Decimal(12, 2)
+  status          SupplierInvoiceStatus @default(PENDING)
+  notes           String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  
+  payments        PaymentMade[]
+  
+  @@unique([invoiceNumber])
+  @@index([supplierId])
+}
+
+model PaymentMade {
+  id                  String          @id @default(cuid())
+  supplierInvoiceId   String
+  supplierInvoice     SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id])
+  amount              Decimal         @db.Decimal(12, 2)
+  date                DateTime        @default(now())
+  reference           String?         // Cheque number, transfer ref, etc.
+  notes               String?
+  createdAt           DateTime        @default(now())
+  
+  @@index([supplierInvoiceId])
 }
 
 // ============================================================================
@@ -434,7 +523,6 @@ enum MTATransactionType {
 enum MTAPaymentMethod {
   CASH
   BANK_TRANSFER
-  CORE_CREDIT
 }
 
 enum MTAInvoiceStatus {
@@ -485,6 +573,7 @@ model Customer {
   paymentTransactions   PaymentTransaction[]
   invoices             Invoice[]
   coreBuybacks          CoreBuyback[]
+  supplierInvoices     SupplierInvoice[]
 }
 
 model SalesOrder {
@@ -612,12 +701,34 @@ model Invoice {
   dueDate               DateTime?
   paidAt                DateTime?
   
+  // Amount tracking (computed from payments, but stored for quick access)
+  amountPaid           Decimal          @default(0) @db.Decimal(15, 2)
+  
   createdAt             DateTime        @default(now())
+  
+  payments              PaymentReceived[]
   
   @@index([invoiceNumber])
   @@index([salesOrderId])
   @@index([customerId])
   @@index([status])
+}
+
+// ============================================================================
+// PAYMENTS RECEIVED (Accounts Receivable)
+// ============================================================================
+
+model PaymentReceived {
+  id              String      @id @default(cuid())
+  invoiceId       String
+  invoice        Invoice    @relation(fields: [invoiceId], references: [id])
+  amount          Decimal    @db.Decimal(12, 2)
+  date            DateTime   @default(now())
+  reference       String?    // Receipt number, transfer ref, etc.
+  notes           String?
+  createdAt       DateTime   @default(now())
+  
+  @@index([invoiceId])
 }
 
 model CoreBuyback {

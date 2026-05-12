@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { inventoryController } from './controller'
 import { validateRequest } from '../../middleware/validation'
-import { materialSchema, stockMovementSchema } from './validation'
+import { materialSchema, materialUpdateSchema, stockMovementSchema } from './validation'
 import { authenticate, loadUser } from '../../middleware/auth'
 
 export const inventoryRouter = Router()
@@ -32,6 +32,7 @@ inventoryRouter.patch(
   '/materials/:id',
   authenticate,
   loadUser,
+  validateRequest(materialUpdateSchema),
   inventoryController.updateMaterial
 )
 
@@ -63,6 +64,13 @@ inventoryRouter.delete(
   inventoryController.deleteMaterial
 )
 
+inventoryRouter.patch(
+  '/materials/:id/adjust-stock',
+  authenticate,
+  loadUser,
+  inventoryController.adjustStock
+)
+
 inventoryRouter.post(
   '/movements',
   authenticate,
@@ -76,4 +84,32 @@ inventoryRouter.get(
   authenticate,
   loadUser,
   inventoryController.getStockMovements
+)
+
+inventoryRouter.get(
+  '/core-stock',
+  authenticate,
+  loadUser,
+  inventoryController.getCoreStock
+)
+
+inventoryRouter.get(
+  '/packing-bag-stock',
+  authenticate,
+  loadUser,
+  inventoryController.getPackingBagStock
+)
+
+inventoryRouter.post(
+  '/initialize-stock',
+  authenticate,
+  loadUser,
+  inventoryController.initializeStock
+)
+
+inventoryRouter.get(
+  '/initial-stock-movements',
+  authenticate,
+  loadUser,
+  inventoryController.getInitialStockMovements
 )

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express'
 import { inventoryService } from './service'
 import { MaterialInput, StockMovementInput } from './validation'
 import { AuthenticatedRequest } from '../../middleware/auth'
+import { AppError } from '../../middleware/errorHandler'
 
 export const inventoryController = {
   async getAllMaterials(req: Request, res: Response, next: NextFunction) {
@@ -67,9 +68,18 @@ export const inventoryController = {
 
   async deleteMaterial(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const userId = req.user?.id
-      await inventoryService.deleteMaterial(req.params.id, userId)
+      await inventoryService.deleteMaterial(req.params.id)
       res.status(204).send()
+    } catch (error) {
+      next(error)
+    }
+  },
+
+  async adjustStock(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { newQuantity, reason } = req.body
+      const material = await inventoryService.adjustStock(req.params.id, newQuantity, reason)
+      res.json({ data: material })
     } catch (error) {
       next(error)
     }
@@ -101,6 +111,51 @@ export const inventoryController = {
     try {
       const rolls = await inventoryService.getMaterialRolls(req.params.id)
       res.json({ data: rolls })
+    } catch (error) {
+      next(error)
+    }
+  },
+
+  async getCoreStock(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await inventoryService.getCoreStock()
+      res.json({ data: result })
+    } catch (error) {
+      next(error)
+    }
+  },
+
+  async getPackingBagStock(req: Request, res: Response, next: NextFunction) {
+    try {
+      const days = parseInt(req.query.days as string) || 60
+      const result = await inventoryService.getPackingBagStock(days)
+      res.json({ data: result })
+    } catch (error) {
+      next(error)
+    }
+  },
+
+  async initializeStock(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { materials, date } = req.body
+      const userId = req.user?.id
+
+      if (!materials || !Array.isArray(materials) || materials.length === 0) {
+        throw new AppError(400, 'INVALID', 'Materials array is required')
+      }
+
+      const result = await inventoryService.initializeStock(materials, new Date(date || Date.now()), userId)
+      res.json({ data: result })
+    } catch (error) {
+      next(error)
+    }
+  },
+
+  async getInitialStockMovements(req: Request, res: Response, next: NextFunction) {
+    try {
+      const limit = parseInt(req.query.limit as string) || 100
+      const movements = await inventoryService.getInitialStockMovements(limit)
+      res.json({ data: movements })
     } catch (error) {
       next(error)
     }

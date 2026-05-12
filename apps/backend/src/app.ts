@@ -12,6 +12,7 @@ import { productionRouter } from './modules/production'
 import { transactionRouter } from './modules/transactions'
 import { pricingRouter } from './modules/pricing'
 import { financeRouter } from './modules/finance'
+import { salesOrderRouter } from './modules/salesOrders'
 import { idempotencyMiddleware } from './middleware/idempotency'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler'
 import { logger } from './logger'
@@ -29,7 +30,7 @@ export function createApp() {
 
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 500,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: { code: 'RATE_LIMITED', message: 'Too many requests' } }
@@ -48,6 +49,7 @@ export function createApp() {
   app.use('/api/settings', settingsRouter)
   app.use('/api/pricing', pricingRouter)
   app.use('/api/finance', financeRouter)
+  app.use('/api/sales-orders', salesOrderRouter)
 
   app.use(notFoundHandler)
   app.use(errorHandler)

@@ -109,11 +109,19 @@ export const salesOrderRepository = {
     customerId: string
     specsJson: any
     quantityOrdered: Prisma.Decimal | number
+    quantityProduced?: Prisma.Decimal | number
+    quantityDelivered?: Prisma.Decimal | number
     unitPrice: Prisma.Decimal | number
     totalAmount: Prisma.Decimal | number
     deliveryMethod: string
     shippingAddress?: string
     depositRequired: Prisma.Decimal | number
+    status?: string
+    approvedAt?: Date
+    completedAt?: Date
+    totalPaid?: Prisma.Decimal | number
+    balancePaid?: Prisma.Decimal | number
+    paymentStatus?: string
   }) {
     return prisma.salesOrder.create({
       data: {
@@ -121,13 +129,19 @@ export const salesOrderRepository = {
         customerId: data.customerId,
         specsJson: data.specsJson,
         quantityOrdered: new Prisma.Decimal(String(data.quantityOrdered)),
+        quantityProduced: data.quantityProduced ? new Prisma.Decimal(String(data.quantityProduced)) : undefined,
+        quantityDelivered: data.quantityDelivered ? new Prisma.Decimal(String(data.quantityDelivered)) : undefined,
         unitPrice: new Prisma.Decimal(String(data.unitPrice)),
         totalAmount: new Prisma.Decimal(String(data.totalAmount)),
         deliveryMethod: data.deliveryMethod as any,
         shippingAddress: data.shippingAddress,
         depositRequired: new Prisma.Decimal(String(data.depositRequired)),
-        status: 'PENDING' as any,
-        paymentStatus: 'PENDING_PAYMENT' as any
+        status: (data.status || 'PENDING') as any,
+        paymentStatus: data.paymentStatus || 'PENDING_PAYMENT' as any,
+        approvedAt: data.approvedAt,
+        completedAt: data.completedAt,
+        totalPaid: data.totalPaid ? new Prisma.Decimal(String(data.totalPaid)) : undefined,
+        balancePaid: data.balancePaid ? new Prisma.Decimal(String(data.balancePaid)) : undefined
       },
       include: {
         customer: true,
@@ -550,7 +564,8 @@ export const invoiceRepository = {
       where: { id },
       include: {
         customer: true,
-        salesOrder: true
+        salesOrder: true,
+        payments: true
       }
     })
   },
@@ -567,7 +582,8 @@ export const invoiceRepository = {
       where,
       include: {
         customer: true,
-        salesOrder: true
+        salesOrder: true,
+        payments: true
       },
       orderBy: { createdAt: 'desc' }
     })

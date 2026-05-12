@@ -2,9 +2,18 @@ import { prisma } from '../../database'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { financeRepository } from './repository'
-import { Prisma } from '@prisma/client'
+import { Prisma, Account, JournalEntry } from '@prisma/client'
 
 const logger = createChildLogger('finance:service')
+
+const ACCOUNT_CACHE: Map<string, Account> = new Map()
+
+async function loadAccountCache() {
+  if (ACCOUNT_CACHE.size === 0) {
+    const accounts = await prisma.account.findMany({ where: { isActive: true } })
+    accounts.forEach(acc => ACCOUNT_CACHE.set(acc.code, acc))
+  }
+}
 
 export const financeService = {
   async getAccounts() {
@@ -22,9 +31,32 @@ export const financeService = {
   },
 
   async getAccountByCode(code: string) {
-    const account = await financeRepository.findAccountByCode(code)
+    await loadAccountCache()
+    const account = ACCOUNT_CACHE.get(code)
     if (!account) throw new AppError(404, 'NOT_FOUND', `Account ${code} not found`)
     return account
+  },
+
+  async getAccountIdByCode(code: string): Promise<string> {
+    const account = await this.getAccountByCode(code)
+    return account.id
+  },
+
+  async getEarliestJournalDate(tx?: Prisma.TransactionClient): Promise<Date> {
+    const client = tx || prisma
+    const earliest = await client.journalEntry.findFirst({
+      orderBy: { date: 'asc' },
+      select: { date: true }
+    })
+    return earliest?.date || new Date('2026-01-01')
+  },
+
+  async validateJournalDate(date: Date, tx?: Prisma.TransactionClient): Promise<void> {
+    const earliestDate = await this.getEarliestJournalDate(tx)
+    if (new Date(date) < earliestDate) {
+      throw new AppError(400, 'INVALID_DATE', 
+        `Journal date cannot be before earliest entry: ${earliestDate.toISOString().split('T')[0]}`)
+    }
   },
 
   async createAccount(input: {
@@ -63,8 +95,9 @@ export const financeService = {
     postedById?: string
     date?: Date
     lines: { accountId: string; debit: number; credit: number; memo?: string }[]
-  }) {
+  }, tx?: Prisma.TransactionClient) {
     const { lines, description, sourceModule, sourceId, reference, postedById, date } = input
+    const db = tx || prisma
 
     if (!lines || lines.length < 2) {
       throw new AppError(400, 'INVALID', 'Journal entry must have at least 2 lines')
@@ -86,13 +119,16 @@ export const financeService = {
       }
     }
 
-    const entryNumber = await financeRepository.getNextEntryNumber()
+    const entryDate = date || new Date()
+    await this.validateJournalDate(entryDate, db)
 
-    return prisma.$transaction(async (tx) => {
-      const entry = await tx.journalEntry.create({
+    const entryNumber = await financeRepository.getNextEntryNumber(db)
+
+    const createEntry = async (client: Prisma.TransactionClient) => {
+      const entry = await client.journalEntry.create({
         data: {
           entryNumber,
-          date: date || new Date(),
+          date: entryDate,
           description,
           sourceModule: sourceModule as any,
           sourceId,
@@ -112,7 +148,13 @@ export const financeService = {
 
       logger.info({ entryNumber: entry.entryNumber, sourceModule, sourceId }, 'Journal entry posted')
       return entry
-    })
+    }
+
+    if (tx) {
+      return createEntry(tx)
+    }
+
+    return prisma.$transaction(async (dbTx) => createEntry(dbTx))
   },
 
   async getJournalEntries(options?: {
@@ -373,5 +415,217 @@ export const financeService = {
 
     logger.info({ count: accounts.length }, 'Chart of accounts seeded')
     return { message: 'Chart of accounts seeded', count: accounts.length }
+  },
+
+  async getDeferredCogsSummary() {
+    try {
+      // Get Deferred COGS account balance
+      const deferredCogsAccount = await this.getAccountByCode('1330')
+      const balanceResult = await financeRepository.getAccountBalance(deferredCogsAccount.id)
+      const totalDeferred = Math.max(0, Number(balanceResult?.balance || 0))
+
+      // Get orders with pending deferred COGS (status READY or PICKED_UP that have completed jobs)
+      const pendingOrders = await prisma.salesOrder.findMany({
+        where: {
+          status: { in: ['READY', 'PICKED_UP'] },
+          productionJobId: { not: null }
+        },
+        include: {
+          customer: true,
+          productionJob: true
+        },
+        orderBy: { updatedAt: 'desc' }
+      })
+
+      // Get all journal entries for 1330 to calculate actual deferred amounts
+      const allJournalEntries = await prisma.journalEntry.findMany({
+        include: {
+          lines: {
+            where: {
+              accountId: deferredCogsAccount.id
+            }
+          }
+        }
+      })
+
+      // Calculate deferred amount per jobId (from PRODUCTION entries)
+      const deferredByJob: Record<string, number> = {}
+      for (const entry of allJournalEntries) {
+        if (entry.sourceModule !== 'PRODUCTION') continue
+        const jobId = entry.sourceId
+        if (!jobId) continue
+        
+        for (const line of entry.lines) {
+          const amount = Number(line.debit) - Number(line.credit)
+          if (amount > 0) {
+            deferredByJob[jobId] = (deferredByJob[jobId] || 0) + amount
+          }
+        }
+      }
+
+      // Calculate recognized amount per order (from SALES entries)
+      const recognizedByOrder: Record<string, number> = {}
+      for (const entry of allJournalEntries) {
+        if (entry.sourceModule !== 'SALES') continue
+        
+        // The sourceId for SALES is the salesOrderId
+        const orderId = entry.sourceId
+        if (!orderId) continue
+        
+        for (const line of entry.lines) {
+          const amount = Number(line.credit)
+          if (amount > 0) {
+            recognizedByOrder[orderId] = (recognizedByOrder[orderId] || 0) + amount
+          }
+        }
+      }
+
+      const ordersWithDeferred = pendingOrders.map(order => {
+        const completedAt = order.productionJob?.endDate || order.updatedAt
+        const daysPending = Math.floor((Date.now() - new Date(completedAt).getTime()) / (1000 * 60 * 60 * 24))
+        
+        const jobId = order.productionJobId
+        const orderId = order.id
+        
+        // Get deferred amount from journal entries
+        let deferredAmount = 0
+        if (jobId) {
+          const deferred = deferredByJob[jobId] || 0
+          const recognized = recognizedByOrder[orderId] || 0
+          deferredAmount = Math.max(0, deferred - recognized)
+        }
+        
+        return {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          customerName: order.customer?.name || 'Unknown',
+          deferredAmount,
+          completedAt: completedAt,
+          daysPending
+        }
+      })
+
+      const overdueOrders = ordersWithDeferred.filter(o => o.daysPending > 7)
+
+      return {
+        totalDeferred,
+        pendingCount: ordersWithDeferred.length,
+        overdueCount: overdueOrders.length,
+        orders: ordersWithDeferred
+      }
+    } catch (error) {
+      logger.error({ error }, 'Failed to get Deferred COGS summary')
+      throw new AppError(500, 'INTERNAL_ERROR', 'Failed to get Deferred COGS summary')
+    }
+  },
+
+  async recognizeDeferredCogs(orderId: string, userId?: string) {
+    const order = await prisma.salesOrder.findUnique({
+      where: { id: orderId },
+      include: {
+        customer: true,
+        productionJob: true
+      }
+    })
+
+    if (!order) {
+      throw new AppError(404, 'NOT_FOUND', 'Sales order not found')
+    }
+
+    if (order.status !== 'READY' && order.status !== 'PICKED_UP') {
+      throw new AppError(400, 'INVALID', 'Order must be READY or PICKED_UP to recognize COGS')
+    }
+
+    if (!order.productionJobId || !order.productionJob) {
+      throw new AppError(400, 'INVALID', 'Order has no production job')
+    }
+
+    // Calculate deferred amount from job
+    const job = order.productionJob
+    const totalPrintedWeight = Number(order.quantityProduced) || 0
+    let totalDeferredCost = 0
+
+    // Get parent rolls for material cost
+    if (job.parentRollIds && job.parentRollIds.length > 0) {
+      const parentRolls = await prisma.roll.findMany({
+        where: { id: { in: job.parentRollIds } },
+        include: { material: true }
+      })
+      
+      // Material cost: printed weight × cost per kg
+      const parentMaterial = parentRolls[0]?.material
+      const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
+      totalDeferredCost += totalPrintedWeight * costPerKg
+    }
+
+    // Add consumables and overhead
+    const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+    if (settings) {
+      const inkRate = Number(settings.inkConsumptionRate) || 0.2
+      const ipaRate = Number(settings.ipaConsumptionRate) || 0.1
+      const butanolRate = Number(settings.butanolConsumptionRate) || 0.1
+      const inkCostPerLiter = Number(settings.inkCostPerKg) || 50
+      
+      const consumableMaterials = await prisma.material.findMany({ where: { category: 'INK_SOLVENTS' } })
+      const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
+      const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
+      const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
+      const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
+      
+      totalDeferredCost += totalPrintedWeight * inkRate * inkCostPerLiter
+      totalDeferredCost += totalPrintedWeight * ipaRate * ipaCostPerLiter
+      totalDeferredCost += totalPrintedWeight * butanolRate * butanolCostPerLiter
+      
+      const overheadRate = Number(settings.overheadRatePerKg) || 0
+      totalDeferredCost += totalPrintedWeight * overheadRate
+    }
+
+    if (totalDeferredCost <= 0) {
+      throw new AppError(400, 'INVALID', 'No deferred COGS to recognize')
+    }
+
+    const cogsAccountId = await this.getAccountIdByCode('5000')
+    const deferredCogsAccountId = await this.getAccountIdByCode('1330')
+
+    const entry = await this.postJournalEntry({
+      description: `Recognize COGS - SO ${order.orderNumber}`,
+      sourceModule: 'SALES',
+      sourceId: order.id,
+      reference: order.orderNumber,
+      postedById: userId,
+      lines: [
+        { accountId: cogsAccountId, debit: totalDeferredCost, credit: 0, memo: 'COGS recognized on delivery' },
+        { accountId: deferredCogsAccountId, debit: 0, credit: totalDeferredCost, memo: 'Deferred COGS cleared' }
+      ]
+    })
+
+    logger.info({ orderId, orderNumber: order.orderNumber, amount: totalDeferredCost }, 'Deferred COGS manually recognized')
+
+    return {
+      success: true,
+      amount: totalDeferredCost,
+      journalEntry: entry
+    }
+  },
+
+  async reverseJournalEntry(entryId: string, userId?: string) {
+    const entry = await this.getJournalEntryById(entryId)
+    if (!entry) throw new AppError(404, 'NOT_FOUND', 'Journal entry not found')
+
+    const reversedLines = entry.lines.map(l => ({
+      accountId: l.accountId,
+      debit: Number(l.credit),
+      credit: Number(l.debit),
+      memo: `Reversal: ${l.memo || ''}`
+    }))
+
+    return this.postJournalEntry({
+      description: `Reversal of ${entry.entryNumber} - ${entry.description}`,
+      sourceModule: entry.sourceModule,
+      sourceId: entry.sourceId || undefined,
+      reference: entry.reference || undefined,
+      postedById: userId,
+      lines: reversedLines
+    })
   }
 }

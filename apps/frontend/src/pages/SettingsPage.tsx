@@ -4,17 +4,20 @@ import { pricingApi, MaterialWithPrice } from '../api/pricing'
 import { inventoryApi, MaterialCategory } from '../api/inventory'
 import { Layout } from '../components/Layout'
 
-type SettingsTab = 'consumption' | 'core-deposits' | 'products'
+type SettingsTab = 'consumption' | 'core-deposits' | 'products' | 'overhead'
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('products')
   const [rates, setRates] = useState<ConsumptionRates>({
     coreWeight: 0.7,
     inkConsumptionRate: 0.7,
+    inkCostPerLiter: 50,
     ipaConsumptionRate: 0.1,
     butanolConsumptionRate: 0.1,
     coreDepositValue: 150
   })
+  const [overheadRate, setOverheadRate] = useState(0)
+  const [overheadHistory, setOverheadHistory] = useState<{month: string; ratePerKg: number; createdAt: Date}[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -41,24 +44,56 @@ export function SettingsPage() {
     pricePerPack: 0
   })
 
-  useEffect(() => {
+useEffect(() => {
     loadSettings()
     loadMaterials()
+    loadOverheadRate()
   }, [])
 
-  const loadSettings = async () => {
+  const loadOverheadRate = async () => {
+    try {
+      const [rateRes, historyRes] = await Promise.all([
+        settingsApi.getOverheadRate(),
+        settingsApi.getOverheadRateHistory()
+      ])
+      
+      const raw = rateRes.data
+      const rate = (raw as any)?.data ?? raw ?? 0
+      console.log('loadOverheadRate:', rate)
+      setOverheadRate(typeof rate === 'number' ? rate : 0)
+      
+      const historyRaw = historyRes.data
+      const historyData = (historyRaw as any)?.data ?? historyRaw ?? []
+      setOverheadHistory(historyData.map((h: any) => ({
+        month: h.month,
+        ratePerKg: h.ratePerKg,
+        createdAt: new Date(h.createdAt)
+      })))
+    } catch (err) {
+      console.error('Failed to load overhead rate:', err)
+    }
+  }
+
+const loadSettings = async () => {
     setLoading(true)
     try {
       const res = await settingsApi.getConsumptionRates()
-      const data = res.data || (res as any)?.data
+      const raw = res.data
+      const data = (raw as any)?.data ?? raw
+      console.log('loadSettings res.data:', raw)
+      console.log('loadSettings data:', data)
       if (!res.error && data) {
+        const inkRate = data.inkConsumptionRate ?? 0.7
+        console.log('inkConsumptionRate extracted:', inkRate)
         setRates({
           coreWeight: data.coreWeight ?? 0.7,
-          inkConsumptionRate: data.inkConsumptionRate ?? 0.7,
+          inkConsumptionRate: inkRate,
+          inkCostPerLiter: data.inkCostPerLiter ?? 50,
           ipaConsumptionRate: data.ipaConsumptionRate ?? 0.1,
           butanolConsumptionRate: data.butanolConsumptionRate ?? 0.1,
           coreDepositValue: data.coreDepositValue ?? 150
         })
+        console.log('rates state updated, inkConsumptionRate:', inkRate)
       }
     } catch (err: any) {
       console.error('Failed to load settings:', err)
@@ -87,6 +122,9 @@ export function SettingsPage() {
 
     const res = await settingsApi.updateConsumptionRates(rates)
     console.log('Save response:', res)
+    console.log('Save response data:', res.data)
+    const respData = (res.data as any)?.data ?? res.data
+    console.log('inkCostPerLiter in response:', respData?.inkCostPerLiter)
     
     if (res.error) {
       setError(res.error.message)
@@ -209,13 +247,21 @@ export function SettingsPage() {
           >
             Consumption Rates
           </button>
-          <button
+<button
             onClick={() => setActiveTab('core-deposits')}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
               activeTab === 'core-deposits' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             Core Deposits
+          </button>
+          <button
+            onClick={() => setActiveTab('overhead')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'overhead' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Overhead
           </button>
         </div>
 
@@ -316,9 +362,9 @@ export function SettingsPage() {
                 <p className="text-xs text-slate-500 mt-1">Weight of each plastic core (default: 0.7 kg)</p>
               </div>
 
-              <div>
+<div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Ink Consumption Rate (kg per kg of printed roll)
+                  Ink Consumption Rate (L per kg of printed roll)
                 </label>
                 <input
                   type="number"
@@ -328,7 +374,22 @@ export function SettingsPage() {
                   onChange={e => setRates({ ...rates, inkConsumptionRate: parseFloat(e.target.value) || 0 })}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                 />
-                <p className="text-xs text-slate-500 mt-1">Default: 0.7 kg</p>
+                <p className="text-xs text-slate-500 mt-1">Liters of ink per kg of printed roll. Default: 0.2 L</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Ink Cost Per Liter (₦)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={rates.inkCostPerLiter}
+                  onChange={e => setRates({ ...rates, inkCostPerLiter: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                />
+                <p className="text-xs text-slate-500 mt-1">Cost per liter of ink. Default: ₦50</p>
               </div>
 
               <div>
@@ -397,6 +458,63 @@ export function SettingsPage() {
                 <p className="text-xs text-slate-500 mt-1">Default: ₦150 per core</p>
               </div>
 
+<div className="pt-4">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {activeTab === 'overhead' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Overhead Rate</h2>
+            <p className="text-sm text-slate-500 mb-6">
+              Overhead rate per kg of printed roll. This covers factory labor, electricity, maintenance, etc.
+            </p>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                setSaving(true)
+                setError('')
+                setSuccess('')
+                try {
+                  const res = await settingsApi.updateOverheadRate(overheadRate)
+                  if (res.error) {
+                    setError(res.error.message)
+                  } else {
+                    setSuccess(`Overhead rate updated. Applied: ${new Date().toISOString().slice(0, 7)}`)
+                    setTimeout(() => setSuccess(''), 5000)
+                    await loadOverheadRate()
+                  }
+                } catch (err: any) {
+                  setError(err.message)
+                }
+                setSaving(false)
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Overhead Rate (₦ per kg)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={overheadRate}
+                  onChange={e => setOverheadRate(parseFloat(e.target.value) || 0)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                />
+                <p className="text-xs text-slate-500 mt-1">Cost per kg of printed roll</p>
+              </div>
+
               <div className="pt-4">
                 <button
                   type="submit"
@@ -407,6 +525,28 @@ export function SettingsPage() {
                 </button>
               </div>
             </form>
+
+            {overheadHistory.length > 0 && (
+              <div className="mt-8">
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Rate History</h3>
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Period</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Rate (₦/kg)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {overheadHistory.map((h) => (
+                      <tr key={h.month}>
+                        <td className="px-3 py-2 text-sm text-slate-600">{h.month}</td>
+                        <td className="px-3 py-2 text-sm text-slate-600 text-right">₦{h.ratePerKg.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

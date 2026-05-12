@@ -1,12 +1,22 @@
 import { procurementRepository } from './repository'
 import { PurchaseOrderInput, RollInput, ReceivePOInput, AddLineItemInput, UpdatePOInput } from './validation'
-import { PurchaseOrder, Roll } from './types'
+import { PurchaseOrder, Roll, SupplierInvoice, PaymentMade, SupplierInvoiceStatus } from './types'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { prisma } from '../../database'
 import { inventoryService } from '../inventory/service'
 
 const logger = createChildLogger('procurement:service')
+
+async function generateSupplierInvoiceNumber(): Promise<string> {
+  const year = new Date().getFullYear()
+  const count = await prisma.supplierInvoice.count({
+    where: {
+      invoiceNumber: { startsWith: `SI-${year}-` }
+    }
+  })
+  return `SI-${year}-${String(count + 1).padStart(3, '0')}`
+}
 
 export const procurementService = {
   // Purchase Orders
@@ -196,5 +206,191 @@ export const procurementService = {
     }
     logger.info({ count, materialId }, 'Creating multiple rolls')
     return procurementRepository.createRolls(rolls)
+  },
+
+  // Supplier Invoices
+  async getAllSupplierInvoices(status?: string): Promise<SupplierInvoice[]> {
+    const where = status ? { status: status as SupplierInvoiceStatus } : {}
+    const invoices = await prisma.supplierInvoice.findMany({
+      where,
+      include: {
+        po: true,
+        supplier: true,
+        payments: true
+      },
+      orderBy: { date: 'desc' }
+    })
+    return invoices.map(inv => ({
+      id: inv.id,
+      poId: inv.poId,
+      purchaseOrder: inv.po ? {
+        id: inv.po.id,
+        poNumber: inv.po.poNumber,
+        supplier: inv.po.supplier,
+        status: inv.po.status,
+        totalAmount: Number(inv.po.totalAmount),
+        createdAt: inv.po.createdAt,
+        updatedAt: inv.po.updatedAt
+      } : undefined,
+      supplierId: inv.supplierId,
+      supplier: inv.supplier ? {
+        id: inv.supplier.id,
+        name: inv.supplier.name
+      } : undefined,
+      invoiceNumber: inv.invoiceNumber,
+      date: inv.date,
+      amount: Number(inv.amount),
+      status: inv.status,
+      amountPaid: Number(inv.amountPaid),
+      createdAt: inv.createdAt,
+      payments: inv.payments?.map((p: any) => ({
+        id: p.id,
+        supplierInvoiceId: p.supplierInvoiceId,
+        amount: Number(p.amount),
+        date: p.date,
+        reference: p.reference || undefined,
+        notes: p.notes || undefined,
+        createdAt: p.createdAt
+      })) || []
+    }))
+  },
+
+  async getSupplierInvoiceById(id: string): Promise<SupplierInvoice> {
+    const inv = await prisma.supplierInvoice.findUnique({
+      where: { id },
+      include: {
+        po: true,
+        supplier: true,
+        payments: true
+      }
+    })
+    if (!inv) throw new AppError(404, 'NOT_FOUND', 'Supplier invoice not found')
+    return {
+      id: inv.id,
+      poId: inv.poId,
+      purchaseOrder: inv.po ? {
+        id: inv.po.id,
+        poNumber: inv.po.poNumber,
+        supplier: inv.po.supplier,
+        status: inv.po.status,
+        totalAmount: Number(inv.po.totalAmount),
+        createdAt: inv.po.createdAt,
+        updatedAt: inv.po.updatedAt
+      } : undefined,
+      supplierId: inv.supplierId,
+      supplier: inv.supplier ? {
+        id: inv.supplier.id,
+        name: inv.supplier.name
+      } : undefined,
+      invoiceNumber: inv.invoiceNumber,
+      date: inv.date,
+      amount: Number(inv.amount),
+      status: inv.status,
+      amountPaid: Number(inv.amountPaid),
+      createdAt: inv.createdAt,
+      payments: inv.payments?.map((p: any) => ({
+        id: p.id,
+        supplierInvoiceId: p.supplierInvoiceId,
+        amount: Number(p.amount),
+        date: p.date,
+        reference: p.reference || undefined,
+        notes: p.notes || undefined,
+        createdAt: p.createdAt
+      })) || []
+    }
+  },
+
+  async createSupplierInvoice(poId: string, date: Date, amount: number, invoiceNumber?: string): Promise<SupplierInvoice> {
+    const po = await procurementRepository.findPOById(poId)
+    if (!po) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
+
+    const customer = await prisma.customer.findFirst({
+      where: { name: po.supplier }
+    })
+    if (!customer) throw new AppError(400, 'INVALID_OPERATION', 'Supplier not found as customer in system')
+
+    const finalInvoiceNumber = invoiceNumber || await generateSupplierInvoiceNumber()
+    logger.info({ poId, invoiceNumber: finalInvoiceNumber, amount }, 'Creating supplier invoice')
+
+    const inv = await prisma.supplierInvoice.create({
+      data: {
+        poId,
+        supplierId: customer.id,
+        invoiceNumber: finalInvoiceNumber,
+        date: new Date(date),
+        amount,
+        status: 'PENDING',
+        amountPaid: 0
+      },
+      include: {
+        po: true,
+        supplier: true,
+        payments: true
+      }
+    })
+
+    return {
+      id: inv.id,
+      poId: inv.poId,
+      purchaseOrder: inv.po ? {
+        id: inv.po.id,
+        poNumber: inv.po.poNumber,
+        supplier: inv.po.supplier,
+        status: inv.po.status,
+        totalAmount: Number(inv.po.totalAmount),
+        createdAt: inv.po.createdAt,
+        updatedAt: inv.po.updatedAt
+      } : undefined,
+      supplierId: inv.supplierId,
+      supplier: inv.supplier ? {
+        id: inv.supplier.id,
+        name: inv.supplier.name
+      } : undefined,
+      invoiceNumber: inv.invoiceNumber,
+      date: inv.date,
+      amount: Number(inv.amount),
+      status: inv.status,
+      amountPaid: Number(inv.amountPaid),
+      createdAt: inv.createdAt,
+      payments: []
+    }
+  },
+
+  async addPayment(supplierInvoiceId: string, amount: number, date: Date, reference?: string, notes?: string): Promise<PaymentMade> {
+    const inv = await prisma.supplierInvoice.findUnique({ where: { id: supplierInvoiceId } })
+    if (!inv) throw new AppError(404, 'NOT_FOUND', 'Supplier invoice not found')
+
+    const newAmountPaid = Number(inv.amountPaid) + amount
+    const newStatus = newAmountPaid >= Number(inv.amount) ? 'PAID' : newAmountPaid > 0 ? 'PARTIAL' : 'PENDING'
+
+    logger.info({ supplierInvoiceId, amount, newStatus }, 'Recording payment to supplier invoice')
+
+    const payment = await prisma.paymentMade.create({
+      data: {
+        supplierInvoiceId,
+        amount,
+        date: new Date(date),
+        reference,
+        notes
+      }
+    })
+
+    await prisma.supplierInvoice.update({
+      where: { id: supplierInvoiceId },
+      data: {
+        amountPaid: newAmountPaid,
+        status: newStatus
+      }
+    })
+
+    return {
+      id: payment.id,
+      supplierInvoiceId: payment.supplierInvoiceId,
+      amount: Number(payment.amount),
+      date: payment.date,
+      reference: payment.reference || undefined,
+      notes: payment.notes || undefined,
+      createdAt: payment.createdAt
+    }
   }
 }

@@ -19,3 +19,9 @@ procurementRouter.get('/rolls', authenticate, loadUser, procurementController.ge
 procurementRouter.get('/rolls/:id', authenticate, loadUser, procurementController.getRollById)
 procurementRouter.post('/rolls', authenticate, loadUser, procurementController.createRoll)
 procurementRouter.post('/rolls/bulk', authenticate, loadUser, procurementController.createMultipleRolls)
+
+// Supplier Invoices
+procurementRouter.get('/supplier-invoices', authenticate, loadUser, procurementController.getAllSupplierInvoices)
+procurementRouter.get('/supplier-invoices/:id', authenticate, loadUser, procurementController.getSupplierInvoiceById)
+procurementRouter.post('/supplier-invoices', authenticate, loadUser, procurementController.createSupplierInvoice)
+procurementRouter.post('/supplier-invoices/:id/payments', authenticate, loadUser, procurementController.addPayment)

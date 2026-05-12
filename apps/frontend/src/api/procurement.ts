@@ -66,6 +66,31 @@ export interface CreatePOLineItem {
   rollWeights?: number[]
 }
 
+export type SupplierInvoiceStatus = 'PENDING' | 'PARTIAL' | 'PAID'
+
+export interface SupplierInvoice {
+  id: string
+  poId: string
+  purchaseOrder?: { id: string; poNumber: string; supplier: string; totalAmount?: number }
+  supplierId: string
+  supplier?: { id: string; name: string }
+  invoiceNumber: string
+  date: string
+  amount: number
+  status: SupplierInvoiceStatus
+  amountPaid: number
+  payments?: PaymentMade[]
+}
+
+export interface PaymentMade {
+  id: string
+  supplierInvoiceId: string
+  amount: number
+  date: string
+  reference?: string
+  notes?: string
+}
+
 export const procurementApi = {
   // Purchase Orders
   getPOs: async (status?: string) => {
@@ -115,5 +140,16 @@ export const procurementApi = {
     api.post<ProductionJob>('/procurement/jobs', data),
   assignRolls: async (jobId: string, rolls: { rollId: string; weightUsed: number }[]) => 
     api.post('/procurement/jobs/assign-rolls', { jobId, rolls }),
-  completeJob: async (id: string) => api.post<ProductionJob>(`/procurement/jobs/${id}/complete`, {})
+  completeJob: async (id: string) => api.post<ProductionJob>(`/procurement/jobs/${id}/complete`, {}),
+
+  // Supplier Invoices
+  getSupplierInvoices: async (status?: string) => {
+    const query = status ? `?status=${status}` : ''
+    return api.get<SupplierInvoice[]>(`/procurement/supplier-invoices${query}`)
+  },
+  getSupplierInvoice: async (id: string) => api.get<SupplierInvoice>(`/procurement/supplier-invoices/${id}`),
+  createSupplierInvoice: async (data: { poId: string; date: string; amount: number; invoiceNumber?: string }) =>
+    api.post<SupplierInvoice>('/procurement/supplier-invoices', data),
+  addPayment: async (id: string, data: { amount: number; date: string; reference?: string; notes?: string }) =>
+    api.post<PaymentMade>(`/procurement/supplier-invoices/${id}/payments`, data)
 }

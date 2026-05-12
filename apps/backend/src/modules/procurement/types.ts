@@ -48,3 +48,31 @@ export interface Roll {
   createdAt: Date
   updatedAt: Date
 }
+
+export type SupplierInvoiceStatus = 'PENDING' | 'PARTIAL' | 'PAID'
+
+export interface SupplierInvoice {
+  id: string
+  poId: string
+  purchaseOrder?: PurchaseOrder
+  supplierId: string
+  supplier?: { id: string; name: string }
+  invoiceNumber: string
+  date: Date
+  amount: number
+  status: SupplierInvoiceStatus
+  amountPaid: number
+  createdAt: Date
+  payments?: PaymentMade[]
+}
+
+export interface PaymentMade {
+  id: string
+  supplierInvoiceId: string
+  supplierInvoice?: SupplierInvoice
+  amount: number
+  date: Date
+  reference?: string
+  notes?: string
+  createdAt: Date
+}

@@ -172,5 +172,39 @@ export const financeController = {
       logger.error(error, 'Error seeding accounts')
       res.status(error.statusCode || 500).json({ error: error.message || 'Failed to seed accounts' })
     }
+  },
+
+  async getDeferredCogsSummary(req: Request, res: Response) {
+    try {
+      const summary = await financeService.getDeferredCogsSummary()
+      res.json({ data: summary })
+    } catch (error: any) {
+      logger.error(error, 'Error getting Deferred COGS summary')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get Deferred COGS summary' })
+    }
+  },
+
+  async recognizeDeferredCogs(req: Request, res: Response) {
+    try {
+      const { id } = req.params
+      const userId = (req as any).user?.id
+      const result = await financeService.recognizeDeferredCogs(id, userId)
+      res.json({ data: result })
+    } catch (error: any) {
+      logger.error(error, 'Error recognizing Deferred COGS')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to recognize Deferred COGS' })
+    }
+  },
+
+  async reverseJournalEntry(req: Request, res: Response) {
+    try {
+      const { id } = req.params
+      const userId = (req as any).user?.id
+      const entry = await financeService.reverseJournalEntry(id, userId)
+      res.status(201).json({ data: entry })
+    } catch (error: any) {
+      logger.error(error, 'Error reversing journal entry')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to reverse journal entry' })
+    }
   }
 }

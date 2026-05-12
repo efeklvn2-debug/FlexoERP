@@ -7,7 +7,7 @@ import { productionApi, ParentRoll } from '../api/production'
 import { Layout } from '../components/Layout'
 
 type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'REFUND'
-type PaymentMethod = 'CASH' | 'BANK_TRANSFER' | 'CORE_CREDIT'
+type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 type QuantityType = 'rolls' | 'kg'
 
 type Tab = 'orders' | 'payments' | 'invoices' | 'core-buyback' | 'balances' | 'packing-bags'
@@ -53,7 +53,7 @@ export function SalesOrdersPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [coreBuybacks, setCoreBuybacks] = useState<any[]>([])
   const [customerBalances, setCustomerBalances] = useState<CustomerBalance[]>([])
-  const [customers, setCustomers] = useState<SalesCustomer[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [materials, setMaterials] = useState<MaterialType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -103,7 +103,7 @@ export function SalesOrdersPage() {
     customerId: '',
     sellerName: '',
     coresQuantity: 0,
-    paymentMethod: 'CASH' as PaymentMethod,
+    paymentMethod: 'Cash' as PaymentMethod,
     notes: ''
   })
 
@@ -122,6 +122,8 @@ export function SalesOrdersPage() {
     quantityToPickup: 0,
     packingBags: 0,
     packingBagPrice: 0,
+    amountPaid: 0,
+    paymentMethod: 'Cash' as 'Cash' | 'Electronic',
     notes: ''
   })
 
@@ -129,7 +131,7 @@ export function SalesOrdersPage() {
     customerId: '',
     quantity: 0,
     unitPrice: 0,
-    paymentMethod: 'CASH' as 'CASH' | 'BANK_TRANSFER',
+    paymentMethod: 'Cash' as 'Cash' | 'Electronic',
     referenceNumber: '',
     notes: ''
   })
@@ -334,7 +336,7 @@ export function SalesOrdersPage() {
       })
       if (res.error) { setError(res.error.message); return }
       setShowPaymentModal(false)
-      setPaymentForm({ salesOrderId: '', customerId: '', transactionType: 'DEPOSIT', paymentMethod: 'CASH', paymentCategory: 'ROLL', amount: 0, referenceNumber: '', notes: '' })
+      setPaymentForm({ salesOrderId: '', customerId: '', transactionType: 'DEPOSIT', paymentMethod: 'Cash', paymentCategory: 'ROLL', amount: 0, referenceNumber: '', notes: '' })
       loadData()
       loadPayments()
     } catch (err: any) {
@@ -370,7 +372,7 @@ export function SalesOrdersPage() {
         customerId: '',
         quantity: 0,
         unitPrice: 0,
-        paymentMethod: 'CASH',
+        paymentMethod: 'Cash',
         referenceNumber: '',
         notes: ''
       })
@@ -400,7 +402,7 @@ export function SalesOrdersPage() {
       console.log('Core buyback response:', res)
       if (res.error) { setError(res.error.message); return }
       setShowCoreBuybackModal(false)
-      setCoreBuybackForm({ customerId: '', sellerName: '', coresQuantity: 0, paymentMethod: 'CASH', notes: '' })
+      setCoreBuybackForm({ customerId: '', sellerName: '', coresQuantity: 0, paymentMethod: 'Cash', notes: '' })
       loadCoreBuybacks()
       loadData()
     } catch (err: any) {
@@ -524,6 +526,8 @@ export function SalesOrdersPage() {
       quantityToPickup: remainingQty,
       packingBags: 0,
       packingBagPrice: defaultPrice,
+      amountPaid: 0,
+      paymentMethod: 'Cash',
       notes: ''
     })
     setShowPickupModal(true)
@@ -591,7 +595,9 @@ export function SalesOrdersPage() {
       const res = await salesOrderApi.recordPickup(
         productionOrder.id, 
         pickupForm.quantityToPickup,
-        pickupForm.packingBags > 0 ? pickupForm.packingBags : undefined
+        pickupForm.packingBags > 0 ? pickupForm.packingBags : undefined,
+        pickupForm.amountPaid > 0 ? pickupForm.amountPaid : undefined,
+        pickupForm.paymentMethod
       )
       if (res.error) { setError(res.error.message); return }
       setShowPickupModal(false)
@@ -637,7 +643,7 @@ export function SalesOrdersPage() {
       salesOrderId: order?.id || '',
       customerId: order?.customerId || '',
       transactionType: 'PAYMENT',
-      paymentMethod: 'CASH',
+      paymentMethod: 'Cash',
       paymentCategory: 'ROLL',
       amount: order ? order.totalAmount - order.totalPaid : 0,
       referenceNumber: '',
@@ -1010,11 +1016,11 @@ export function SalesOrdersPage() {
                       <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
                       <select 
                         value={packingBagForm.paymentMethod} 
-                        onChange={e => setPackingBagForm({...packingBagForm, paymentMethod: e.target.value as 'CASH' | 'BANK_TRANSFER'})} 
+                        onChange={e => setPackingBagForm({...packingBagForm, paymentMethod: e.target.value as 'Cash' | 'Electronic'})} 
                         className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                       >
-                        <option value="CASH">Cash</option>
-                        <option value="BANK_TRANSFER">Bank Transfer</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Electronic">Electronic</option>
                       </select>
                     </div>
 
@@ -1207,8 +1213,8 @@ export function SalesOrdersPage() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
                   <select value={paymentForm.paymentMethod} onChange={e => setPaymentForm({...paymentForm, paymentMethod: e.target.value as PaymentMethod})} className="w-full px-4 py-2 border border-slate-300 rounded-lg">
-                    <option value="CASH">Cash</option>
-                    <option value="BANK_TRANSFER">Bank Transfer</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Electronic">Electronic</option>
                     <option value="CORE_CREDIT">Core Credit</option>
                   </select>
                 </div>
@@ -1282,8 +1288,8 @@ export function SalesOrdersPage() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
                   <select value={coreBuybackForm.paymentMethod} onChange={e => setCoreBuybackForm({...coreBuybackForm, paymentMethod: e.target.value as PaymentMethod})} className="w-full px-4 py-2 border border-slate-300 rounded-lg">
-                    <option value="CASH">Cash</option>
-                    <option value="BANK_TRANSFER">Bank Transfer</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Electronic">Electronic</option>
                   </select>
                 </div>
 
@@ -1570,6 +1576,39 @@ export function SalesOrdersPage() {
                   {pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 && (
                     <p className="text-sm text-teal-600 mt-2 font-medium">
                       Packing Bags Total: ₦{(pickupForm.packingBags * pickupForm.packingBagPrice).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-200 pt-4 mt-4">
+                  <h4 className="text-sm font-medium text-slate-700 mb-3">Payment (Optional)</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Amount Paid (₦)</label>
+                      <input
+                        type="number"
+                        value={pickupForm.amountPaid || ''}
+                        onChange={e => setPickupForm({...pickupForm, amountPaid: parseFloat(e.target.value) || 0})}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        min="0"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Payment Method</label>
+                      <select
+                        value={pickupForm.paymentMethod}
+                        onChange={e => setPickupForm({...pickupForm, paymentMethod: e.target.value as 'Cash' | 'Electronic'})}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                      >
+                        <option value="Cash">Cash</option>
+                        <option value="Electronic">Electronic</option>
+                      </select>
+                    </div>
+                  </div>
+                  {pickupForm.amountPaid > 0 && (
+                    <p className="text-sm text-blue-600 mt-2 font-medium">
+                      Balance after payment: ₦{Math.max(0, ((productionOrder?.unitPrice || 0) * pickupForm.quantityToPickup) - pickupForm.amountPaid).toLocaleString()}
                     </p>
                   )}
                 </div>

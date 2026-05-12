@@ -190,6 +190,12 @@ apps/backend/src/modules/production/service.ts.backup
 test-out.js
 ```
 
+### Plain Roll Sales (Future)
+- Direct sale of parent/plain rolls without production
+- Select roll from inventory → mark as SOLD/CONSUMED
+- Post revenue (4000) + COGS (5000) immediately (no deferral)
+- UI option in Sales Orders for "Plain Roll" order type
+
 ### Finance Module (Future Phase)
 - Accounts Receivable tracking
 - Invoice issuance workflow (DRAFT → ISSUED → PAID)

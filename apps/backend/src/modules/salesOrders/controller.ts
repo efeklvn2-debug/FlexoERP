@@ -100,8 +100,8 @@ export const salesOrderController = {
   async recordPickup(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const { quantityPickedUp, packingBags } = req.body
-      const order = await salesOrderService.recordPickup(id, (req as any).user?.id, quantityPickedUp, packingBags)
+      const { quantityPickedUp, packingBags, amountPaid, paymentMethod } = req.body
+      const order = await salesOrderService.recordPickup(id, (req as any).user?.id, quantityPickedUp, packingBags, amountPaid, paymentMethod)
       res.json({ data: order })
     } catch (error: any) {
       logger.error(error, 'Error recording pickup')
@@ -259,7 +259,7 @@ export const invoiceController = {
   async getInvoice(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const invoice = await invoiceService.getInvoice(id)
+      const invoice = await invoiceService.getInvoiceById(id)
       res.json({ data: invoice })
     } catch (error: any) {
       logger.error(error, 'Error fetching invoice')
@@ -277,6 +277,18 @@ export const invoiceController = {
       res.json({ data: invoices })
     } catch (error: any) {
       logger.error(error, 'Error fetching invoices')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+    }
+  },
+
+  async addPayment(req: Request, res: Response) {
+    try {
+      const { id } = req.params
+      const { amount, date, reference, notes } = req.body
+      const payment = await invoiceService.addPayment(id, amount, new Date(date), reference, notes)
+      res.status(201).json({ data: payment })
+    } catch (error: any) {
+      logger.error(error, 'Error recording payment')
       res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
     }
   }

@@ -4,9 +4,15 @@ import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { salesOrderRepository, paymentRepository, invoiceRepository, coreBuybackRepository } from './repository'
 import { inventoryService } from '../inventory/service'
+import { financeService } from '../finance/service'
 import type { SpecsJson, SalesOrderInput, SalesOrderUpdateInput, PaymentInput, CoreBuybackInput } from './types'
 
 const logger = createChildLogger('salesOrders:service')
+
+const PAYMENT_METHOD_MAP: Record<string, string> = {
+  Cash: 'CASH',
+  Electronic: 'BANK_TRANSFER',
+}
 
 export const salesOrderService = {
   async getOrders(options?: { status?: string; customerId?: string; limit?: number; offset?: number }) {
@@ -248,7 +254,7 @@ export const salesOrderService = {
     return updated
   },
 
-  async recordPickup(id: string, userId?: string, quantityPickedUp?: number, packingBags?: number) {
+  async recordPickup(id: string, userId?: string, quantityPickedUp?: number, packingBags?: number, amountPaid?: number, paymentMethod?: string) {
     const order = await salesOrderRepository.findById(id)
     
     if (!order) {
@@ -281,6 +287,78 @@ export const salesOrderService = {
               pickedUpAt: new Date()
             }
           })
+          
+          // =====================================================
+          // RECOGNIZE DEFERRED COGS (Move from 1330 to 5000)
+          // =====================================================
+          try {
+            const cogsAccountId = await financeService.getAccountIdByCode('5000')
+            const deferredCogsAccountId = await financeService.getAccountIdByCode('1330')
+            
+            // Calculate total deferred cost from production job
+            // Use printed weight × cost per kg (same as production service fix)
+            const totalPrintedWeight = productionJob.printedRolls.reduce((sum: number, pr: any) => sum + Number(pr.weightUsed || 0), 0)
+            let totalDeferredCost = 0
+            
+            // Get parent rolls for material cost
+            if (productionJob.parentRollIds && productionJob.parentRollIds.length > 0) {
+              const parentRolls = await tx.roll.findMany({
+                where: { id: { in: productionJob.parentRollIds } },
+                include: { material: true }
+              })
+              
+              // Material cost: printed weight × cost per kg (NOT roll weight delta)
+              const parentMaterial = parentRolls[0]?.material
+              const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
+              const materialCost = totalPrintedWeight * costPerKg
+              totalDeferredCost += materialCost
+            }
+            
+            // Add consumables cost (ink + IPA + Butanol)
+            const settings = await tx.settings.findUnique({ where: { id: 'default' } })
+            if (settings) {
+              const inkRate = Number(settings.inkConsumptionRate) || 0.2
+              const ipaRate = Number(settings.ipaConsumptionRate) || 0.1
+              const butanolRate = Number(settings.butanolConsumptionRate) || 0.1
+              const inkCostPerLiter = Number(settings.inkCostPerKg) || 50
+              
+              // Get IPA and Butanol material costs
+              const consumableMaterials = await tx.material.findMany({
+                where: { category: 'INK_SOLVENTS' }
+              })
+              const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
+              const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
+              const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
+              const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
+              
+              const inkCost = totalPrintedWeight * inkRate * inkCostPerLiter
+              const ipaCost = totalPrintedWeight * ipaRate * ipaCostPerLiter
+              const butanolCost = totalPrintedWeight * butanolRate * butanolCostPerLiter
+              totalDeferredCost += inkCost + ipaCost + butanolCost
+              
+              // Add overhead cost
+              const overheadRate = Number(settings.overheadRatePerKg) || 0
+              const overheadCost = totalPrintedWeight * overheadRate
+              totalDeferredCost += overheadCost
+            }
+            
+            if (totalDeferredCost > 0) {
+              await financeService.postJournalEntry({
+                description: `Recognize COGS - SO ${order.orderNumber}`,
+                sourceModule: 'SALES',
+                sourceId: order.id,
+                reference: order.orderNumber,
+                lines: [
+                  { accountId: cogsAccountId, debit: totalDeferredCost, credit: 0, memo: 'COGS recognized on delivery' },
+                  { accountId: deferredCogsAccountId, debit: 0, credit: totalDeferredCost, memo: 'Deferred COGS cleared' }
+                ]
+              }, tx)
+              
+              logger.info({ orderId: order.id, orderNumber: order.orderNumber, cogsAmount: totalDeferredCost }, 'Deferred COGS recognized on pickup')
+            }
+          } catch (financeErr) {
+            logger.error({ err: financeErr, orderId: order.id }, 'Failed to recognize Deferred COGS - continuing anyway')
+          }
         }
       }
 
@@ -328,9 +406,116 @@ export const salesOrderService = {
             `Sales Order ${order.orderNumber}`,
             userId
           )
+
+          try {
+            const cogsId = await financeService.getAccountIdByCode('5000')
+            const packingBagInventoryId = await financeService.getAccountIdByCode('1510')
+
+            await financeService.postJournalEntry({
+              description: `COGS - Packing Bags SO ${order.orderNumber}`,
+              sourceModule: 'SALES',
+              sourceId: order.id,
+              reference: order.orderNumber,
+              lines: [
+                { accountId: cogsId, debit: bagTotalAmount, credit: 0, memo: 'COGS - Packing Bags' },
+                { accountId: packingBagInventoryId, debit: 0, credit: bagTotalAmount, memo: 'Packing Bag Inventory' }
+              ]
+            }, tx)
+          } catch (financeErr) {
+            logger.error({ err: financeErr }, 'Failed to post COGS journal for packing bags at pickup')
+          }
         } catch (err) {
           logger.error({ err, orderId: id }, 'Failed to record packing bag sale')
         }
+      }
+
+      // =====================================================
+      // RECOGNIZE REVENUE (Merge payment into pickup)
+      // =====================================================
+      try {
+        const settings = await tx.settings.findUnique({ where: { id: 'default' } })
+        const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
+
+        const deliveryValue = quantity * Number(order.unitPrice)
+        const bagValue = bagTotalAmount
+        const totalRevenue = deliveryValue + bagValue
+        const vatAmount = totalRevenue * (vatRate / 100)
+        const totalDue = totalRevenue + vatAmount
+
+        const cashAccountId = await financeService.getAccountIdByCode('1000')
+        const arAccountId = await financeService.getAccountIdByCode('1200')
+        const salesRevenueId = await financeService.getAccountIdByCode('4000')
+        const packingBagRevenueId = await financeService.getAccountIdByCode('4100')
+        const vatOutputId = await financeService.getAccountIdByCode('2100')
+
+        const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = []
+
+        if (deliveryValue > 0) {
+          lines.push({ accountId: salesRevenueId, debit: 0, credit: deliveryValue, memo: 'Roll revenue' })
+        }
+        if (bagValue > 0) {
+          lines.push({ accountId: packingBagRevenueId, debit: 0, credit: bagValue, memo: 'Packing bags revenue' })
+        }
+        if (vatAmount > 0) {
+          lines.push({ accountId: vatOutputId, debit: 0, credit: vatAmount, memo: 'Output VAT' })
+        }
+
+        const previousPayments = Number(order.totalPaid)
+        const amountPaidNow = amountPaid || 0
+        const balanceDue = Math.max(0, totalDue - previousPayments - amountPaidNow)
+
+        if (amountPaidNow > 0) {
+          lines.push({ accountId: cashAccountId, debit: amountPaidNow, credit: 0, memo: 'Cash collected at pickup' })
+        }
+        if (balanceDue > 0) {
+          lines.push({ accountId: arAccountId, debit: balanceDue, credit: 0, memo: 'Accounts receivable' })
+        }
+
+        if (lines.length > 0) {
+          await financeService.postJournalEntry({
+            description: `Pickup & Revenue - SO ${order.orderNumber}`,
+            sourceModule: 'SALES',
+            sourceId: order.id,
+            reference: order.orderNumber,
+            lines
+          }, tx)
+        }
+
+        // Record payment transaction if cash collected
+        if (amountPaidNow > 0) {
+          await tx.paymentTransaction.create({
+            data: {
+              salesOrderId: order.id,
+              customerId: order.customerId,
+              transactionType: 'PAYMENT',
+              paymentMethod: (PAYMENT_METHOD_MAP[paymentMethod || 'Cash'] || 'CASH') as any,
+              amount: new Prisma.Decimal(String(amountPaidNow)),
+              receivedById: userId,
+              paymentCategory: bagValue > 0 && deliveryValue > 0 ? 'BOTH' : bagValue > 0 ? 'BAG' : 'ROLL',
+              notes: `Payment at pickup`
+            }
+          })
+
+          // Update order payment status
+          const newTotalPaid = previousPayments + amountPaidNow
+          let paymentStatus = 'PENDING_PAYMENT'
+          if (newTotalPaid >= totalDue) {
+            paymentStatus = 'FULLY_PAID'
+          } else if (newTotalPaid > 0) {
+            paymentStatus = 'PARTIAL_PAYMENT'
+          }
+
+          await tx.salesOrder.update({
+            where: { id },
+            data: {
+              totalPaid: newTotalPaid,
+              balancePaid: amountPaidNow,
+              paymentStatus: paymentStatus as any
+            }
+          })
+        }
+      } catch (financeErr) {
+        logger.error({ err: financeErr, orderId: id }, 'Failed to post revenue journal at pickup - continuing anyway')
       }
 
       logger.info({ orderId: id, quantityPickedUp: quantity, totalDelivered: newDelivered, fullyDelivered, packingBags }, 'Sales order pickup recorded')
@@ -381,53 +566,60 @@ export const salesOrderService = {
 
     const invoiceNumber = await invoiceRepository.getNextInvoiceNumber()
 
-    const invoice = await invoiceRepository.create({
-      invoiceNumber,
-      salesOrderId: order.id,
-      customerId: order.customerId,
-      quantityDelivered,
-      unitPrice,
-      subtotal,
-      vatAmount,
-      totalAmount,
-      depositApplied,
-      coreCreditApplied,
-      previousPayments,
-      balanceDue,
-      coresReturned: input.coresReturned || 0,
-      packingBagsQuantity,
-      packingBagsUnitPrice,
-      packingBagsSubtotal,
-      packingBagsPaid: 0
-    })
+    let invoice
+    try {
+      invoice = await prisma.$transaction(async (tx) => {
+        const createdInvoice = await tx.invoice.create({
+          data: {
+            invoiceNumber,
+            salesOrderId: order.id,
+            customerId: order.customerId,
+            quantityDelivered,
+            unitPrice: new Prisma.Decimal(String(unitPrice)),
+            subtotal: new Prisma.Decimal(String(subtotal)),
+            vatAmount: new Prisma.Decimal(String(vatAmount)),
+            totalAmount: new Prisma.Decimal(String(totalAmount)),
+            depositApplied: new Prisma.Decimal(String(depositApplied)),
+            coreCreditApplied: new Prisma.Decimal(String(coreCreditApplied)),
+            previousPayments: new Prisma.Decimal(String(previousPayments)),
+            balanceDue: new Prisma.Decimal(String(balanceDue)),
+            coresReturned: input.coresReturned || 0,
+            packingBagsQuantity,
+            packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPrice)),
+            packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotal)),
+            packingBagsPaid: new Prisma.Decimal('0')
+          },
+          include: { customer: true, salesOrder: true }
+        })
 
-    await salesOrderRepository.update(order.id, {
-      status: 'INVOICED',
-      quantityDelivered
-    })
+        await tx.salesOrder.update({
+          where: { id: order.id },
+          data: { status: 'INVOICED', quantityDelivered: new Prisma.Decimal(String(quantityDelivered)) }
+        })
 
-    logger.info({ invoiceId: invoice.id, invoiceNumber, orderId: order.id }, 'Invoice created')
+        return createdInvoice
+      })
+    } catch (error: any) {
+      if (error.code === 'P2002' || error.code === 'P2025') {
+        throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Cannot invoice right now; accounting system temporarily unavailable.')
+      }
+      throw error
+    }
+
+    logger.info({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, orderId: order.id }, 'Invoice created')
 
     return invoice
   },
 
   async sellPackingBags(input: {
-    customerId: string
+    customerId?: string
     quantity: number
     unitPrice: number
-    paymentMethod: 'CASH' | 'BANK_TRANSFER'
+    paymentMethod: 'Cash' | 'Electronic'
     referenceNumber?: string
     notes?: string
     userId?: string
   }) {
-    const customer = await prisma.customer.findUnique({
-      where: { id: input.customerId }
-    })
-
-    if (!customer) {
-      throw new AppError(404, 'NOT_FOUND', 'Customer not found')
-    }
-
     const material = await prisma.material.findFirst({
       where: { code: 'PBAG' }
     })
@@ -438,33 +630,188 @@ export const salesOrderService = {
 
     const totalAmount = input.quantity * input.unitPrice
 
-    await inventoryService.recordPackingBagChange(
-      material.id,
-      input.quantity,
-      'SALE',
-      input.referenceNumber,
-      input.userId
-    )
+    const customerId = input.customerId || null
+    logger.info({ customerId, isNull: customerId === null, isUndefined: customerId === undefined }, 'Customer ID check')
+    
+    let customerName = 'Walk-in'
+    
+    let effectiveCustomerId: string
+    
+    if (!customerId) {
+      let walkInCustomer = await prisma.customer.findFirst({
+        where: { code: 'WALK-IN' }
+      })
+      if (!walkInCustomer) {
+        walkInCustomer = await prisma.customer.create({
+          data: {
+            name: 'Walk-in Customer',
+            code: 'WALK-IN',
+            isActive: true,
+            paymentType: 'CASH'
+          }
+        })
+      }
+      effectiveCustomerId = walkInCustomer.id
+      customerName = 'Walk-in'
+    } else {
+      effectiveCustomerId = customerId
+      const customer = await prisma.customer.findUnique({ where: { id: effectiveCustomerId } })
+      if (customer) customerName = customer.name
+    }
 
-    const payment = await paymentRepository.create({
-      customerId: input.customerId,
-      transactionType: 'PAYMENT',
-      paymentMethod: input.paymentMethod,
-      amount: new Prisma.Decimal(String(totalAmount)),
-      referenceNumber: input.referenceNumber,
-      notes: input.notes || `Packing bag sale: ${input.quantity} bags`,
-      receivedById: input.userId
-    })
+    const specsJson = {
+      materialCode: 'PBAG',
+      materialType: 'packaging',
+      quantityType: 'bags',
+      quantityInUnits: input.quantity
+    }
 
-    logger.info({ customerId: input.customerId, quantity: input.quantity, totalAmount }, 'Packing bags sold')
+    const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+    const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
+    const subtotal = input.quantity * input.unitPrice
+    const packingBagsSubtotal = subtotal
+    const vatAmount = subtotal * (vatRate / 100)
+    const totalAmountWithVat = subtotal + vatAmount
+
+    const orderNumber = await salesOrderRepository.generateUniqueOrderNumber()
+    const invoiceNumber = await invoiceRepository.getNextInvoiceNumber()
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await inventoryService.recordPackingBagChange(
+          material.id,
+          input.quantity,
+          'SALE',
+          input.referenceNumber,
+          input.userId
+        )
+
+        const order = await tx.salesOrder.create({
+          data: {
+            orderNumber,
+            customerId: effectiveCustomerId,
+            specsJson,
+            quantityOrdered: new Prisma.Decimal(String(input.quantity)),
+            quantityProduced: new Prisma.Decimal(String(input.quantity)),
+            quantityDelivered: new Prisma.Decimal(String(input.quantity)),
+            unitPrice: new Prisma.Decimal(String(input.unitPrice)),
+            totalAmount: new Prisma.Decimal(String(totalAmountWithVat)),
+            deliveryMethod: 'PICKUP' as any,
+            depositRequired: new Prisma.Decimal('0'),
+            status: 'INVOICED' as any,
+            paymentStatus: 'FULLY_PAID' as any,
+            approvedAt: new Date(),
+            completedAt: new Date(),
+            totalPaid: new Prisma.Decimal(String(totalAmountWithVat)),
+            balancePaid: new Prisma.Decimal(String(totalAmountWithVat))
+          }
+        })
+
+        const invoice = await tx.invoice.create({
+          data: {
+            invoiceNumber,
+            salesOrderId: order.id,
+            customerId: effectiveCustomerId,
+            quantityDelivered: input.quantity,
+            unitPrice: new Prisma.Decimal(String(input.unitPrice)),
+            subtotal: new Prisma.Decimal(String(subtotal)),
+            vatAmount: new Prisma.Decimal(String(vatAmount)),
+            totalAmount: new Prisma.Decimal(String(totalAmountWithVat)),
+            depositApplied: new Prisma.Decimal('0'),
+            coreCreditApplied: new Prisma.Decimal('0'),
+            previousPayments: new Prisma.Decimal('0'),
+            balanceDue: new Prisma.Decimal('0'),
+            coresReturned: 0,
+            packingBagsQuantity: input.quantity,
+            packingBagsUnitPrice: new Prisma.Decimal(String(input.unitPrice)),
+            packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotal)),
+            packingBagsPaid: new Prisma.Decimal(String(totalAmountWithVat)),
+            amountPaid: new Prisma.Decimal(String(totalAmountWithVat)),
+            status: 'PAID' as any,
+            paidAt: new Date()
+          }
+        })
+
+        if (customerId) {
+          await tx.paymentTransaction.create({
+            data: {
+              customerId,
+              transactionType: 'PAYMENT',
+              paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
+              amount: new Prisma.Decimal(String(totalAmountWithVat)),
+              referenceNumber: input.referenceNumber,
+              notes: input.notes || `Packing bag sale: ${input.quantity} bags (Invoice ${invoiceNumber})`,
+              receivedById: input.userId,
+              salesOrderId: order.id
+            }
+          })
+        }
+
+        try {
+          const arAccountId = await financeService.getAccountIdByCode('1200')
+          const packingBagRevenueId = await financeService.getAccountIdByCode('4100')
+          const vatOutputId = await financeService.getAccountIdByCode('2100')
+          const cogsId = await financeService.getAccountIdByCode('5000')
+          const packingBagInventoryId = await financeService.getAccountIdByCode('1510')
+          const cashAccountId = await financeService.getAccountIdByCode('1000')
+
+          await financeService.postJournalEntry({
+            description: `Invoice ${invoiceNumber} - Packing Bags`,
+            sourceModule: 'SALES',
+            sourceId: invoice.id,
+            reference: invoiceNumber,
+            postedById: input.userId,
+            lines: [
+              { accountId: arAccountId, debit: totalAmountWithVat, credit: 0, memo: 'Accounts Receivable' },
+              { accountId: packingBagRevenueId, debit: 0, credit: subtotal, memo: 'Packing Bags Revenue' }
+            ].concat(
+              vatAmount > 0 ? [{ accountId: vatOutputId, debit: 0, credit: vatAmount, memo: 'Output VAT' }] : []
+            )
+          }, tx)
+
+          await financeService.postJournalEntry({
+            description: `COGS - Packing Bags ${invoiceNumber}`,
+            sourceModule: 'SALES',
+            sourceId: invoice.id,
+            reference: invoiceNumber,
+            lines: [
+              { accountId: cogsId, debit: packingBagsSubtotal, credit: 0, memo: 'COGS - Packing Bags' },
+              { accountId: packingBagInventoryId, debit: 0, credit: packingBagsSubtotal, memo: 'Packing Bag Inventory' }
+            ]
+          }, tx)
+
+          await financeService.postJournalEntry({
+            description: `Payment - Packing Bags ${invoiceNumber}`,
+            sourceModule: 'PAYMENT',
+            sourceId: invoice.id,
+            reference: input.referenceNumber || invoiceNumber,
+            lines: [
+              { accountId: cashAccountId, debit: totalAmountWithVat, credit: 0, memo: 'Cash received' },
+              { accountId: arAccountId, debit: 0, credit: totalAmountWithVat, memo: 'AR cleared' }
+            ]
+          }, tx)
+        } catch (financeError: any) {
+          logger.error({ error: financeError }, 'Failed to post journal entries for packing bag sale')
+          throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Cannot complete packing bag sale; accounting system temporarily unavailable.')
+        }
+
+        logger.info({ orderId: order.id, invoiceId: invoice.id, quantity: input.quantity, totalAmount: totalAmountWithVat }, 'Packing bags sold with journals')
+      })
+    } catch (error: any) {
+      if (error.statusCode === 503) throw error
+      throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Cannot complete packing bag sale; accounting system temporarily unavailable.')
+    }
 
     return {
       success: true,
-      customer: { id: customer.id, name: customer.name },
+      order: { id: '', orderNumber },
+      invoice: { id: '', invoiceNumber },
+      customer: customerName,
       quantity: input.quantity,
       unitPrice: input.unitPrice,
-      totalAmount,
-      payment: { id: payment.id, method: payment.paymentMethod, amount: Number(payment.amount) }
+      subtotal,
+      vatAmount,
+      totalAmount: totalAmountWithVat
     }
   },
 
@@ -548,7 +895,7 @@ export const paymentService = {
       salesOrderId: input.salesOrderId,
       customerId: input.customerId!,
       transactionType: input.transactionType as any,
-      paymentMethod: input.paymentMethod as any,
+      paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
       amount: new Prisma.Decimal(String(input.amount)),
       referenceNumber: input.referenceNumber,
       notes: input.notes,
@@ -630,6 +977,77 @@ export const invoiceService = {
 
   async issueInvoice(id: string) {
     return invoiceRepository.update(id, { status: 'ISSUED' as any, issuedAt: new Date() })
+  },
+
+  async addPayment(invoiceId: string, amount: number, date: Date, reference?: string, notes?: string) {
+    const invoice = await invoiceRepository.findById(invoiceId)
+    if (!invoice) throw new AppError(404, 'NOT_FOUND', 'Invoice not found')
+
+    const newAmountPaid = (Number(invoice.amountPaid) || 0) + amount
+    const newStatus = newAmountPaid >= Number(invoice.totalAmount) ? 'PAID' : newAmountPaid > 0 ? 'PARTIAL' : invoice.status
+
+    logger.info({ invoiceId, amount, newStatus }, 'Recording payment received')
+
+    let payment
+    try {
+      payment = await prisma.$transaction(async (tx) => {
+        const createdPayment = await tx.paymentReceived.create({
+          data: {
+            invoiceId,
+            amount: new Prisma.Decimal(String(amount)),
+            date: new Date(date),
+            reference,
+            notes
+          }
+        })
+
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            amountPaid: new Prisma.Decimal(String(newAmountPaid)),
+            status: newStatus as any
+          }
+        })
+
+        try {
+          const cashAccountId = await financeService.getAccountIdByCode('1000')
+          const bankAccountId = await financeService.getAccountIdByCode('1100')
+          const arAccountId = await financeService.getAccountIdByCode('1200')
+
+          await financeService.postJournalEntry({
+            description: `Payment received - ${invoice.invoiceNumber}`,
+            sourceModule: 'PAYMENT',
+            sourceId: createdPayment.id,
+            reference: reference || `Inv ${invoice.invoiceNumber}`,
+            date: new Date(date),
+            lines: [
+              { accountId: cashAccountId, debit: amount, credit: 0, memo: 'Cash received' },
+              { accountId: arAccountId, debit: 0, credit: amount, memo: `Payment against ${invoice.invoiceNumber}` }
+            ]
+          }, tx)
+        } catch (financeError: any) {
+          logger.error({ error: financeError }, 'Failed to post journal entry for payment')
+          throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Cannot record payment right now; accounting system temporarily unavailable.')
+        }
+
+        return createdPayment
+      })
+    } catch (error: any) {
+      if (error.code === 'P2002' || error.code === 'P2025' || error.statusCode === 503) {
+        throw error
+      }
+      throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Cannot record payment right now; accounting system temporarily unavailable.')
+    }
+
+    return {
+      id: payment.id,
+      invoiceId: payment.invoiceId,
+      amount: Number(payment.amount),
+      date: payment.date,
+      reference: payment.reference || undefined,
+      notes: payment.notes || undefined,
+      createdAt: payment.createdAt
+    }
   }
 }
 
@@ -651,7 +1069,7 @@ export const coreBuybackService = {
       coresQuantity: input.coresQuantity,
       ratePerCore: input.ratePerCore,
       totalValue,
-      paymentMethod: input.paymentMethod as any,
+      paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
       paidAmount: input.paidAmount || totalValue
     })
 

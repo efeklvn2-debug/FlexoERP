@@ -6,13 +6,35 @@ const logger = createChildLogger('settings:service')
 export interface ConsumptionRates {
   coreWeight: number
   inkConsumptionRate: number
+  inkCostPerLiter: number
   ipaConsumptionRate: number
   butanolConsumptionRate: number
   coreDepositValue: number
 }
 
+export interface Settings {
+  id: string
+  coreWeight: number
+  rollWeight: number
+  inkConsumptionRate: number
+  ipaConsumptionRate: number
+  butanolConsumptionRate: number
+  inkCostPerKg: number
+  coreDepositValue: number
+  vatRate: number
+  overheadRatePerKg: number
+}
+
+export interface OverheadRateHistoryEntry {
+  id: string
+  month: Date
+  ratePerKg: number
+  createdAt: Date
+  createdBy?: string
+}
+
 export const settingsService = {
-  async getConsumptionRates(): Promise<ConsumptionRates> {
+  async getSettings(): Promise<Settings> {
     let settings = await prisma.settings.findUnique({
       where: { id: 'default' }
     })
@@ -24,42 +46,112 @@ export const settingsService = {
     }
 
     return {
+      id: settings.id,
       coreWeight: Number(settings.coreWeight),
+      rollWeight: Number(settings.rollWeight || 15),
       inkConsumptionRate: Number(settings.inkConsumptionRate),
       ipaConsumptionRate: Number(settings.ipaConsumptionRate),
       butanolConsumptionRate: Number(settings.butanolConsumptionRate),
-      coreDepositValue: Number(settings.coreDepositValue)
+      inkCostPerKg: Number(settings.inkCostPerKg || 500),
+      coreDepositValue: Number(settings.coreDepositValue),
+      vatRate: Number(settings.vatRate),
+      overheadRatePerKg: Number(settings.overheadRatePerKg || 0)
+    }
+  },
+
+  async getConsumptionRates(): Promise<ConsumptionRates> {
+    const settings = await this.getSettings()
+    return {
+      coreWeight: settings.coreWeight,
+      inkConsumptionRate: settings.inkConsumptionRate,
+      inkCostPerLiter: settings.inkCostPerKg,
+      ipaConsumptionRate: settings.ipaConsumptionRate,
+      butanolConsumptionRate: settings.butanolConsumptionRate,
+      coreDepositValue: settings.coreDepositValue
     }
   },
 
   async updateConsumptionRates(input: Partial<ConsumptionRates>): Promise<ConsumptionRates> {
-    logger.info({ rates: input }, 'Updating consumption rates')
-
+    console.log('BACKEND updateConsumptionRates RECEIVED:', JSON.stringify(input))
+    
     const settings = await prisma.settings.upsert({
       where: { id: 'default' },
       update: {
         coreWeight: input.coreWeight,
         inkConsumptionRate: input.inkConsumptionRate,
+        inkCostPerKg: input.inkCostPerLiter,
         ipaConsumptionRate: input.ipaConsumptionRate,
-        butanolConsumptionRate: input.butanolConsensationRate,
+        butanolConsumptionRate: input.butanolConsumptionRate,
         coreDepositValue: input.coreDepositValue
       },
       create: {
         id: 'default',
         coreWeight: input.coreWeight || 0.7,
         inkConsumptionRate: input.inkConsumptionRate || 0.7,
+        inkCostPerKg: input.inkCostPerLiter || 500,
         ipaConsumptionRate: input.ipaConsumptionRate || 0.1,
         butanolConsumptionRate: input.butanolConsumptionRate || 0.1,
         coreDepositValue: input.coreDepositValue || 150
       }
     })
 
-    return {
+    console.log('BACKEND updateConsumptionRates SETTINGS NOW:', settings.inkCostPerKg)
+
+    const result = {
       coreWeight: Number(settings.coreWeight),
       inkConsumptionRate: Number(settings.inkConsumptionRate),
+      inkCostPerLiter: Number(settings.inkCostPerKg || 500),
       ipaConsumptionRate: Number(settings.ipaConsumptionRate),
       butanolConsumptionRate: Number(settings.butanolConsumptionRate),
       coreDepositValue: Number(settings.coreDepositValue)
     }
+    console.log('BACKEND updateConsumptionRates RETURNING:', JSON.stringify(result))
+    return result
+  },
+
+  async getOverheadRate(): Promise<number> {
+    const settings = await this.getSettings()
+    return settings.overheadRatePerKg
+  },
+
+  async updateOverheadRate(rate: number, userId?: string): Promise<number> {
+    logger.info({ rate }, 'Updating overhead rate')
+
+    const now = new Date()
+    const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+    await prisma.overheadRateHistory.upsert({
+      where: { month: monthStr },
+      create: {
+        month: monthStr,
+        ratePerKg: rate,
+        createdBy: userId || null
+      },
+      update: {
+        ratePerKg: rate,
+        createdBy: userId || null
+      }
+    })
+
+    await prisma.settings.upsert({
+      where: { id: 'default' },
+      update: { overheadRatePerKg: rate },
+      create: { id: 'default', overheadRatePerKg: rate }
+    })
+
+    return rate
+  },
+
+  async getOverheadRateHistory(): Promise<OverheadRateHistoryEntry[]> {
+    const history = await prisma.overheadRateHistory.findMany({
+      orderBy: { month: 'desc' }
+    })
+    return history.map(h => ({
+      id: h.id,
+      month: new Date(h.month + '-01'),
+      ratePerKg: Number(h.ratePerKg),
+      createdAt: h.createdAt,
+      createdBy: h.createdBy || undefined
+    }))
   }
 }

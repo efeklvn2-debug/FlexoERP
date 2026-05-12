@@ -42,6 +42,9 @@ client.interceptors.request.use(
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    if (config.method === 'get') {
+      config.params = { ...config.params, _t: Date.now() }
+    }
     return config
   },
   (error) => Promise.reject(error)
@@ -133,9 +136,17 @@ export const api = {
 
 function handleError(error: unknown): ApiResponse<never> {
   if (axios.isAxiosError(error)) {
-    const response = error.response?.data as ApiResponse<never>
+    const data = error.response?.data as any
+    if (data?.error) {
+      return {
+        error: {
+          code: data.error.code || 'ERROR',
+          message: data.error.message || String(data.error)
+        }
+      }
+    }
     return {
-      error: response?.error || {
+      error: {
         code: 'NETWORK_ERROR',
         message: error.message
       }

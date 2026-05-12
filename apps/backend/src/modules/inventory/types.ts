@@ -3,7 +3,7 @@ export type MaterialCategory =
   | 'INK_SOLVENTS' 
   | 'PACKAGING'
 
-export type MovementType = 'IN' | 'OUT' | 'ADJUSTMENT' | 'TRANSFER'
+export type MovementType = 'IN' | 'OUT' | 'ADJUSTMENT' | 'TRANSFER' | 'INITIAL'
 
 export interface Material {
   id: string

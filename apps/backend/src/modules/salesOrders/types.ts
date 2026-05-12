@@ -2,7 +2,7 @@ export type DeliveryMethod = 'PICKUP' | 'SHIPPING'
 export type MTOOrderStatus = 'PENDING' | 'APPROVED' | 'MRP_PENDING' | 'IN_PRODUCTION' | 'READY' | 'PICKED_UP' | 'INVOICED' | 'COMPLETED' | 'CANCELLED'
 export type MTOPaymentStatus = 'PENDING_PAYMENT' | 'PARTIAL_DEPOSIT' | 'DEPOSIT_COMPLETE' | 'PARTIAL_PAYMENT' | 'FULLY_PAID' | 'OVERPAID'
 export type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'REFUND'
-export type PaymentMethod = 'CASH' | 'BANK_TRANSFER' | 'CORE_CREDIT'
+export type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'CANCELLED'
 export type PaymentType = 'CASH' | 'CREDIT'
 
@@ -97,4 +97,14 @@ export const PAYMENT_STATUS_LABELS: Record<MTOPaymentStatus, string> = {
   PARTIAL_PAYMENT: 'Partial Payment',
   FULLY_PAID: 'Fully Paid',
   OVERPAID: 'Overpaid'
+}
+
+export interface PaymentReceived {
+  id: string
+  invoiceId: string
+  amount: number
+  date: Date
+  reference?: string
+  notes?: string
+  createdAt: Date
 }

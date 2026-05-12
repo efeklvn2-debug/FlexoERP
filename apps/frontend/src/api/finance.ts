@@ -162,6 +162,7 @@ export const financeApi = {
   },
   getJournalEntryById: (id: string) => api.get<JournalEntry>(`/finance/journal/${id}`),
   postJournalEntry: (data: JournalEntryInput) => api.post<JournalEntry>('/finance/journal', data),
+  reverseJournalEntry: (id: string) => api.post<JournalEntry>(`/finance/journal/${id}/reverse`, {}),
 
   // Balances
   getAllBalances: () => api.get<AccountBalance[]>('/finance/balances'),
@@ -181,6 +182,10 @@ export const financeApi = {
     return api.get<GeneralLedger>(`/finance/ledger/${accountId}${queryStr ? '?' + queryStr : ''}`)
   },
 
+  // Deferred COGS
+  getDeferredCogsSummary: () => api.get<DeferredCogsSummary>('/finance/deferred-cogs'),
+  recognizeDeferredCogs: (orderId: string) => api.post<{ success: boolean; amount: number }>(`/finance/deferred-cogs/${orderId}/recognize`, {}),
+
   // Reports
   getDashboard: () => api.get<FinanceDashboard>('/finance/dashboard'),
   getVatSummary: (dateFrom?: string, dateTo?: string) => {
@@ -194,4 +199,20 @@ export const financeApi = {
     const query = month ? `?month=${month}` : ''
     return api.get<ProfitSummary>(`/finance/profit${query}`)
   }
+}
+
+export interface DeferredCogsOrder {
+  id: string
+  orderNumber: string
+  customerName: string
+  deferredAmount: number
+  completedAt: string
+  daysPending: number
+}
+
+export interface DeferredCogsSummary {
+  totalDeferred: number
+  pendingCount: number
+  overdueCount: number
+  orders: DeferredCogsOrder[]
 }

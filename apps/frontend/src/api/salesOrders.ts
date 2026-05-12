@@ -4,7 +4,7 @@ export type DeliveryMethod = 'PICKUP' | 'SHIPPING'
 export type MTOOrderStatus = 'PENDING' | 'APPROVED' | 'MRP_PENDING' | 'IN_PRODUCTION' | 'READY' | 'PICKED_UP' | 'INVOICED' | 'COMPLETED' | 'CANCELLED'
 export type MTOPaymentStatus = 'PENDING_PAYMENT' | 'PARTIAL_DEPOSIT' | 'DEPOSIT_COMPLETE' | 'PARTIAL_PAYMENT' | 'FULLY_PAID' | 'OVERPAID'
 export type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'REFUND'
-export type PaymentMethod = 'CASH' | 'BANK_TRANSFER' | 'CORE_CREDIT'
+export type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'CANCELLED'
 
 export interface SpecsJson {
@@ -107,6 +107,16 @@ export interface Invoice {
   createdAt: string
   customer?: Customer
   salesOrder?: SalesOrder
+  payments?: PaymentReceived[]
+}
+
+export interface PaymentReceived {
+  id: string
+  invoiceId: string
+  amount: number
+  date: string
+  reference?: string
+  notes?: string
 }
 
 export interface CoreBuyback {
@@ -193,7 +203,7 @@ export const salesOrderApi = {
   }) => api.patch<{ order: SalesOrder; productionJob: any }>(`/sales-orders/orders/${id}/start-production`, data),
   cancelOrder: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/cancel`, {}),
   markReady: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/ready`, {}),
-  recordPickup: (id: string, quantityPickedUp?: number, packingBags?: number) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { quantityPickedUp, packingBags }),
+  recordPickup: (id: string, quantityPickedUp?: number, packingBags?: number, amountPaid?: number, paymentMethod?: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { quantityPickedUp, packingBags, amountPaid, paymentMethod }),
 
   // Payments
   recordPayment: (data: {
@@ -227,6 +237,8 @@ export const salesOrderApi = {
   },
   getInvoiceById: (id: string) => api.get<Invoice>(`/sales-orders/invoices/${id}`),
   issueInvoice: (id: string) => api.patch<Invoice>(`/sales-orders/invoices/${id}/issue`, {}),
+  addPayment: (id: string, data: { amount: number; date: string; reference?: string; notes?: string }) =>
+    api.post<PaymentReceived>(`/sales-orders/invoices/${id}/payments`, data),
 
   // Core Buyback
   recordCoreBuyback: (data: {
@@ -282,18 +294,21 @@ export const salesOrderApi = {
 
   // Packing Bag Sales
   sellPackingBags: (data: {
-    customerId: string
+    customerId?: string
     quantity: number
     unitPrice: number
-    paymentMethod: 'CASH' | 'BANK_TRANSFER'
+    paymentMethod: PaymentMethod
     referenceNumber?: string
     notes?: string
   }) => api.post<{
     success: boolean
-    customer: { id: string; name: string }
+    order: { id: string; orderNumber: string }
+    invoice: { id: string; invoiceNumber: string }
+    customer: string
     quantity: number
     unitPrice: number
+    subtotal: number
+    vatAmount: number
     totalAmount: number
-    payment: { id: string; method: string; amount: number }
   }>('/sales-orders/packing-bags/sell', data)
 }

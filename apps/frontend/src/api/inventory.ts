@@ -5,7 +5,7 @@ export type MaterialCategory =
   | 'INK_SOLVENTS' 
   | 'PACKAGING'
 
-export type MovementType = 'IN' | 'OUT' | 'ADJUSTMENT' | 'TRANSFER'
+export type MovementType = 'IN' | 'OUT' | 'ADJUSTMENT' | 'TRANSFER' | 'INITIAL'
 
 export interface Material {
   id: string
@@ -87,5 +87,25 @@ export const inventoryApi = {
 
   getMaterialRolls: async (materialId: string) => {
     return api.get<any[]>(`/inventory/materials/${materialId}/rolls`)
+  },
+
+  getCoreStock: async () => {
+    return api.get<{ stock: number; movements: StockMovement[] }>('/inventory/core-stock')
+  },
+
+  getPackingBagStock: async (days = 60) => {
+    return api.get<{ materials: any[]; movements: StockMovement[] }>(`/inventory/packing-bag-stock?days=${days}`)
+  },
+
+  initializeStock: async (materials: { materialId: string; quantity: number }[], date: string) => {
+    return api.post<{ success: boolean; updated: number; movements: StockMovement[] }>('/inventory/initialize-stock', { materials, date })
+  },
+
+  getInitialStockMovements: async (limit = 100) => {
+    return api.get<StockMovement[]>(`/inventory/initial-stock-movements?limit=${limit}`)
+  },
+
+  adjustStock: async (materialId: string, newQuantity: number, reason: string) => {
+    return api.patch<Material>(`/inventory/materials/${materialId}/adjust-stock`, { newQuantity, reason })
   }
 }
