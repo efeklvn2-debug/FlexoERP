@@ -72,6 +72,7 @@ export interface PaymentMade {
   supplierInvoice?: SupplierInvoice
   amount: number
   date: Date
+  paymentMethod: 'Cash' | 'Bank Transfer'
   reference?: string
   notes?: string
   createdAt: Date

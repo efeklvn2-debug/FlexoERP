@@ -368,6 +368,7 @@ model PaymentMade {
   supplierInvoice     SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id])
   amount              Decimal         @db.Decimal(12, 2)
   date                DateTime        @default(now())
+  paymentMethod       String          @default("Cash") // Cash or Bank Transfer
   reference           String?         // Cheque number, transfer ref, etc.
   notes               String?
   createdAt           DateTime        @default(now())

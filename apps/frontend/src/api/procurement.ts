@@ -87,6 +87,7 @@ export interface PaymentMade {
   supplierInvoiceId: string
   amount: number
   date: string
+  paymentMethod: 'Cash' | 'Bank Transfer'
   reference?: string
   notes?: string
 }
@@ -150,6 +151,6 @@ export const procurementApi = {
   getSupplierInvoice: async (id: string) => api.get<SupplierInvoice>(`/procurement/supplier-invoices/${id}`),
   createSupplierInvoice: async (data: { poId: string; date: string; amount: number; invoiceNumber?: string }) =>
     api.post<SupplierInvoice>('/procurement/supplier-invoices', data),
-  addPayment: async (id: string, data: { amount: number; date: string; reference?: string; notes?: string }) =>
+  addPayment: async (id: string, data: { amount: number; date: string; paymentMethod: 'Cash' | 'Bank Transfer'; reference?: string; notes?: string }) =>
     api.post<PaymentMade>(`/procurement/supplier-invoices/${id}/payments`, data)
 }

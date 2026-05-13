@@ -252,6 +252,7 @@ export const procurementService = {
         date: p.date,
         reference: p.reference || undefined,
         notes: p.notes || undefined,
+        paymentMethod: p.paymentMethod || 'Cash',
         createdAt: p.createdAt
       })) || []
     }))
@@ -297,6 +298,7 @@ export const procurementService = {
         date: p.date,
         reference: p.reference || undefined,
         notes: p.notes || undefined,
+        paymentMethod: p.paymentMethod || 'Cash',
         createdAt: p.createdAt
       })) || []
     }
@@ -419,41 +421,70 @@ export const procurementService = {
     }
   },
 
-  async addPayment(supplierInvoiceId: string, amount: number, date: Date, reference?: string, notes?: string): Promise<PaymentMade> {
-    const inv = await prisma.supplierInvoice.findUnique({ where: { id: supplierInvoiceId } })
+  async addPayment(supplierInvoiceId: string, amount: number, date: Date, paymentMethod: 'Cash' | 'Bank Transfer', reference?: string, notes?: string): Promise<PaymentMade> {
+    const inv = await prisma.supplierInvoice.findUnique({
+      where: { id: supplierInvoiceId },
+      include: { po: true, supplier: true }
+    })
     if (!inv) throw new AppError(404, 'NOT_FOUND', 'Supplier invoice not found')
 
     const newAmountPaid = Number(inv.amountPaid) + amount
     const newStatus = newAmountPaid >= Number(inv.amount) ? 'PAID' : newAmountPaid > 0 ? 'PARTIAL' : 'PENDING'
 
-    logger.info({ supplierInvoiceId, amount, newStatus }, 'Recording payment to supplier invoice')
+    logger.info({ supplierInvoiceId, amount, newStatus, paymentMethod }, 'Recording payment to supplier invoice')
 
-    const payment = await prisma.paymentMade.create({
-      data: {
-        supplierInvoiceId,
-        amount,
-        date: new Date(date),
-        reference,
-        notes
-      }
-    })
+    const result = await prisma.$transaction(async (tx) => {
+      const payment = await tx.paymentMade.create({
+        data: {
+          supplierInvoiceId,
+          amount,
+          date: new Date(date),
+          reference,
+          notes,
+          paymentMethod
+        }
+      })
 
-    await prisma.supplierInvoice.update({
-      where: { id: supplierInvoiceId },
-      data: {
-        amountPaid: newAmountPaid,
-        status: newStatus
+      await tx.supplierInvoice.update({
+        where: { id: supplierInvoiceId },
+        data: {
+          amountPaid: newAmountPaid,
+          status: newStatus
+        }
+      })
+
+      try {
+        const cashAccountCode = paymentMethod === 'Cash' ? '1000' : '1100'
+        const apAccountId = await financeService.getAccountIdByCode('2000')
+        const cashAccountId = await financeService.getAccountIdByCode(cashAccountCode)
+
+        await financeService.postJournalEntry({
+          description: `Payment for ${inv.invoiceNumber} - ${inv.po?.supplier || ''}`,
+          sourceModule: 'PROCUREMENT',
+          sourceId: inv.id,
+          reference: reference || inv.invoiceNumber,
+          date: new Date(date),
+          lines: [
+            { accountId: apAccountId, debit: amount, credit: 0, memo: `Payment to supplier ${inv.invoiceNumber}` },
+            { accountId: cashAccountId, debit: 0, credit: amount, memo: paymentMethod === 'Cash' ? 'Cash payment' : 'Bank transfer' }
+          ]
+        }, tx)
+      } catch (jeErr) {
+        logger.error({ err: jeErr }, 'Failed to post payment journal entry - continuing')
       }
+
+      return payment
     })
 
     return {
-      id: payment.id,
-      supplierInvoiceId: payment.supplierInvoiceId,
-      amount: Number(payment.amount),
-      date: payment.date,
-      reference: payment.reference || undefined,
-      notes: payment.notes || undefined,
-      createdAt: payment.createdAt
+      id: result.id,
+      supplierInvoiceId: result.supplierInvoiceId,
+      amount: Number(result.amount),
+      date: result.date,
+      reference: result.reference || undefined,
+      notes: result.notes || undefined,
+      paymentMethod: (result.paymentMethod || 'Cash') as 'Cash' | 'Bank Transfer',
+      createdAt: result.createdAt
     }
   }
 }
