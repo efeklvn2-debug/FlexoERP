@@ -308,10 +308,20 @@ export const procurementService = {
     const po = await procurementRepository.findPOById(poId)
     if (!po) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
 
-    const customer = await prisma.customer.findFirst({
+    let customer = await prisma.customer.findFirst({
       where: { name: po.supplier }
     })
-    if (!customer) throw new AppError(400, 'INVALID_OPERATION', 'Supplier not found as customer in system')
+    if (!customer) {
+      const code = 'SUP-' + po.supplier.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase().slice(0, 20)
+      customer = await prisma.customer.create({
+        data: {
+          name: po.supplier,
+          code,
+          isActive: true
+        }
+      })
+      logger.info({ supplierName: po.supplier, code }, 'Auto-created customer record for supplier')
+    }
 
     const finalInvoiceNumber = invoiceNumber || await generateSupplierInvoiceNumber()
     logger.info({ poId, invoiceNumber: finalInvoiceNumber, amount }, 'Creating supplier invoice')

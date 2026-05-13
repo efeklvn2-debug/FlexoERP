@@ -539,7 +539,7 @@ export function ProcurementPage() {
                         </>
                       )}
                       {po.status === 'RECEIVED' && (
-                        <button onClick={() => openInvoiceModal(po)} className="text-green-600 hover:text-green-800 text-sm font-medium">Create Invoice</button>
+                        <button onClick={() => openInvoiceModal(po)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">Create Invoice</button>
                       )}
                     </td>
                   </tr>
@@ -948,6 +948,9 @@ export function ProcurementPage() {
                     <button type="button" onClick={() => { setShowViewPOModal(false); openReceiveModal(selectedPO) }} className="px-4 py-2 bg-green-600 text-white rounded-lg">Receive</button>
                     <button type="button" onClick={() => { setShowViewPOModal(false); handleDeletePO(selectedPO.id) }} className="px-4 py-2 bg-red-600 text-white rounded-lg">Delete</button>
                   </>
+                )}
+                {selectedPO.status === 'RECEIVED' && (
+                  <button type="button" onClick={() => { setShowViewPOModal(false); openInvoiceModal(selectedPO) }} className="px-4 py-2 bg-blue-600 text-white rounded-lg">Create Invoice</button>
                 )}
               </div>
             </div>
