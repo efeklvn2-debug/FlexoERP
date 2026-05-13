@@ -499,7 +499,7 @@ export const salesOrderService = {
           // Update order payment status
           const newTotalPaid = previousPayments + amountPaidNow
           let paymentStatus = 'PENDING_PAYMENT'
-          if (newTotalPaid >= totalDue) {
+          if (newTotalPaid >= totalRevenue) {
             paymentStatus = 'FULLY_PAID'
           } else if (newTotalPaid > 0) {
             paymentStatus = 'PARTIAL_PAYMENT'
@@ -513,6 +513,48 @@ export const salesOrderService = {
               paymentStatus: paymentStatus as any
             }
           })
+
+          // Auto-create invoice and complete order if fully paid at pickup
+          if (paymentStatus === 'FULLY_PAID') {
+            const autoInvoiceNumber = await invoiceRepository.getNextInvoiceNumber()
+
+            const invoiceSubtotal = quantity * Number(order.unitPrice)
+            const invoicePackingBagsQty = packingBags || 0
+            const invoicePackingBagsSubtotal = bagTotalAmount
+            const invoiceVatAmount = invoiceSubtotal * (vatRate / 100)
+            const invoiceTotal = invoiceSubtotal + invoicePackingBagsSubtotal + invoiceVatAmount
+            const invoiceDepositApplied = Number(order.depositPaid)
+            const invoiceCoreCreditApplied = Number(order.coreCreditApplied)
+            const invoicePreviousPayments = newTotalPaid
+            const invoiceBalanceDue = Math.max(0, invoiceTotal - invoiceDepositApplied - invoiceCoreCreditApplied - invoicePreviousPayments)
+
+            await tx.invoice.create({
+              data: {
+                invoiceNumber: autoInvoiceNumber,
+                salesOrderId: order.id,
+                customerId: order.customerId,
+                quantityDelivered,
+                unitPrice: new Prisma.Decimal(String(Number(order.unitPrice))),
+                subtotal: new Prisma.Decimal(String(invoiceSubtotal)),
+                vatAmount: new Prisma.Decimal(String(invoiceVatAmount)),
+                totalAmount: new Prisma.Decimal(String(invoiceTotal)),
+                depositApplied: new Prisma.Decimal(String(invoiceDepositApplied)),
+                coreCreditApplied: new Prisma.Decimal(String(invoiceCoreCreditApplied)),
+                previousPayments: new Prisma.Decimal(String(invoicePreviousPayments)),
+                balanceDue: new Prisma.Decimal(String(invoiceBalanceDue)),
+                coresReturned: 0,
+                packingBagsQuantity: invoicePackingBagsQty,
+                packingBagsSubtotal: new Prisma.Decimal(String(invoicePackingBagsSubtotal))
+              }
+            })
+
+            await tx.salesOrder.update({
+              where: { id },
+              data: { status: 'COMPLETED' }
+            })
+
+            logger.info({ orderId: id, invoiceNumber: autoInvoiceNumber }, 'Invoice auto-created and order completed on full payment at pickup')
+          }
         }
       } catch (financeErr) {
         logger.error({ err: financeErr, orderId: id }, 'Failed to post revenue journal at pickup - continuing anyway')
