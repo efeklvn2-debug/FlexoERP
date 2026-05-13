@@ -19,6 +19,14 @@ export interface Settings {
   coreDepositValue: number
   vatRate: number
   overheadRatePerKg: number
+  businessTin?: string
+  businessAddress?: string
+}
+
+export interface VatSettings {
+  vatRate: number
+  businessTin?: string
+  businessAddress?: string
 }
 
 export interface OverheadRateHistoryEntry {
@@ -52,5 +60,9 @@ export const settingsApi = {
 
   getOverheadRateHistory: async () => {
     return api.get<OverheadRateHistoryEntry[]>('/settings/overhead-rate-history')
+  },
+
+  updateVatSettings: async (data: Partial<VatSettings>) => {
+    return api.patch<Settings>('/settings/vat', data)
   }
 }

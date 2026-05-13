@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { salesOrderRepository, paymentRepository, invoiceRepository, coreBuybackRepository } from './repository'
+import { decomposeInclusive } from '../../lib/vat-utils'
 import { inventoryService } from '../inventory/service'
 import { financeService } from '../finance/service'
 import type { SpecsJson, SalesOrderInput, SalesOrderUpdateInput, PaymentInput, CoreBuybackInput } from './types'
@@ -439,8 +440,10 @@ export const salesOrderService = {
         const deliveryValue = quantity * Number(order.unitPrice)
         const bagValue = bagTotalAmount
         const totalRevenue = deliveryValue + bagValue
-        const vatAmount = totalRevenue * (vatRate / 100)
-        const totalDue = totalRevenue + vatAmount
+
+        const { exclusive: deliveryExclusive, vat: deliveryVat } = decomposeInclusive(deliveryValue, vatRate)
+        const { exclusive: bagExclusive, vat: bagVat } = decomposeInclusive(bagValue, vatRate)
+        const totalVat = deliveryVat + bagVat
 
         const cashAccountId = await financeService.getAccountIdByCode('1000')
         const arAccountId = await financeService.getAccountIdByCode('1200')
@@ -450,19 +453,19 @@ export const salesOrderService = {
 
         const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = []
 
-        if (deliveryValue > 0) {
-          lines.push({ accountId: salesRevenueId, debit: 0, credit: deliveryValue, memo: 'Roll revenue' })
+        if (deliveryExclusive > 0) {
+          lines.push({ accountId: salesRevenueId, debit: 0, credit: deliveryExclusive, memo: 'Roll revenue (excl. VAT)' })
         }
-        if (bagValue > 0) {
-          lines.push({ accountId: packingBagRevenueId, debit: 0, credit: bagValue, memo: 'Packing bags revenue' })
+        if (bagExclusive > 0) {
+          lines.push({ accountId: packingBagRevenueId, debit: 0, credit: bagExclusive, memo: 'Packing bags revenue (excl. VAT)' })
         }
-        if (vatAmount > 0) {
-          lines.push({ accountId: vatOutputId, debit: 0, credit: vatAmount, memo: 'Output VAT' })
+        if (totalVat > 0) {
+          lines.push({ accountId: vatOutputId, debit: 0, credit: totalVat, memo: 'Output VAT' })
         }
 
         const previousPayments = Number(order.totalPaid)
         const amountPaidNow = amountPaid || 0
-        const balanceDue = Math.max(0, totalDue - previousPayments - amountPaidNow)
+        const balanceDue = Math.max(0, totalRevenue - previousPayments - amountPaidNow)
 
         if (amountPaidNow > 0) {
           lines.push({ accountId: cashAccountId, debit: amountPaidNow, credit: 0, memo: 'Cash collected at pickup' })
@@ -518,33 +521,41 @@ export const salesOrderService = {
           if (paymentStatus === 'FULLY_PAID') {
             const autoInvoiceNumber = await invoiceRepository.getNextInvoiceNumber()
 
-            const invoiceSubtotal = quantity * Number(order.unitPrice)
+            const invoiceRollInclusive = quantity * Number(order.unitPrice)
             const invoicePackingBagsQty = packingBags || 0
-            const invoicePackingBagsSubtotal = bagTotalAmount
-            const invoiceVatAmount = invoiceSubtotal * (vatRate / 100)
-            const invoiceTotal = invoiceSubtotal + invoicePackingBagsSubtotal + invoiceVatAmount
+            const invoiceBagInclusive = bagTotalAmount
+            const invoiceTotalInclusive = invoiceRollInclusive + invoiceBagInclusive
+            const { exclusive: invoiceRollExclusive, vat: invoiceRollVat } = decomposeInclusive(invoiceRollInclusive, vatRate)
+            const { exclusive: invoiceBagExclusive, vat: invoiceBagVat } = decomposeInclusive(invoiceBagInclusive, vatRate)
+            const invoiceVatAmount = invoiceRollVat + invoiceBagVat
+            const invoiceSubtotalExcl = invoiceRollExclusive + invoiceBagExclusive
             const invoiceDepositApplied = Number(order.depositPaid)
             const invoiceCoreCreditApplied = Number(order.coreCreditApplied)
             const invoicePreviousPayments = newTotalPaid
-            const invoiceBalanceDue = Math.max(0, invoiceTotal - invoiceDepositApplied - invoiceCoreCreditApplied - invoicePreviousPayments)
+            const invoiceBalanceDue = Math.max(0, invoiceTotalInclusive - invoiceDepositApplied - invoiceCoreCreditApplied - invoicePreviousPayments)
+
+            const packingBagsUnitPriceVal = bagTotalAmount > 0 && (packingBags || 0) > 0
+              ? bagTotalAmount / (packingBags || 1)
+              : 0
 
             await tx.invoice.create({
               data: {
                 invoiceNumber: autoInvoiceNumber,
                 salesOrderId: order.id,
                 customerId: order.customerId,
-                quantityDelivered,
+                quantityDelivered: quantity,
                 unitPrice: new Prisma.Decimal(String(Number(order.unitPrice))),
-                subtotal: new Prisma.Decimal(String(invoiceSubtotal)),
+                subtotal: new Prisma.Decimal(String(invoiceRollExclusive)),
                 vatAmount: new Prisma.Decimal(String(invoiceVatAmount)),
-                totalAmount: new Prisma.Decimal(String(invoiceTotal)),
+                totalAmount: new Prisma.Decimal(String(invoiceTotalInclusive)),
                 depositApplied: new Prisma.Decimal(String(invoiceDepositApplied)),
                 coreCreditApplied: new Prisma.Decimal(String(invoiceCoreCreditApplied)),
                 previousPayments: new Prisma.Decimal(String(invoicePreviousPayments)),
                 balanceDue: new Prisma.Decimal(String(invoiceBalanceDue)),
                 coresReturned: 0,
-                packingBagsQuantity: invoicePackingBagsQty,
-                packingBagsSubtotal: new Prisma.Decimal(String(invoicePackingBagsSubtotal))
+                packingBagsQuantity: invoicePackingBagsQty || 0,
+                packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPriceVal)),
+                packingBagsSubtotal: new Prisma.Decimal(String(invoiceBagExclusive))
               }
             })
 
@@ -585,6 +596,7 @@ export const salesOrderService = {
     const quantityDelivered = input.quantityDelivered || Number(order.quantityDelivered) || Number(order.quantityOrdered)
     const unitPrice = Number(order.unitPrice)
     const subtotal = quantityDelivered * unitPrice
+    const { exclusive: invoiceRollExcl } = decomposeInclusive(subtotal, vatRate)
     
     const packingBagsQuantity = Number(order.packingBagsQuantity) || 0
     const packingBagsMaterial = await prisma.material.findFirst({ where: { code: 'PBAG' } })
@@ -596,10 +608,14 @@ export const salesOrderService = {
       })
       packingBagsUnitPrice = priceList?.pricePerPack ? Number(priceList.pricePerPack) : 0
     }
-    const packingBagsSubtotal = packingBagsQuantity * packingBagsUnitPrice
+    const packingBagsInclusive = packingBagsQuantity * packingBagsUnitPrice
     
-    const vatAmount = subtotal * (vatRate / 100)
-    const totalAmount = subtotal + packingBagsSubtotal + vatAmount
+    const { exclusive: rollExcl, vat: rollVat } = decomposeInclusive(subtotal, vatRate)
+    const { exclusive: bagsExcl, vat: bagsVat } = decomposeInclusive(packingBagsInclusive, vatRate)
+    const vatAmount = rollVat + bagsVat
+    const invoiceSubtotalExcl = rollExcl
+    const packingBagsSubtotalExcl = bagsExcl
+    const totalAmount = subtotal + packingBagsInclusive
 
     const depositApplied = Number(order.depositPaid)
     const coreCreditApplied = Number(order.coreCreditApplied)
@@ -618,7 +634,7 @@ export const salesOrderService = {
             customerId: order.customerId,
             quantityDelivered,
             unitPrice: new Prisma.Decimal(String(unitPrice)),
-            subtotal: new Prisma.Decimal(String(subtotal)),
+            subtotal: new Prisma.Decimal(String(invoiceSubtotalExcl)),
             vatAmount: new Prisma.Decimal(String(vatAmount)),
             totalAmount: new Prisma.Decimal(String(totalAmount)),
             depositApplied: new Prisma.Decimal(String(depositApplied)),
@@ -628,7 +644,7 @@ export const salesOrderService = {
             coresReturned: input.coresReturned || 0,
             packingBagsQuantity,
             packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPrice)),
-            packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotal)),
+            packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotalExcl)),
             packingBagsPaid: new Prisma.Decimal('0')
           },
           include: { customer: true, salesOrder: true }
@@ -711,9 +727,9 @@ export const salesOrderService = {
     const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
     const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
     const subtotal = input.quantity * input.unitPrice
-    const packingBagsSubtotal = subtotal
-    const vatAmount = subtotal * (vatRate / 100)
-    const totalAmountWithVat = subtotal + vatAmount
+    const { exclusive: bagsExclusive, vat: vatAmount } = decomposeInclusive(subtotal, vatRate)
+    const packingBagsSubtotal = bagsExclusive
+    const totalAmountWithVat = subtotal
 
     const orderNumber = await salesOrderRepository.generateUniqueOrderNumber()
     const invoiceNumber = await invoiceRepository.getNextInvoiceNumber()

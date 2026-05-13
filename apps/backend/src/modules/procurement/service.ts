@@ -5,6 +5,8 @@ import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { prisma } from '../../database'
 import { inventoryService } from '../inventory/service'
+import { financeService } from '../finance/service'
+import { decomposeInclusive } from '../../lib/vat-utils'
 
 const logger = createChildLogger('procurement:service')
 
@@ -312,21 +314,82 @@ export const procurementService = {
     const finalInvoiceNumber = invoiceNumber || await generateSupplierInvoiceNumber()
     logger.info({ poId, invoiceNumber: finalInvoiceNumber, amount }, 'Creating supplier invoice')
 
-    const inv = await prisma.supplierInvoice.create({
-      data: {
-        poId,
-        supplierId: customer.id,
-        invoiceNumber: finalInvoiceNumber,
-        date: new Date(date),
-        amount,
-        status: 'PENDING',
-        amountPaid: 0
-      },
-      include: {
-        po: true,
-        supplier: true,
-        payments: true
+    const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+    const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
+    const { exclusive: totalExclusive, vat: totalVat } = decomposeInclusive(amount, vatRate)
+
+    let rawMaterialExclusive = totalExclusive
+    let packagingExclusive = 0
+    const poItems = po.items || []
+    if (poItems.length > 0) {
+      let rawTotal = 0
+      let packagingTotal = 0
+      for (const item of poItems) {
+        const material = await prisma.material.findUnique({ where: { id: item.materialId } })
+        const itemTotal = Number(item.totalWeight) * Number(item.unitPrice)
+        if (material?.category === 'PACKAGING') {
+          packagingTotal += itemTotal
+        } else {
+          rawTotal += itemTotal
+        }
       }
+      const grandTotal = rawTotal + packagingTotal
+      if (grandTotal > 0) {
+        rawMaterialExclusive = totalExclusive * (rawTotal / grandTotal)
+        packagingExclusive = totalExclusive * (packagingTotal / grandTotal)
+      }
+    }
+
+    const inv = await prisma.$transaction(async (tx) => {
+      const createdInvoice = await tx.supplierInvoice.create({
+        data: {
+          poId,
+          supplierId: customer.id,
+          invoiceNumber: finalInvoiceNumber,
+          date: new Date(date),
+          amount,
+          status: 'PENDING',
+          amountPaid: 0
+        },
+        include: {
+          po: true,
+          supplier: true,
+          payments: true
+        }
+      })
+
+      try {
+        const rawMaterialAccountId = await financeService.getAccountIdByCode('1300')
+        const packagingAccountId = await financeService.getAccountIdByCode('1510')
+        const vatInputId = await financeService.getAccountIdByCode('1400')
+        const apAccountId = await financeService.getAccountIdByCode('2000')
+
+        const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = []
+
+        if (rawMaterialExclusive > 0) {
+          lines.push({ accountId: rawMaterialAccountId, debit: rawMaterialExclusive, credit: 0, memo: 'Raw material inventory (excl. VAT)' })
+        }
+        if (packagingExclusive > 0) {
+          lines.push({ accountId: packagingAccountId, debit: packagingExclusive, credit: 0, memo: 'Packaging inventory (excl. VAT)' })
+        }
+        if (totalVat > 0) {
+          lines.push({ accountId: vatInputId, debit: totalVat, credit: 0, memo: 'Input VAT on purchase' })
+        }
+        lines.push({ accountId: apAccountId, debit: 0, credit: amount, memo: `Supplier invoice ${finalInvoiceNumber}` })
+
+        await financeService.postJournalEntry({
+          description: `Supplier Invoice ${finalInvoiceNumber} - ${po.supplier}`,
+          sourceModule: 'PROCUREMENT',
+          sourceId: createdInvoice.id,
+          reference: finalInvoiceNumber,
+          date: new Date(date),
+          lines
+        }, tx)
+      } catch (financeErr) {
+        logger.error({ err: financeErr }, 'Failed to post procurement journal entry - continuing')
+      }
+
+      return createdInvoice
     })
 
     return {

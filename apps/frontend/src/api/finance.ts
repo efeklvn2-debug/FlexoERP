@@ -88,10 +88,18 @@ export interface FinanceDashboard {
   profitSnapshot: ProfitSnapshot
 }
 
+export interface VatPeriod {
+  month: string
+  outputVat: number
+  inputVat: number
+  vatPayable: number
+}
+
 export interface VatSummary {
   outputVat: number
   inputVat: number
   vatPayable: number
+  periods: VatPeriod[]
 }
 
 export interface ProfitSummary {

@@ -69,6 +69,8 @@ export function SalesOrdersPage() {
   const [showPickupModal, setShowPickupModal] = useState(false)
   const [showInvoiceModal, setShowInvoiceModal] = useState(false)
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(null)
+  const [businessTin, setBusinessTin] = useState('')
+  const [businessAddress, setBusinessAddress] = useState('')
   const [productionOrder, setProductionOrder] = useState<SalesOrder | null>(null)
   const [availableRolls, setAvailableRolls] = useState<ParentRoll[]>([])
   const [loadingRolls, setLoadingRolls] = useState(false)
@@ -438,10 +440,18 @@ export function SalesOrdersPage() {
 
   const handleCreateInvoice = async (orderId: string) => {
     try {
-      const res = await salesOrderApi.createInvoice({ salesOrderId: orderId })
+      const [res, settingsRes] = await Promise.all([
+        salesOrderApi.createInvoice({ salesOrderId: orderId }),
+        settingsApi.getSettings()
+      ])
       if (res.error) { setError(res.error.message); return }
       const invoice = (res.data as any)?.data || res.data
       if (invoice) {
+        const settingsData = (settingsRes.data as any)?.data ?? settingsRes.data
+        if (settingsData) {
+          setBusinessTin(settingsData.businessTin || '')
+          setBusinessAddress(settingsData.businessAddress || '')
+        }
         setCurrentInvoice(invoice)
         setShowInvoiceModal(true)
         loadInvoices()
@@ -1821,6 +1831,7 @@ export function SalesOrdersPage() {
                   <div>
                     <p className="text-xs text-slate-500">Invoice #</p>
                     <p className="font-medium">{currentInvoice.invoiceNumber}</p>
+                    {businessTin && <p className="text-xs text-slate-500 mt-1">TIN: {businessTin}</p>}
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-slate-500">Date</p>
@@ -1833,6 +1844,13 @@ export function SalesOrdersPage() {
                   <p className="font-medium">{currentInvoice.customer?.name || currentInvoice.salesOrder?.customer?.name || 'N/A'}</p>
                 </div>
 
+                {businessAddress && (
+                  <div className="p-4 bg-slate-50 rounded-xl">
+                    <p className="text-xs text-slate-500">Business Address</p>
+                    <p className="text-sm whitespace-pre-wrap">{businessAddress}</p>
+                  </div>
+                )}
+
                 <div className="border rounded-xl overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-100">
@@ -1840,7 +1858,7 @@ export function SalesOrdersPage() {
                         <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Item</th>
                         <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Qty</th>
                         <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Unit</th>
-                        <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Amount (excl. VAT)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -1861,7 +1879,7 @@ export function SalesOrdersPage() {
                     </tbody>
                     <tfoot className="bg-slate-50">
                       <tr>
-                        <td colSpan={3} className="px-4 py-2 text-right font-medium">Subtotal:</td>
+                        <td colSpan={3} className="px-4 py-2 text-right font-medium">Subtotal (excl. VAT):</td>
                         <td className="px-4 py-2 text-right">₦{(Number(currentInvoice.subtotal) + Number(currentInvoice.packingBagsSubtotal || 0)).toLocaleString()}</td>
                       </tr>
                       {Number(currentInvoice.vatAmount) > 0 && (
@@ -1871,11 +1889,27 @@ export function SalesOrdersPage() {
                         </tr>
                       )}
                       <tr className="font-bold">
-                        <td colSpan={3} className="px-4 py-2 text-right">Total:</td>
+                        <td colSpan={3} className="px-4 py-2 text-right">Total (incl. VAT):</td>
                         <td className="px-4 py-2 text-right">₦{(Number(currentInvoice.totalAmount) || 0).toLocaleString()}</td>
                       </tr>
+                      <tr className="border-t">
+                        <td colSpan={3} className="px-4 py-2 text-right font-medium">Deposit Applied:</td>
+                        <td className="px-4 py-2 text-right">-₦{(Number(currentInvoice.depositApplied) || 0).toLocaleString()}</td>
+                      </tr>
+                      {Number(currentInvoice.coreCreditApplied) > 0 && (
+                        <tr>
+                          <td colSpan={3} className="px-4 py-2 text-right font-medium">Core Credit:</td>
+                          <td className="px-4 py-2 text-right">-₦{(Number(currentInvoice.coreCreditApplied) || 0).toLocaleString()}</td>
+                        </tr>
+                      )}
+                      {Number(currentInvoice.previousPayments) > 0 && (
+                        <tr>
+                          <td colSpan={3} className="px-4 py-2 text-right font-medium">Previous Payments:</td>
+                          <td className="px-4 py-2 text-right">-₦{(Number(currentInvoice.previousPayments) || 0).toLocaleString()}</td>
+                        </tr>
+                      )}
                       {Number(currentInvoice.balanceDue) > 0 && (
-                        <tr className="text-red-600">
+                        <tr className="text-red-600 font-bold">
                           <td colSpan={3} className="px-4 py-2 text-right">Balance Due:</td>
                           <td className="px-4 py-2 text-right">₦{(Number(currentInvoice.balanceDue) || 0).toLocaleString()}</td>
                         </tr>

@@ -23,6 +23,14 @@ export interface Settings {
   coreDepositValue: number
   vatRate: number
   overheadRatePerKg: number
+  businessTin?: string
+  businessAddress?: string
+}
+
+export interface VatSettings {
+  vatRate: number
+  businessTin?: string
+  businessAddress?: string
 }
 
 export interface OverheadRateHistoryEntry {
@@ -55,7 +63,9 @@ export const settingsService = {
       inkCostPerKg: Number(settings.inkCostPerKg || 500),
       coreDepositValue: Number(settings.coreDepositValue),
       vatRate: Number(settings.vatRate),
-      overheadRatePerKg: Number(settings.overheadRatePerKg || 0)
+      overheadRatePerKg: Number(settings.overheadRatePerKg || 0),
+      businessTin: settings.businessTin || undefined,
+      businessAddress: settings.businessAddress || undefined
     }
   },
 
@@ -140,6 +150,24 @@ export const settingsService = {
     })
 
     return rate
+  },
+
+  async updateVatSettings(input: Partial<VatSettings>): Promise<Settings> {
+    const settings = await prisma.settings.upsert({
+      where: { id: 'default' },
+      update: {
+        vatRate: input.vatRate,
+        businessTin: input.businessTin,
+        businessAddress: input.businessAddress
+      },
+      create: {
+        id: 'default',
+        vatRate: input.vatRate || 7.5,
+        businessTin: input.businessTin,
+        businessAddress: input.businessAddress
+      }
+    })
+    return this.getSettings()
   },
 
   async getOverheadRateHistory(): Promise<OverheadRateHistoryEntry[]> {

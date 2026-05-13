@@ -276,10 +276,31 @@ export const financeService = {
     const outputVat = await financeRepository.getOutputVat(from, to)
     const inputVat = await financeRepository.getInputVat(from, to)
 
+    const periods: { month: string; outputVat: number; inputVat: number; vatPayable: number }[] = []
+    const startYear = from.getFullYear()
+    const startMonth = from.getMonth()
+    const endYear = to.getFullYear()
+    const endMonth = to.getMonth()
+    let cursor = new Date(startYear, startMonth, 1)
+    while (cursor <= to) {
+      const periodStart = new Date(cursor)
+      const periodEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59)
+      const monthOutput = await financeRepository.getOutputVat(periodStart, periodEnd)
+      const monthInput = await financeRepository.getInputVat(periodStart, periodEnd)
+      periods.push({
+        month: `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`,
+        outputVat: monthOutput,
+        inputVat: monthInput,
+        vatPayable: monthOutput - monthInput
+      })
+      cursor.setMonth(cursor.getMonth() + 1)
+    }
+
     return {
       outputVat,
       inputVat,
-      vatPayable: outputVat - inputVat
+      vatPayable: outputVat - inputVat,
+      periods
     }
   },
 
@@ -383,7 +404,9 @@ export const financeService = {
       { code: '1300', name: 'Raw Material Inventory', type: 'ASSET', description: 'Plain rolls, ink, solvents' },
       { code: '1310', name: 'Work in Progress', type: 'ASSET', description: 'Materials in production' },
       { code: '1320', name: 'Finished Goods', type: 'ASSET', description: 'Printed rolls ready for sale' },
+      { code: '1330', name: 'Deferred Cost of Goods Sold', type: 'ASSET', description: 'Cost of completed jobs awaiting delivery' },
       { code: '1400', name: 'VAT Input', type: 'ASSET', isVatEnabled: true, description: 'VAT paid on purchases' },
+      { code: '1510', name: 'Packing Bag Inventory', type: 'ASSET', description: 'Packing bags held for resale' },
 
       { code: '2000', name: 'Accounts Payable', type: 'LIABILITY', description: 'Money owed to suppliers' },
       { code: '2100', name: 'VAT Output', type: 'LIABILITY', isVatEnabled: true, description: 'VAT collected on sales' },

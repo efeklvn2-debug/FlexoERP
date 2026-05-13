@@ -437,6 +437,38 @@ export function FinancePage() {
                     </div>
                   </div>
                 </div>
+
+                {vatSummary.periods && vatSummary.periods.length > 0 && (
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-200">
+                      <h2 className="text-lg font-semibold text-slate-900">Monthly VAT Breakdown</h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Period</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Output VAT</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Input VAT</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">VAT Payable</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {vatSummary.periods.map(p => (
+                            <tr key={p.month} className="hover:bg-slate-50">
+                              <td className="px-6 py-4 text-sm font-medium text-slate-900">{p.month}</td>
+                              <td className="px-6 py-4 text-sm text-right text-purple-700">{formatCurrency(p.outputVat)}</td>
+                              <td className="px-6 py-4 text-sm text-right text-blue-700">{formatCurrency(p.inputVat)}</td>
+                              <td className={`px-6 py-4 text-sm text-right font-medium ${p.vatPayable >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                {formatCurrency(p.vatPayable)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

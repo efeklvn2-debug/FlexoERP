@@ -4,7 +4,7 @@ import { pricingApi, MaterialWithPrice } from '../api/pricing'
 import { inventoryApi, MaterialCategory } from '../api/inventory'
 import { Layout } from '../components/Layout'
 
-type SettingsTab = 'consumption' | 'core-deposits' | 'products' | 'overhead'
+type SettingsTab = 'consumption' | 'core-deposits' | 'products' | 'overhead' | 'vat'
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('products')
@@ -18,6 +18,9 @@ export function SettingsPage() {
   })
   const [overheadRate, setOverheadRate] = useState(0)
   const [overheadHistory, setOverheadHistory] = useState<{month: string; ratePerKg: number; createdAt: Date}[]>([])
+  const [vatRate, setVatRate] = useState(7.5)
+  const [businessTin, setBusinessTin] = useState('')
+  const [businessAddress, setBusinessAddress] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -52,23 +55,26 @@ useEffect(() => {
 
   const loadOverheadRate = async () => {
     try {
-      const [rateRes, historyRes] = await Promise.all([
+      const [rateRes, historyRes, settingsRes] = await Promise.all([
         settingsApi.getOverheadRate(),
-        settingsApi.getOverheadRateHistory()
+        settingsApi.getOverheadRateHistory(),
+        settingsApi.getSettings()
       ])
-      
-      const raw = rateRes.data
-      const rate = (raw as any)?.data ?? raw ?? 0
+      const rate = (rateRes.data as any)?.data ?? rateRes.data
       console.log('loadOverheadRate:', rate)
       setOverheadRate(typeof rate === 'number' ? rate : 0)
-      
-      const historyRaw = historyRes.data
-      const historyData = (historyRaw as any)?.data ?? historyRaw ?? []
+      const historyData = (historyRes.data as any)?.data ?? historyRes.data ?? []
       setOverheadHistory(historyData.map((h: any) => ({
         month: h.month,
-        ratePerKg: h.ratePerKg,
+        ratePerKg: Number(h.ratePerKg),
         createdAt: new Date(h.createdAt)
       })))
+      const settingsData = (settingsRes.data as any)?.data ?? settingsRes.data
+      if (settingsData) {
+        setVatRate(Number(settingsData.vatRate) || 7.5)
+        setBusinessTin(settingsData.businessTin || '')
+        setBusinessAddress(settingsData.businessAddress || '')
+      }
     } catch (err) {
       console.error('Failed to load overhead rate:', err)
     }
@@ -262,6 +268,14 @@ const loadSettings = async () => {
             }`}
           >
             Overhead
+          </button>
+          <button
+            onClick={() => setActiveTab('vat')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'vat' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            VAT
           </button>
         </div>
 
@@ -465,6 +479,82 @@ const loadSettings = async () => {
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {activeTab === 'vat' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">VAT Settings</h2>
+            <p className="text-sm text-slate-500 mb-6">
+              Configure VAT rate and business details. Prices are VAT-inclusive — the system will automatically decompose amounts for accounting.
+            </p>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                setSaving(true)
+                setError('')
+                setSuccess('')
+                try {
+                  const res = await settingsApi.updateVatSettings({ vatRate, businessTin, businessAddress })
+                  if (res.error) { setError(res.error.message || 'Failed to update'); return }
+                  setSuccess('VAT settings updated successfully')
+                } catch (err: any) {
+                  setError(err.message || 'Failed to update')
+                } finally {
+                  setSaving(false)
+                }
+              }}
+              className="space-y-6"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">VAT Rate (%)</label>
+                  <input
+                    type="number"
+                    value={vatRate}
+                    onChange={e => setVatRate(parseFloat(e.target.value) || 0)}
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Business TIN <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={businessTin}
+                    onChange={e => setBusinessTin(e.target.value)}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    placeholder="Enter Tax Identification Number"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Business Address <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+                <textarea
+                  value={businessAddress}
+                  onChange={e => setBusinessAddress(e.target.value)}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                  placeholder="Enter business address for invoices"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save VAT Settings'}
                 </button>
               </div>
             </form>

@@ -293,6 +293,8 @@ model Settings {
   overheadRatePerKg    Decimal  @default(0) @db.Decimal(10, 2)    // Overhead rate per kg (Naira)
   walkInCustomerId     String?  // Default walk-in customer ID
   vatRate               Decimal  @default(7.5) @db.Decimal(4, 2)  // Nigerian VAT rate (%)
+  businessTin          String?  // Business Tax Identification Number (optional)
+  businessAddress      String?  // Business address for invoices
   updatedAt            DateTime @updatedAt
 }
 

@@ -45,5 +45,13 @@ export const settingsController = {
       const history = await settingsService.getOverheadRateHistory()
       res.json({ data: history })
     } catch (error) { next(error) }
+  },
+
+  async updateVatSettings(req: Request, res: Response, next: NextFunction) {
+    try {
+      const input = req.body
+      const settings = await settingsService.updateVatSettings(input)
+      res.json({ data: settings })
+    } catch (error) { next(error) }
   }
 }
