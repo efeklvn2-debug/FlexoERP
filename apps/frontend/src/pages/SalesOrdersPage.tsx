@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { salesOrderApi, SalesOrder, PaymentTransaction, Invoice, CustomerBalance, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, DeliveryMethod, Customer } from '../api/salesOrders'
+import { salesOrderApi, SalesOrder, PaymentTransaction, Invoice, CustomerBalance, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, InvoiceStatus, DeliveryMethod, Customer } from '../api/salesOrders'
 import { pricingApi } from '../api/pricing'
 import { settingsApi } from '../api/settings'
 import { productionApi, ParentRoll } from '../api/production'
@@ -11,6 +11,15 @@ type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 type QuantityType = 'rolls' | 'kg'
 
 type Tab = 'orders' | 'payments' | 'invoices' | 'core-buyback' | 'balances' | 'packing-bags'
+
+const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  DRAFT: 'Draft',
+  ISSUED: 'Issued',
+  PARTIAL: 'Partially Paid',
+  PAID: 'Paid',
+  OVERDUE: 'Overdue',
+  CANCELLED: 'Cancelled'
+}
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING: 'bg-slate-100 text-slate-800',
@@ -51,6 +60,7 @@ export function SalesOrdersPage() {
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [payments, setPayments] = useState<PaymentTransaction[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('')
   const [coreBuybacks, setCoreBuybacks] = useState<any[]>([])
   const [customerBalances, setCustomerBalances] = useState<CustomerBalance[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -879,43 +889,60 @@ export function SalesOrdersPage() {
             )}
 
             {activeTab === 'invoices' && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <table className="min-w-full divide-y divide-slate-200">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Invoice #</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Rolls</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Bags</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Balance</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {invoices.length === 0 ? (
-                      <tr><td colSpan={8} className="px-6 py-8 text-center text-slate-500">No invoices found</td></tr>
-                    ) : (
-                      invoices.map(inv => (
-                        <tr key={inv.id} className="hover:bg-slate-50">
-                          <td className="px-6 py-4 text-sm font-medium text-slate-900">{inv.invoiceNumber}</td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{inv.customer?.name || '-'}</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[inv.status] || 'bg-slate-100'}`}>
-                              {inv.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600 text-right">{Number(inv.quantityDelivered || 0).toFixed(1)} kg</td>
-                          <td className="px-6 py-4 text-sm text-slate-600 text-right">{Number(inv.packingBagsQuantity || 0)} bags</td>
-                          <td className="px-6 py-4 text-sm text-slate-900 text-right">₦{Number(inv.totalAmount).toLocaleString()}</td>
-                          <td className="px-6 py-4 text-sm text-red-600 text-right">₦{Number(inv.balanceDue).toLocaleString()}</td>
-                          <td className="px-6 py-4 text-sm text-slate-500">{new Date(inv.createdAt).toLocaleDateString()}</td>
-                        </tr>
-                      ))
+              <div className="space-y-4">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+                  <div className="flex gap-4 flex-wrap">
+                    <select
+                      value={invoiceStatusFilter}
+                      onChange={e => setInvoiceStatusFilter(e.target.value)}
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    >
+                      <option value="">All Statuses</option>
+                      {Object.entries(INVOICE_STATUS_LABELS).map(([key, label]) => (
+                        <option key={key} value={key}>{label}</option>
+                      ))}
+                    </select>
+                    {invoiceStatusFilter && (
+                      <button onClick={() => setInvoiceStatusFilter('')} className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                        Clear Filter
+                      </button>
                     )}
-                  </tbody>
-                </table>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <table className="min-w-full divide-y divide-slate-200">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Invoice #</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Balance</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {(invoices.filter(inv => !invoiceStatusFilter || inv.status === invoiceStatusFilter)).length === 0 ? (
+                        <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">No invoices found</td></tr>
+                      ) : (
+                        invoices.filter(inv => !invoiceStatusFilter || inv.status === invoiceStatusFilter).map(inv => (
+                          <tr key={inv.id} className="hover:bg-slate-50">
+                            <td className="px-6 py-4 text-sm font-medium text-slate-900">{inv.invoiceNumber}</td>
+                            <td className="px-6 py-4 text-sm text-slate-600">{inv.customer?.name || '-'}</td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[inv.status] || 'bg-slate-100'}`}>
+                                {INVOICE_STATUS_LABELS[inv.status] || inv.status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-900 text-right">₦{Number(inv.totalAmount).toLocaleString()}</td>
+                            <td className="px-6 py-4 text-sm text-red-600 text-right">₦{Number(inv.balanceDue).toLocaleString()}</td>
+                            <td className="px-6 py-4 text-sm text-slate-500">{new Date(inv.createdAt).toLocaleDateString()}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
