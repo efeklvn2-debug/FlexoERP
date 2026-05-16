@@ -995,6 +995,27 @@ export const paymentService = {
               paymentStatus: paymentStatus as any
             }
           })
+
+          // Also update linked invoice if one exists
+          const linkedInvoice = await tx.invoice.findFirst({
+            where: { salesOrderId: input.salesOrderId },
+            orderBy: { createdAt: 'desc' }
+          })
+          if (linkedInvoice) {
+            const newInvoiceAmountPaid = (Number(linkedInvoice.amountPaid) || 0) + Number(input.amount)
+            const newInvoiceBalanceDue = Math.max(0, Number(linkedInvoice.totalAmount) - newInvoiceAmountPaid - Number(linkedInvoice.depositApplied) - Number(linkedInvoice.coreCreditApplied) - Number(linkedInvoice.previousPayments))
+            const newInvoiceStatus = newInvoiceAmountPaid >= Number(linkedInvoice.totalAmount) ? 'PAID' : newInvoiceAmountPaid > 0 ? 'PARTIAL' : linkedInvoice.status
+
+            await tx.invoice.update({
+              where: { id: linkedInvoice.id },
+              data: {
+                amountPaid: new Prisma.Decimal(String(newInvoiceAmountPaid)),
+                balanceDue: new Prisma.Decimal(String(newInvoiceBalanceDue)),
+                status: newInvoiceStatus as any,
+                ...(newInvoiceStatus === 'PAID' ? { paidAt: new Date() } : {})
+              }
+            })
+          }
         }
       }
 
