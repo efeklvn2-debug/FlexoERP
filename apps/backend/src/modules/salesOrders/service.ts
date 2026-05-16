@@ -558,7 +558,9 @@ export const salesOrderService = {
                 coresReturned: 0,
                 packingBagsQuantity: invoicePackingBagsQty || 0,
                 packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPriceVal)),
-                packingBagsSubtotal: new Prisma.Decimal(String(invoiceBagExclusive))
+                packingBagsSubtotal: new Prisma.Decimal(String(invoiceBagExclusive)),
+                status: 'PAID' as any,
+                paidAt: new Date()
               }
             })
 
@@ -648,7 +650,9 @@ export const salesOrderService = {
             packingBagsQuantity,
             packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPrice)),
             packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotalExcl)),
-            packingBagsPaid: new Prisma.Decimal('0')
+            packingBagsPaid: new Prisma.Decimal('0'),
+            status: 'ISSUED' as any,
+            issuedAt: new Date()
           },
           include: { customer: true, salesOrder: true }
         })

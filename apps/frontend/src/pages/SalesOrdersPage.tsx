@@ -926,7 +926,7 @@ export function SalesOrdersPage() {
                         <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">No invoices found</td></tr>
                       ) : (
                         invoices.filter(inv => !invoiceStatusFilter || inv.status === invoiceStatusFilter).map(inv => (
-                          <tr key={inv.id} className="hover:bg-slate-50">
+                          <tr key={inv.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setCurrentInvoice(inv); setShowInvoiceModal(true) }}>
                             <td className="px-6 py-4 text-sm font-medium text-slate-900">{inv.invoiceNumber}</td>
                             <td className="px-6 py-4 text-sm text-slate-600">{inv.customer?.name || '-'}</td>
                             <td className="px-6 py-4">
