@@ -77,6 +77,7 @@ export function SalesOrdersPage() {
 
   const [statusFilter, setStatusFilter] = useState('')
   const [customerFilter, setCustomerFilter] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState('')
 
   const [orderForm, setOrderForm] = useState({
     customerId: '',
@@ -256,6 +257,7 @@ export function SalesOrdersPage() {
   const filteredOrders = orders.filter(o => {
     if (statusFilter && o.status !== statusFilter) return false
     if (customerFilter && o.customerId !== customerFilter) return false
+    if (paymentFilter && o.paymentStatus !== paymentFilter) return false
     return true
   })
 
@@ -724,6 +726,17 @@ export function SalesOrdersPage() {
                       <option value="">All Customers</option>
                       {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
+                    <select value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                      <option value="">All Payments</option>
+                      {Object.entries(PAYMENT_STATUS_LABELS).map(([key, label]) =>
+                        <option key={key} value={key}>{label}</option>
+                      )}
+                    </select>
+                    {(statusFilter || customerFilter || paymentFilter) && (
+                      <button onClick={() => { setStatusFilter(''); setCustomerFilter(''); setPaymentFilter('') }} className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                        Clear Filters
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -794,6 +807,14 @@ export function SalesOrdersPage() {
                                 {['PICKED_UP', 'INVOICED'].includes(o.status) && o.paymentStatus !== 'FULLY_PAID' && o.paymentStatus !== 'OVERPAID' && (
                                   <button onClick={() => openPaymentModal(o)} className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-700">
                                     Pay
+                                  </button>
+                                )}
+                                {o.invoices && o.invoices.length > 0 && (
+                                  <button
+                                    onClick={() => salesOrderApi.downloadInvoicePdf(o.invoices![0].id).catch(e => setError(e.message))}
+                                    className="px-2 py-1 bg-slate-700 text-white text-xs rounded hover:bg-slate-800"
+                                  >
+                                    Print
                                   </button>
                                 )}
                               </div>
@@ -1192,7 +1213,7 @@ export function SalesOrdersPage() {
 
         {/* Payment Modal */}
         {showPaymentModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
             <div className="bg-white rounded-2xl p-6 w-full max-w-md">
               <h2 className="text-xl font-bold mb-4">Record Payment</h2>
               <form onSubmit={handleRecordPayment} className="space-y-4">
@@ -1769,6 +1790,20 @@ export function SalesOrdersPage() {
                         {a.label}
                       </button>
                     ))}
+                    {showOrderDetails.invoices && showOrderDetails.invoices.length > 0 && (
+                      <button
+                        onClick={() => salesOrderApi.downloadInvoicePdf(showOrderDetails.invoices[0].id).catch(e => setError(e.message))}
+                        className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700"
+                      >
+                        Print Invoice
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowOrderDetails(null)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >
+                      Done
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1918,7 +1953,10 @@ export function SalesOrdersPage() {
                   </table>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-3">
+                  <button onClick={() => salesOrderApi.downloadInvoicePdf(currentInvoice.id).catch(e => setError(e.message))} className="px-6 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700">
+                    Print Invoice
+                  </button>
                   <button onClick={() => setShowInvoiceModal(false)} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                     Done
                   </button>

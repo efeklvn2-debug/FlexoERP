@@ -175,6 +175,8 @@ model PurchaseOrder {
   id            String     @id @default(cuid())
   poNumber      String     @unique
   supplier      String
+  supplierId    String?
+  supplierRef   Supplier?  @relation(fields: [supplierId], references: [id])
   status       POStatus   @default(PENDING)
   expectedDate  DateTime?
   receivedDate DateTime?
@@ -295,6 +297,11 @@ model Settings {
   vatRate               Decimal  @default(7.5) @db.Decimal(4, 2)  // Nigerian VAT rate (%)
   businessTin          String?  // Business Tax Identification Number (optional)
   businessAddress      String?  // Business address for invoices
+  invoiceCompanyName   String?  // Customizable company name on invoice PDF
+  invoiceLogoUrl       String?  // Logo URL for invoice PDF
+  invoicePrimaryColor  String?  // Primary color hex for invoice (default #1e3a5f)
+  invoiceAccentColor   String?  // Accent color hex for invoice (default #dc2626)
+  invoiceFooter        String?  // Custom footer text on invoice PDF
   updatedAt            DateTime @updatedAt
 }
 
@@ -331,6 +338,29 @@ model MaterialIssue {
 }
 
 // ============================================================================
+// SUPPLIERS
+// ============================================================================
+
+model Supplier {
+  id        String    @id @default(cuid())
+  name      String
+  code      String    @unique
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+  invoices       SupplierInvoice[]
+
+  @@index([name])
+  @@index([code])
+}
+
+// ============================================================================
 // SUPPLIER INVOICES (Accounts Payable)
 // ============================================================================
 
@@ -345,7 +375,7 @@ model SupplierInvoice {
   poId            String
   po              PurchaseOrder      @relation(fields: [poId], references: [id])
   supplierId      String
-  supplier        Customer           @relation(fields: [supplierId], references: [id])
+  supplier        Supplier           @relation(fields: [supplierId], references: [id])
   invoiceNumber   String             // Auto-generated: SI-YYYY-NNN
   date            DateTime           @default(now())
   dueDate         DateTime?
@@ -576,7 +606,6 @@ model Customer {
   paymentTransactions   PaymentTransaction[]
   invoices             Invoice[]
   coreBuybacks          CoreBuyback[]
-  supplierInvoices     SupplierInvoice[]
 }
 
 model SalesOrder {
@@ -729,6 +758,7 @@ model PaymentReceived {
   date            DateTime   @default(now())
   reference       String?    // Receipt number, transfer ref, etc.
   notes           String?
+  paymentMethod   String?    // Cash or Bank Transfer
   createdAt       DateTime   @default(now())
   
   @@index([invoiceId])

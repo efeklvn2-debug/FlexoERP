@@ -11,3 +11,5 @@ settingsRouter.get('/overhead-rate', authenticate, loadUser, settingsController.
 settingsRouter.patch('/overhead-rate', authenticate, loadUser, settingsController.updateOverheadRate)
 settingsRouter.get('/overhead-rate-history', authenticate, loadUser, settingsController.getOverheadRateHistory)
 settingsRouter.patch('/vat', authenticate, loadUser, settingsController.updateVatSettings)
+settingsRouter.get('/invoice', authenticate, loadUser, settingsController.getInvoiceSettings)
+settingsRouter.patch('/invoice', authenticate, loadUser, settingsController.updateInvoiceSettings)

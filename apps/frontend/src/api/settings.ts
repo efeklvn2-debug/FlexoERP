@@ -37,6 +37,14 @@ export interface OverheadRateHistoryEntry {
   createdBy?: string
 }
 
+export interface InvoiceSettings {
+  invoiceCompanyName?: string
+  invoiceLogoUrl?: string
+  invoicePrimaryColor?: string
+  invoiceAccentColor?: string
+  invoiceFooter?: string
+}
+
 export const settingsApi = {
   getSettings: async () => {
     return api.get<Settings>('/settings')
@@ -64,5 +72,13 @@ export const settingsApi = {
 
   updateVatSettings: async (data: Partial<VatSettings>) => {
     return api.patch<Settings>('/settings/vat', data)
+  },
+
+  getInvoiceSettings: async () => {
+    return api.get<InvoiceSettings>('/settings/invoice')
+  },
+
+  updateInvoiceSettings: async (data: InvoiceSettings) => {
+    return api.patch<InvoiceSettings>('/settings/invoice', data)
   }
 }

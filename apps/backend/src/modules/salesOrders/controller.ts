@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { salesOrderService, paymentService, invoiceService, coreBuybackService } from './service'
+import { generateInvoicePdf } from './pdf-service'
 import { logger } from '../../logger'
 
 console.log('[CONTROLLER] Loading salesOrderController...')
@@ -284,12 +285,25 @@ export const invoiceController = {
   async addPayment(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const { amount, date, reference, notes } = req.body
-      const payment = await invoiceService.addPayment(id, amount, new Date(date), reference, notes)
+      const { amount, date, reference, notes, paymentMethod } = req.body
+      const payment = await invoiceService.addPayment(id, amount, new Date(date), reference, notes, paymentMethod)
       res.status(201).json({ data: payment })
     } catch (error: any) {
       logger.error(error, 'Error recording payment')
       res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+    }
+  },
+
+  async downloadPdf(req: Request, res: Response) {
+    try {
+      const { id } = req.params
+      const pdfBuffer = await generateInvoicePdf(id)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', `attachment; filename="invoice-${id.slice(0, 8)}.pdf"`)
+      res.send(pdfBuffer)
+    } catch (error: any) {
+      logger.error(error, 'Error generating invoice PDF')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to generate PDF' })
     }
   }
 }

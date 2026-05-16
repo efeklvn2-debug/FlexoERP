@@ -117,6 +117,7 @@ export interface PaymentReceived {
   date: string
   reference?: string
   notes?: string
+  paymentMethod?: string
 }
 
 export interface CoreBuyback {
@@ -237,7 +238,7 @@ export const salesOrderApi = {
   },
   getInvoiceById: (id: string) => api.get<Invoice>(`/sales-orders/invoices/${id}`),
   issueInvoice: (id: string) => api.patch<Invoice>(`/sales-orders/invoices/${id}/issue`, {}),
-  addPayment: (id: string, data: { amount: number; date: string; reference?: string; notes?: string }) =>
+  addPayment: (id: string, data: { amount: number; date: string; paymentMethod?: string; reference?: string; notes?: string }) =>
     api.post<PaymentReceived>(`/sales-orders/invoices/${id}/payments`, data),
 
   // Core Buyback
@@ -310,5 +311,22 @@ export const salesOrderApi = {
     subtotal: number
     vatAmount: number
     totalAmount: number
-  }>('/sales-orders/packing-bags/sell', data)
+  }>('/sales-orders/packing-bags/sell', data),
+
+  downloadInvoicePdf: async (id: string) => {
+    const token = localStorage.getItem('accessToken')
+    const response = await fetch(`/api/sales-orders/invoices/${id}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    if (!response.ok) throw new Error('Failed to download invoice PDF')
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `invoice-${id.slice(0, 8)}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
 }

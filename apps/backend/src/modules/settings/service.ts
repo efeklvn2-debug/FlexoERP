@@ -25,12 +25,25 @@ export interface Settings {
   overheadRatePerKg: number
   businessTin?: string
   businessAddress?: string
+  invoiceCompanyName?: string
+  invoiceLogoUrl?: string
+  invoicePrimaryColor?: string
+  invoiceAccentColor?: string
+  invoiceFooter?: string
 }
 
 export interface VatSettings {
   vatRate: number
   businessTin?: string
   businessAddress?: string
+}
+
+export interface InvoiceSettings {
+  invoiceCompanyName?: string
+  invoiceLogoUrl?: string
+  invoicePrimaryColor?: string
+  invoiceAccentColor?: string
+  invoiceFooter?: string
 }
 
 export interface OverheadRateHistoryEntry {
@@ -65,7 +78,12 @@ export const settingsService = {
       vatRate: Number(settings.vatRate),
       overheadRatePerKg: Number(settings.overheadRatePerKg || 0),
       businessTin: settings.businessTin || undefined,
-      businessAddress: settings.businessAddress || undefined
+      businessAddress: settings.businessAddress || undefined,
+      invoiceCompanyName: settings.invoiceCompanyName || undefined,
+      invoiceLogoUrl: settings.invoiceLogoUrl || undefined,
+      invoicePrimaryColor: settings.invoicePrimaryColor || undefined,
+      invoiceAccentColor: settings.invoiceAccentColor || undefined,
+      invoiceFooter: settings.invoiceFooter || undefined
     }
   },
 
@@ -168,6 +186,39 @@ export const settingsService = {
       }
     })
     return this.getSettings()
+  },
+
+  async getInvoiceSettings(): Promise<InvoiceSettings> {
+    const settings = await this.getSettings()
+    return {
+      invoiceCompanyName: (settings as any).invoiceCompanyName || undefined,
+      invoiceLogoUrl: (settings as any).invoiceLogoUrl || undefined,
+      invoicePrimaryColor: (settings as any).invoicePrimaryColor || undefined,
+      invoiceAccentColor: (settings as any).invoiceAccentColor || undefined,
+      invoiceFooter: (settings as any).invoiceFooter || undefined
+    }
+  },
+
+  async updateInvoiceSettings(input: InvoiceSettings): Promise<InvoiceSettings> {
+    await prisma.settings.upsert({
+      where: { id: 'default' },
+      update: {
+        invoiceCompanyName: input.invoiceCompanyName,
+        invoiceLogoUrl: input.invoiceLogoUrl,
+        invoicePrimaryColor: input.invoicePrimaryColor,
+        invoiceAccentColor: input.invoiceAccentColor,
+        invoiceFooter: input.invoiceFooter
+      },
+      create: {
+        id: 'default',
+        invoiceCompanyName: input.invoiceCompanyName,
+        invoiceLogoUrl: input.invoiceLogoUrl,
+        invoicePrimaryColor: input.invoicePrimaryColor,
+        invoiceAccentColor: input.invoiceAccentColor,
+        invoiceFooter: input.invoiceFooter
+      }
+    })
+    return this.getInvoiceSettings()
   },
 
   async getOverheadRateHistory(): Promise<OverheadRateHistoryEntry[]> {

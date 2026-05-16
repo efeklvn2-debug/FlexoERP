@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
-import { settingsApi, ConsumptionRates } from '../api/settings'
+import { settingsApi, ConsumptionRates, InvoiceSettings } from '../api/settings'
 import { pricingApi, MaterialWithPrice } from '../api/pricing'
 import { inventoryApi, MaterialCategory } from '../api/inventory'
 import { Layout } from '../components/Layout'
 
-type SettingsTab = 'consumption' | 'core-deposits' | 'products' | 'overhead' | 'vat'
+type SettingsTab = 'consumption' | 'core-deposits' | 'products' | 'overhead' | 'vat' | 'invoice'
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('products')
@@ -21,6 +21,7 @@ export function SettingsPage() {
   const [vatRate, setVatRate] = useState(7.5)
   const [businessTin, setBusinessTin] = useState('')
   const [businessAddress, setBusinessAddress] = useState('')
+  const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -74,6 +75,13 @@ useEffect(() => {
         setVatRate(Number(settingsData.vatRate) || 7.5)
         setBusinessTin(settingsData.businessTin || '')
         setBusinessAddress(settingsData.businessAddress || '')
+        setInvoiceSettings({
+          invoiceCompanyName: settingsData.invoiceCompanyName || '',
+          invoiceLogoUrl: settingsData.invoiceLogoUrl || '',
+          invoicePrimaryColor: settingsData.invoicePrimaryColor || '#1e3a5f',
+          invoiceAccentColor: settingsData.invoiceAccentColor || '#dc2626',
+          invoiceFooter: settingsData.invoiceFooter || 'Thank you for your business!'
+        })
       }
     } catch (err) {
       console.error('Failed to load overhead rate:', err)
@@ -276,6 +284,14 @@ const loadSettings = async () => {
             }`}
           >
             VAT
+          </button>
+          <button
+            onClick={() => setActiveTab('invoice')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'invoice' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Invoice
           </button>
         </div>
 
@@ -555,6 +571,121 @@ const loadSettings = async () => {
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : 'Save VAT Settings'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {activeTab === 'invoice' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Invoice Customization</h2>
+            <p className="text-sm text-slate-500 mb-6">
+              Customize the look and feel of your invoice PDFs. These settings will appear on all generated invoices.
+            </p>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                setSaving(true)
+                setError('')
+                setSuccess('')
+                try {
+                  const res = await settingsApi.updateInvoiceSettings(invoiceSettings)
+                  if (res.error) { setError(res.error.message || 'Failed to update'); return }
+                  setSuccess('Invoice settings updated successfully')
+                } catch (err: any) {
+                  setError(err.message || 'Failed to update')
+                } finally {
+                  setSaving(false)
+                }
+              }}
+              className="space-y-6"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Company Name</label>
+                  <input
+                    type="text"
+                    value={invoiceSettings.invoiceCompanyName || ''}
+                    onChange={e => setInvoiceSettings({ ...invoiceSettings, invoiceCompanyName: e.target.value })}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    placeholder="FLEXOPRINT NIGERIA LTD"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Logo URL <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={invoiceSettings.invoiceLogoUrl || ''}
+                    onChange={e => setInvoiceSettings({ ...invoiceSettings, invoiceLogoUrl: e.target.value })}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    placeholder="https://example.com/logo.png"
+                  />
+                  {invoiceSettings.invoiceLogoUrl && (
+                    <div className="mt-2">
+                      <img src={invoiceSettings.invoiceLogoUrl} alt="Logo preview" className="h-12 object-contain" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Primary Color</label>
+                  <div className="flex space-x-2">
+                    <input
+                      type="color"
+                      value={invoiceSettings.invoicePrimaryColor || '#1e3a5f'}
+                      onChange={e => setInvoiceSettings({ ...invoiceSettings, invoicePrimaryColor: e.target.value })}
+                      className="w-10 h-10 p-0.5 border border-slate-300 rounded cursor-pointer"
+                    />
+                    <input
+                      type="text"
+                      value={invoiceSettings.invoicePrimaryColor || ''}
+                      onChange={e => setInvoiceSettings({ ...invoiceSettings, invoicePrimaryColor: e.target.value })}
+                      className="flex-1 px-4 py-2 border border-slate-300 rounded-lg font-mono"
+                      placeholder="#1e3a5f"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Accent Color</label>
+                  <div className="flex space-x-2">
+                    <input
+                      type="color"
+                      value={invoiceSettings.invoiceAccentColor || '#dc2626'}
+                      onChange={e => setInvoiceSettings({ ...invoiceSettings, invoiceAccentColor: e.target.value })}
+                      className="w-10 h-10 p-0.5 border border-slate-300 rounded cursor-pointer"
+                    />
+                    <input
+                      type="text"
+                      value={invoiceSettings.invoiceAccentColor || ''}
+                      onChange={e => setInvoiceSettings({ ...invoiceSettings, invoiceAccentColor: e.target.value })}
+                      className="flex-1 px-4 py-2 border border-slate-300 rounded-lg font-mono"
+                      placeholder="#dc2626"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Footer Text <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={invoiceSettings.invoiceFooter || ''}
+                  onChange={e => setInvoiceSettings({ ...invoiceSettings, invoiceFooter: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                  placeholder="Thank you for your business!"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save Invoice Settings'}
                 </button>
               </div>
             </form>

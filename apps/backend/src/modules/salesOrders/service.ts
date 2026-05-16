@@ -235,6 +235,7 @@ export const salesOrderService = {
         productionData = {
           status: 'READY',
           quantityOrdered: actualWeight,
+          quantityProduced: actualWeight,
           totalAmount
         }
 
@@ -445,7 +446,9 @@ export const salesOrderService = {
         const { exclusive: bagExclusive, vat: bagVat } = decomposeInclusive(bagValue, vatRate)
         const totalVat = deliveryVat + bagVat
 
-        const cashAccountId = await financeService.getAccountIdByCode('1000')
+        const isElectronic = paymentMethod === 'Electronic'
+        const debitAccountCode = isElectronic ? '1100' : '1000'
+        const debitAccountId = await financeService.getAccountIdByCode(debitAccountCode)
         const arAccountId = await financeService.getAccountIdByCode('1200')
         const salesRevenueId = await financeService.getAccountIdByCode('4000')
         const packingBagRevenueId = await financeService.getAccountIdByCode('4100')
@@ -465,13 +468,13 @@ export const salesOrderService = {
 
         const previousPayments = Number(order.totalPaid)
         const amountPaidNow = amountPaid || 0
-        const balanceDue = Math.max(0, totalRevenue - previousPayments - amountPaidNow)
+        const arToRecognize = Math.max(0, totalRevenue - amountPaidNow)
 
         if (amountPaidNow > 0) {
-          lines.push({ accountId: cashAccountId, debit: amountPaidNow, credit: 0, memo: 'Cash collected at pickup' })
+          lines.push({ accountId: debitAccountId, debit: amountPaidNow, credit: 0, memo: isElectronic ? 'Bank transfer' : 'Cash collected at pickup' })
         }
-        if (balanceDue > 0) {
-          lines.push({ accountId: arAccountId, debit: balanceDue, credit: 0, memo: 'Accounts receivable' })
+        if (arToRecognize > 0) {
+          lines.push({ accountId: arAccountId, debit: arToRecognize, credit: 0, memo: 'Accounts receivable' })
         }
 
         if (lines.length > 0) {
@@ -811,7 +814,9 @@ export const salesOrderService = {
           const vatOutputId = await financeService.getAccountIdByCode('2100')
           const cogsId = await financeService.getAccountIdByCode('5000')
           const packingBagInventoryId = await financeService.getAccountIdByCode('1510')
-          const cashAccountId = await financeService.getAccountIdByCode('1000')
+          const isElectronic = input.paymentMethod === 'Electronic'
+          const debitAccountCode = isElectronic ? '1100' : '1000'
+          const debitAccountId = await financeService.getAccountIdByCode(debitAccountCode)
 
           await financeService.postJournalEntry({
             description: `Invoice ${invoiceNumber} - Packing Bags`,
@@ -821,7 +826,7 @@ export const salesOrderService = {
             postedById: input.userId,
             lines: [
               { accountId: arAccountId, debit: totalAmountWithVat, credit: 0, memo: 'Accounts Receivable' },
-              { accountId: packingBagRevenueId, debit: 0, credit: subtotal, memo: 'Packing Bags Revenue' }
+              { accountId: packingBagRevenueId, debit: 0, credit: packingBagsSubtotal, memo: 'Packing Bags Revenue (excl. VAT)' }
             ].concat(
               vatAmount > 0 ? [{ accountId: vatOutputId, debit: 0, credit: vatAmount, memo: 'Output VAT' }] : []
             )
@@ -844,7 +849,7 @@ export const salesOrderService = {
             sourceId: invoice.id,
             reference: input.referenceNumber || invoiceNumber,
             lines: [
-              { accountId: cashAccountId, debit: totalAmountWithVat, credit: 0, memo: 'Cash received' },
+              { accountId: debitAccountId, debit: totalAmountWithVat, credit: 0, memo: isElectronic ? 'Bank transfer' : 'Cash received' },
               { accountId: arAccountId, debit: 0, credit: totalAmountWithVat, memo: 'AR cleared' }
             ]
           }, tx)
@@ -949,40 +954,72 @@ export const paymentService = {
       throw new AppError(400, 'VALIDATION', 'Either salesOrderId or customerId is required')
     }
 
-    const payment = await paymentRepository.create({
-      salesOrderId: input.salesOrderId,
-      customerId: input.customerId!,
-      transactionType: input.transactionType as any,
-      paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
-      amount: new Prisma.Decimal(String(input.amount)),
-      referenceNumber: input.referenceNumber,
-      notes: input.notes,
-      receivedById: userId,
-      paymentCategory: input.paymentCategory as any
+    const result = await prisma.$transaction(async (tx) => {
+      const payment = await tx.paymentTransaction.create({
+        data: {
+          salesOrderId: input.salesOrderId,
+          customerId: input.customerId!,
+          transactionType: input.transactionType as any,
+          paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
+          amount: new Prisma.Decimal(String(input.amount)),
+          referenceNumber: input.referenceNumber,
+          notes: input.notes,
+          receivedById: userId,
+          paymentCategory: input.paymentCategory as any
+        }
+      })
+
+      // Update sales order if linked
+      if (input.salesOrderId) {
+        const order = await tx.salesOrder.findUnique({
+          where: { id: input.salesOrderId }
+        })
+        if (order) {
+          const newPaid = Number(order.totalPaid) + Number(input.amount)
+          let paymentStatus = 'PARTIAL_PAYMENT'
+          if (newPaid >= Number(order.totalAmount)) {
+            paymentStatus = 'FULLY_PAID'
+          } else if (newPaid >= Number(order.depositRequired)) {
+            paymentStatus = 'DEPOSIT_COMPLETE'
+          }
+
+          await tx.salesOrder.update({
+            where: { id: input.salesOrderId },
+            data: {
+              totalPaid: newPaid,
+              balancePaid: newPaid,
+              paymentStatus: paymentStatus as any
+            }
+          })
+        }
+      }
+
+      // Post journal entry: D/Cash-or-Bank, C/AR
+      try {
+        const isElectronicPayment = input.paymentMethod === 'Electronic'
+        const debitAccountCode = isElectronicPayment ? '1100' : '1000'
+        const debitAccountId = await financeService.getAccountIdByCode(debitAccountCode)
+        const arAccountId = await financeService.getAccountIdByCode('1200')
+
+        await financeService.postJournalEntry({
+          description: `Payment received - ${input.referenceNumber || `SO payment ₦${input.amount.toLocaleString()}`}`,
+          sourceModule: 'PAYMENT',
+          sourceId: input.salesOrderId,
+          reference: input.referenceNumber,
+          lines: [
+            { accountId: debitAccountId, debit: input.amount, credit: 0, memo: isElectronicPayment ? 'Bank transfer' : 'Cash received' },
+            { accountId: arAccountId, debit: 0, credit: input.amount, memo: `Customer payment` }
+          ]
+        }, tx)
+      } catch (jeErr) {
+        logger.error({ err: jeErr, amount: input.amount }, 'Failed to post payment journal entry - continuing')
+      }
+
+      return payment
     })
 
-    // Update sales order if linked
-    if (input.salesOrderId) {
-      const order = await salesOrderRepository.findById(input.salesOrderId)
-      if (order) {
-        const newPaid = Number(order.totalPaid) + Number(input.amount)
-        let paymentStatus = 'PARTIAL_PAYMENT'
-        if (newPaid >= Number(order.totalAmount)) {
-          paymentStatus = 'FULLY_PAID'
-        } else if (newPaid >= Number(order.depositRequired)) {
-          paymentStatus = 'DEPOSIT_COMPLETE'
-        }
-
-        await salesOrderRepository.update(input.salesOrderId, {
-          totalPaid: newPaid,
-          balancePaid: newPaid,
-          paymentStatus: paymentStatus as any
-        })
-      }
-    }
-
-    logger.info({ paymentId: payment.id, amount: input.amount }, 'Payment recorded')
-    return payment
+    logger.info({ paymentId: result.id, amount: input.amount }, 'Payment recorded')
+    return result
   },
 
   async getPayments(options?: { salesOrderId?: string; customerId?: string; dateFrom?: string; dateTo?: string }) {
@@ -1037,14 +1074,14 @@ export const invoiceService = {
     return invoiceRepository.update(id, { status: 'ISSUED' as any, issuedAt: new Date() })
   },
 
-  async addPayment(invoiceId: string, amount: number, date: Date, reference?: string, notes?: string) {
+  async addPayment(invoiceId: string, amount: number, date: Date, reference?: string, notes?: string, paymentMethod?: string) {
     const invoice = await invoiceRepository.findById(invoiceId)
     if (!invoice) throw new AppError(404, 'NOT_FOUND', 'Invoice not found')
 
     const newAmountPaid = (Number(invoice.amountPaid) || 0) + amount
     const newStatus = newAmountPaid >= Number(invoice.totalAmount) ? 'PAID' : newAmountPaid > 0 ? 'PARTIAL' : invoice.status
 
-    logger.info({ invoiceId, amount, newStatus }, 'Recording payment received')
+    logger.info({ invoiceId, amount, newStatus, paymentMethod }, 'Recording payment received')
 
     let payment
     try {
@@ -1055,7 +1092,8 @@ export const invoiceService = {
             amount: new Prisma.Decimal(String(amount)),
             date: new Date(date),
             reference,
-            notes
+            notes,
+            paymentMethod
           }
         })
 
@@ -1063,13 +1101,15 @@ export const invoiceService = {
           where: { id: invoiceId },
           data: {
             amountPaid: new Prisma.Decimal(String(newAmountPaid)),
+            balanceDue: new Prisma.Decimal(String(Math.max(0, Number(invoice.balanceDue) - amount))),
             status: newStatus as any
           }
         })
 
         try {
-          const cashAccountId = await financeService.getAccountIdByCode('1000')
-          const bankAccountId = await financeService.getAccountIdByCode('1100')
+          const isElectronicPayment = paymentMethod === 'Electronic'
+          const debitAccountCode = isElectronicPayment ? '1100' : '1000'
+          const debitAccountId = await financeService.getAccountIdByCode(debitAccountCode)
           const arAccountId = await financeService.getAccountIdByCode('1200')
 
           await financeService.postJournalEntry({
@@ -1079,7 +1119,7 @@ export const invoiceService = {
             reference: reference || `Inv ${invoice.invoiceNumber}`,
             date: new Date(date),
             lines: [
-              { accountId: cashAccountId, debit: amount, credit: 0, memo: 'Cash received' },
+              { accountId: debitAccountId, debit: amount, credit: 0, memo: isElectronicPayment ? 'Bank transfer' : 'Cash received' },
               { accountId: arAccountId, debit: 0, credit: amount, memo: `Payment against ${invoice.invoiceNumber}` }
             ]
           }, tx)
@@ -1104,6 +1144,7 @@ export const invoiceService = {
       date: payment.date,
       reference: payment.reference || undefined,
       notes: payment.notes || undefined,
+      paymentMethod: paymentMethod || 'Cash',
       createdAt: payment.createdAt
     }
   }

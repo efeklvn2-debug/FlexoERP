@@ -53,5 +53,20 @@ export const settingsController = {
       const settings = await settingsService.updateVatSettings(input)
       res.json({ data: settings })
     } catch (error) { next(error) }
+  },
+
+  async getInvoiceSettings(req: Request, res: Response, next: NextFunction) {
+    try {
+      const settings = await settingsService.getInvoiceSettings()
+      res.json({ data: settings })
+    } catch (error) { next(error) }
+  },
+
+  async updateInvoiceSettings(req: Request, res: Response, next: NextFunction) {
+    try {
+      const input = req.body
+      const settings = await settingsService.updateInvoiceSettings(input)
+      res.json({ data: settings })
+    } catch (error) { next(error) }
   }
 }

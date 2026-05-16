@@ -29,6 +29,7 @@ salesOrderRouter.get('/invoices', invoiceController.getInvoices)
 salesOrderRouter.get('/invoices/:id', invoiceController.getInvoice)
 salesOrderRouter.patch('/invoices/:id/issue', invoiceController.issueInvoice)
 salesOrderRouter.post('/invoices/:id/payments', invoiceController.addPayment)
+salesOrderRouter.get('/invoices/:id/pdf', invoiceController.downloadPdf)
 
 // Core Buyback
 salesOrderRouter.post('/core-buyback', coreBuybackController.recordCoreBuyback)
