@@ -906,8 +906,8 @@ export function SalesOrdersPage() {
                               {inv.status}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-sm text-slate-600 text-right">{inv.quantityDelivered?.toFixed(1)} kg</td>
-                          <td className="px-6 py-4 text-sm text-slate-600 text-right">{inv.packingBagsQuantity || 0} bags</td>
+                          <td className="px-6 py-4 text-sm text-slate-600 text-right">{Number(inv.quantityDelivered || 0).toFixed(1)} kg</td>
+                          <td className="px-6 py-4 text-sm text-slate-600 text-right">{Number(inv.packingBagsQuantity || 0)} bags</td>
                           <td className="px-6 py-4 text-sm text-slate-900 text-right">₦{Number(inv.totalAmount).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm text-red-600 text-right">₦{Number(inv.balanceDue).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm text-slate-500">{new Date(inv.createdAt).toLocaleDateString()}</td>
