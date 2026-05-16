@@ -211,7 +211,8 @@ export function SalesOrdersPage() {
   const loadInvoices = async () => {
     try {
       const res = await salesOrderApi.getInvoices()
-      setInvoices(Array.isArray(res.data) ? res.data : [])
+      const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
+      setInvoices(data)
     } catch (err: any) {
       console.error('Failed to load invoices:', err)
     }
