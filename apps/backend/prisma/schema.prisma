@@ -531,7 +531,6 @@ enum MTOOrderStatus {
   IN_PRODUCTION    // Production started
   READY            // Completed, ready for pickup
   PICKED_UP        // Customer collected goods
-  INVOICED         // Invoice generated
   COMPLETED        // Fully paid and closed
   CANCELLED        // Order cancelled
 }

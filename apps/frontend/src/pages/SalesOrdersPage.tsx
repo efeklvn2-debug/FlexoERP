@@ -28,7 +28,7 @@ const STATUS_COLORS: Record<string, string> = {
   IN_PRODUCTION: 'bg-indigo-100 text-indigo-800',
   READY: 'bg-purple-100 text-purple-800',
   PICKED_UP: 'bg-teal-100 text-teal-800',
-  INVOICED: 'bg-cyan-100 text-cyan-800',
+
   COMPLETED: 'bg-green-100 text-green-800',
   CANCELLED: 'bg-red-100 text-red-800',
   PENDING_PAYMENT: 'bg-slate-100 text-slate-800',
@@ -731,7 +731,6 @@ export function SalesOrdersPage() {
                       <option value="IN_PRODUCTION">In Production</option>
                       <option value="READY">Ready for Pickup</option>
                       <option value="PICKED_UP">Picked Up</option>
-                      <option value="INVOICED">Invoiced</option>
                       <option value="COMPLETED">Completed</option>
                       <option value="CANCELLED">Cancelled</option>
                     </select>
@@ -817,7 +816,7 @@ export function SalesOrdersPage() {
                                     {a.label}
                                   </button>
                                 ))}
-                                {['PICKED_UP', 'INVOICED'].includes(o.status) && o.paymentStatus !== 'FULLY_PAID' && o.paymentStatus !== 'OVERPAID' && (
+                                {['PICKED_UP'].includes(o.status) && o.paymentStatus !== 'FULLY_PAID' && o.paymentStatus !== 'OVERPAID' && (
                                   <button onClick={() => openPaymentModal(o)} className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-700">
                                     Pay
                                   </button>

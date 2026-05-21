@@ -396,7 +396,7 @@ export const salesOrderRepository = {
       const orders = await prisma.salesOrder.findMany({
         where: {
           customerId: customer.id,
-          status: { in: ['PENDING', 'APPROVED', 'MRP_PENDING', 'IN_PRODUCTION', 'READY', 'PICKED_UP', 'INVOICED'] }
+          status: { in: ['PENDING', 'APPROVED', 'MRP_PENDING', 'IN_PRODUCTION', 'READY', 'PICKED_UP'] }
         }
       })
 

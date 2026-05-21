@@ -763,7 +763,7 @@ export const salesOrderService = {
             totalAmount: new Prisma.Decimal(String(totalAmountWithVat)),
             deliveryMethod: 'PICKUP' as any,
             depositRequired: new Prisma.Decimal('0'),
-            status: 'INVOICED' as any,
+            status: 'COMPLETED' as any,
             paymentStatus: 'FULLY_PAID' as any,
             approvedAt: new Date(),
             completedAt: new Date(),

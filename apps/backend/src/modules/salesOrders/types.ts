@@ -1,5 +1,5 @@
 export type DeliveryMethod = 'PICKUP' | 'SHIPPING'
-export type MTOOrderStatus = 'PENDING' | 'APPROVED' | 'MRP_PENDING' | 'IN_PRODUCTION' | 'READY' | 'PICKED_UP' | 'INVOICED' | 'COMPLETED' | 'CANCELLED'
+export type MTOOrderStatus = 'PENDING' | 'APPROVED' | 'MRP_PENDING' | 'IN_PRODUCTION' | 'READY' | 'PICKED_UP' | 'COMPLETED' | 'CANCELLED'
 export type MTOPaymentStatus = 'PENDING_PAYMENT' | 'PARTIAL_DEPOSIT' | 'DEPOSIT_COMPLETE' | 'PARTIAL_PAYMENT' | 'FULLY_PAID' | 'OVERPAID'
 export type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'REFUND'
 export type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
@@ -85,7 +85,6 @@ export const ORDER_STATUS_LABELS: Record<MTOOrderStatus, string> = {
   IN_PRODUCTION: 'In Production',
   READY: 'Ready for Pickup',
   PICKED_UP: 'Picked Up',
-  INVOICED: 'Invoiced',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled'
 }
