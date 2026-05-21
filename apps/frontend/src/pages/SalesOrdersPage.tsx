@@ -1170,9 +1170,10 @@ export function SalesOrdersPage() {
                     </div>
                     <input
                       type="number"
-                      min="1"
+                      min="0.1"
+                      step="any"
                       value={orderForm.quantity || ''}
-                      onChange={e => setOrderForm({...orderForm, quantity: parseInt(e.target.value) || 0})}
+                      onChange={e => setOrderForm({...orderForm, quantity: parseFloat(e.target.value) || 0})}
                       className="flex-1 px-4 py-2 border border-slate-300 rounded-lg"
                       placeholder={orderForm.quantityType === 'rolls' ? 'Number of rolls' : 'Weight in kg'}
                       required
