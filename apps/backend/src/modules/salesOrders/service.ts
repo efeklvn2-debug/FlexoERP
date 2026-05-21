@@ -659,7 +659,7 @@ export const salesOrderService = {
 
         await tx.salesOrder.update({
           where: { id: order.id },
-          data: { status: 'INVOICED', quantityDelivered: new Prisma.Decimal(String(quantityDelivered)) }
+          data: { quantityDelivered: new Prisma.Decimal(String(quantityDelivered)) }
         })
 
         return createdInvoice
@@ -987,13 +987,19 @@ export const paymentService = {
             paymentStatus = 'DEPOSIT_COMPLETE'
           }
 
+          const orderUpdateData: any = {
+            totalPaid: newPaid,
+            balancePaid: newPaid,
+            paymentStatus: paymentStatus as any
+          }
+          if (paymentStatus === 'FULLY_PAID') {
+            orderUpdateData.status = 'COMPLETED'
+            orderUpdateData.completedAt = new Date()
+          }
+
           await tx.salesOrder.update({
             where: { id: input.salesOrderId },
-            data: {
-              totalPaid: newPaid,
-              balancePaid: newPaid,
-              paymentStatus: paymentStatus as any
-            }
+            data: orderUpdateData
           })
 
           // Also update linked invoice if one exists

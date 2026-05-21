@@ -655,7 +655,9 @@ export function SalesOrdersPage() {
         actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
         break
       case 'PICKED_UP':
-        actions.push({ label: 'Create Invoice', action: 'invoice', variant: 'bg-blue-600 hover:bg-blue-700' })
+        if (!order.invoices || order.invoices.length === 0) {
+          actions.push({ label: 'Create Invoice', action: 'invoice', variant: 'bg-blue-600 hover:bg-blue-700' })
+        }
         break
     }
     return actions
