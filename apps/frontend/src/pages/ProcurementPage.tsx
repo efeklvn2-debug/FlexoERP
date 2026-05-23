@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { procurementApi, PurchaseOrder, SupplierInvoice, SupplierInvoiceStatus } from '../api/procurement'
 import { Layout } from '../components/Layout'
 import { inventoryApi, MaterialWithStock } from '../api/inventory'
+import { suppliersApi, Supplier } from '../api/suppliers'
 
 const STATUS_COLORS: Record<string, string> = {
   AVAILABLE: 'bg-green-100 text-green-800',
@@ -41,10 +42,7 @@ const SUB_CATEGORIES: Record<ItemCategory, string[]> = {
 export function ProcurementPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [materials, setMaterials] = useState<MaterialWithStock[]>([])
-  const [suppliers, setSuppliers] = useState<string[]>(() => {
-    const saved = localStorage.getItem('flexoprint_suppliers')
-    return saved ? JSON.parse(saved) : []
-  })
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [newSupplier, setNewSupplier] = useState('')
   const [showSupplierModal, setShowSupplierModal] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -68,9 +66,12 @@ export function ProcurementPage() {
 
   const [activeTab, setActiveTab] = useState<'pos' | 'invoices'>('pos')
   const [supplierInvoices, setSupplierInvoices] = useState<SupplierInvoice[]>([])
+  const [invoicedPOIds, setInvoicedPOIds] = useState<Set<string>>(new Set())
   const [showInvModal, setShowInvModal] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
   const [selectedInvoice, setSelectedInvoice] = useState<SupplierInvoice | null>(null)
+  const [showPaymentHistoryModal, setShowPaymentHistoryModal] = useState(false)
+  const [selectedPaymentHistory, setSelectedPaymentHistory] = useState<SupplierInvoice | null>(null)
   const [poForInv, setPoForInv] = useState<PurchaseOrder | null>(null)
   const [invForm, setInvForm] = useState({ poId: '', invoiceNumber: '', date: '', amount: 0 })
   const [payForm, setPayForm] = useState({ amount: 0, date: '', paymentMethod: 'Cash' as 'Cash' | 'Bank Transfer', reference: '', notes: '' })
@@ -97,10 +98,18 @@ export function ProcurementPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await procurementApi.getPOs()
-      setPurchaseOrders(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
-      const matRes = await inventoryApi.getMaterials()
+      const [poRes, matRes, supRes, invRes] = await Promise.all([
+        procurementApi.getPOs(),
+        inventoryApi.getMaterials(),
+        suppliersApi.getAll(),
+        procurementApi.getSupplierInvoices()
+      ])
+      setPurchaseOrders(Array.isArray(poRes.data) ? poRes.data : (poRes.data as any)?.data || [])
       setMaterials(Array.isArray(matRes.data) ? matRes.data : (matRes.data as any)?.data || [])
+      setSuppliers(Array.isArray(supRes.data) ? supRes.data : (supRes.data as any)?.data || [])
+      const invoices = Array.isArray(invRes.data) ? invRes.data : (invRes.data as any)?.data || []
+      setSupplierInvoices(invoices)
+      setInvoicedPOIds(new Set(invoices.map((inv: SupplierInvoice) => inv.poId)))
     } catch (err: any) { setError(err.message) }
     setLoading(false)
   }
@@ -112,14 +121,18 @@ export function ProcurementPage() {
     } catch (err: any) { setError(err.message) }
   }
 
-  const handleAddSupplier = () => {
+  const handleAddSupplier = async () => {
     if (!newSupplier.trim()) return
-    const supplier = newSupplier.trim()
-    if (!suppliers.includes(supplier)) {
-      const updated = [...suppliers, supplier]
-      setSuppliers(updated)
-      localStorage.setItem('flexoprint_suppliers', JSON.stringify(updated))
-      setPoForm({ ...poForm, supplier })
+    const name = newSupplier.trim()
+    if (!suppliers.find(s => s.name === name)) {
+      const res = await suppliersApi.create({ name })
+      if (!res.error) {
+        const created = (res.data as any)?.data || res.data
+        if (created) {
+          setSuppliers([...suppliers, created])
+          setPoForm({ ...poForm, supplier: created.name })
+        }
+      }
     }
     setNewSupplier('')
     setShowSupplierModal(false)
@@ -296,7 +309,8 @@ export function ProcurementPage() {
       if (res.error) { setError(res.error.message); return }
       setShowInvModal(false)
       setPoForInv(null)
-      loadSupplierInvoices()
+      setInvoicedPOIds(prev => new Set(prev).add(invForm.poId))
+      loadData()
     } catch (err: any) { setError(err.message) }
   }
 
@@ -306,6 +320,11 @@ export function ProcurementPage() {
     const balance = Number(inv.amount) - Number(inv.amountPaid)
     setPayForm({ amount: balance > 0 ? balance : 0, date: today, paymentMethod: 'Cash', reference: '', notes: '' })
     setShowPayModal(true)
+  }
+
+  const openPaymentHistory = (inv: SupplierInvoice) => {
+    setSelectedPaymentHistory(inv)
+    setShowPaymentHistoryModal(true)
   }
 
   const handleRecordPayment = async () => {
@@ -538,8 +557,11 @@ export function ProcurementPage() {
                           <button onClick={() => handleDeletePO(po.id)} className="text-red-600 hover:text-red-800 text-sm font-medium">Delete</button>
                         </>
                       )}
-                      {po.status === 'RECEIVED' && (
+                      {po.status === 'RECEIVED' && !invoicedPOIds.has(po.id) && (
                         <button onClick={() => openInvoiceModal(po)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">Create Invoice</button>
+                      )}
+                      {po.status === 'RECEIVED' && invoicedPOIds.has(po.id) && (
+                        <span className="text-xs text-green-600 font-medium">Invoiced</span>
                       )}
                     </td>
                   </tr>
@@ -589,9 +611,16 @@ export function ProcurementPage() {
                         }`}>{inv.status}</span>
                       </td>
                       <td className="px-6 py-4">
-                        {inv.status !== 'PAID' && (
-                          <button onClick={() => openPaymentModal(inv)} className="text-blue-600 hover:text-blue-800 text-sm font-medium">Record Payment</button>
-                        )}
+                        <div className="flex items-center space-x-3">
+                          {inv.payments && inv.payments.length > 0 && (
+                            <button onClick={() => openPaymentHistory(inv)} className="text-slate-500 hover:text-slate-700 text-sm font-medium">
+                              History ({inv.payments.length})
+                            </button>
+                          )}
+                          {inv.status !== 'PAID' && (
+                            <button onClick={() => openPaymentModal(inv)} className="text-blue-600 hover:text-blue-800 text-sm font-medium">Record Payment</button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -617,7 +646,7 @@ export function ProcurementPage() {
                     >
                       <option value="">Select supplier</option>
                       {suppliers.map(s => (
-                        <option key={s} value={s}>{s}</option>
+                        <option key={s.id} value={s.name}>{s.name}</option>
                       ))}
                     </select>
                     <button 
@@ -949,7 +978,7 @@ export function ProcurementPage() {
                     <button type="button" onClick={() => { setShowViewPOModal(false); handleDeletePO(selectedPO.id) }} className="px-4 py-2 bg-red-600 text-white rounded-lg">Delete</button>
                   </>
                 )}
-                {selectedPO.status === 'RECEIVED' && (
+                {selectedPO.status === 'RECEIVED' && !invoicedPOIds.has(selectedPO.id) && (
                   <button type="button" onClick={() => { setShowViewPOModal(false); openInvoiceModal(selectedPO) }} className="px-4 py-2 bg-blue-600 text-white rounded-lg">Create Invoice</button>
                 )}
               </div>
@@ -973,7 +1002,7 @@ export function ProcurementPage() {
                     >
                       <option value="">Select supplier</option>
                       {suppliers.map(s => (
-                        <option key={s} value={s}>{s}</option>
+                        <option key={s.id} value={s.name}>{s.name}</option>
                       ))}
                     </select>
                     <button 
@@ -1302,6 +1331,59 @@ export function ProcurementPage() {
                   <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg">Record Payment</button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {showPaymentHistoryModal && selectedPaymentHistory && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowPaymentHistoryModal(false); setSelectedPaymentHistory(null) }}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-xl font-bold">Payment History</h2>
+                  <p className="text-sm text-slate-500">{selectedPaymentHistory.invoiceNumber} — {selectedPaymentHistory.purchaseOrder?.supplier || selectedPaymentHistory.supplier?.name || '-'}</p>
+                </div>
+                <button onClick={() => { setShowPaymentHistoryModal(false); setSelectedPaymentHistory(null) }} className="p-1 hover:bg-slate-100 rounded">
+                  <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {(!selectedPaymentHistory.payments || selectedPaymentHistory.payments.length === 0) ? (
+                <p className="text-center text-slate-500 py-8">No payments recorded yet</p>
+              ) : (
+                <div className="space-y-3">
+                  {selectedPaymentHistory.payments.map(p => (
+                    <div key={p.id} className="bg-slate-50 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-semibold text-lg text-green-700">₦{Number(p.amount).toLocaleString()}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          p.paymentMethod === 'Bank Transfer' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
+                        }`}>{p.paymentMethod}</span>
+                      </div>
+                      <div className="text-sm text-slate-600 space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Date:</span>
+                          <span>{new Date(p.date).toLocaleDateString()}</span>
+                        </div>
+                        {p.reference && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Reference:</span>
+                            <span className="font-mono text-xs">{p.reference}</span>
+                          </div>
+                        )}
+                        {p.notes && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Notes:</span>
+                            <span>{p.notes}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

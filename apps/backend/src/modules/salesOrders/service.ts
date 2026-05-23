@@ -256,24 +256,31 @@ export const salesOrderService = {
     return updated
   },
 
-  async recordPickup(id: string, userId?: string, quantityPickedUp?: number, packingBags?: number, amountPaid?: number, paymentMethod?: string) {
+  async recordPickup(id: string, userId?: string, quantityPickedUp?: number, packingBags?: number) {
     const order = await salesOrderRepository.findById(id)
     
     if (!order) {
       throw new AppError(404, 'NOT_FOUND', 'Sales order not found')
     }
 
-    if (order.status !== 'READY') {
+    if (order.status !== 'READY' && order.status !== 'PICKED_UP') {
       throw new AppError(400, 'INVALID', 'Order is not ready for pickup')
     }
 
     const currentDelivered = Number(order.quantityDelivered) || 0
     const quantityOrdered = Number(order.quantityOrdered)
+    const produced = Number(order.quantityProduced || 0)
+    const remaining = Math.max(quantityOrdered, produced) - currentDelivered
+
+    if (quantityPickedUp && quantityPickedUp > remaining) {
+      throw new AppError(400, 'INVALID', `Cannot pick up more than remaining quantity. Remaining: ${remaining} kg`)
+    }
+
     const quantity = quantityPickedUp || quantityOrdered
     const newDelivered = currentDelivered + quantity
     const fullyDelivered = newDelivered >= quantityOrdered
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       if (order.productionJobId) {
         const productionJob = await tx.productionJob.findUnique({
           where: { id: order.productionJobId },
@@ -297,66 +304,63 @@ export const salesOrderService = {
             const cogsAccountId = await financeService.getAccountIdByCode('5000')
             const deferredCogsAccountId = await financeService.getAccountIdByCode('1330')
             
-            // Calculate total deferred cost from production job
-            // Use printed weight × cost per kg (same as production service fix)
+            // Read cost snapshot from ProductionJob (saved at completion)
+            const totalJobCost = Number(productionJob.materialCost || 0)
+              + Number((productionJob as any).consumablesCost || 0)
+              + Number(productionJob.overheadCost || 0)
+
+            // Fallback for pre-fix jobs where costs were never saved
             const totalPrintedWeight = productionJob.printedRolls.reduce((sum: number, pr: any) => sum + Number(pr.weightUsed || 0), 0)
-            let totalDeferredCost = 0
-            
-            // Get parent rolls for material cost
-            if (productionJob.parentRollIds && productionJob.parentRollIds.length > 0) {
-              const parentRolls = await tx.roll.findMany({
-                where: { id: { in: productionJob.parentRollIds } },
-                include: { material: true }
-              })
-              
-              // Material cost: printed weight × cost per kg (NOT roll weight delta)
-              const parentMaterial = parentRolls[0]?.material
-              const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
-              const materialCost = totalPrintedWeight * costPerKg
-              totalDeferredCost += materialCost
+            let totalJobCostCalc = totalJobCost
+            if (!totalJobCostCalc && totalPrintedWeight > 0) {
+              totalJobCostCalc = 0
+              if (productionJob.parentRollIds && productionJob.parentRollIds.length > 0) {
+                const parentRolls = await tx.roll.findMany({
+                  where: { id: { in: productionJob.parentRollIds } },
+                  include: { material: true }
+                })
+                const parentMaterial = parentRolls[0]?.material
+                const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
+                totalJobCostCalc += totalPrintedWeight * costPerKg
+              }
+              const fbSettings = await tx.settings.findUnique({ where: { id: 'default' } })
+              if (fbSettings) {
+                const inkRate = Number(fbSettings.inkConsumptionRate) || 0.2
+                const ipaRate = Number(fbSettings.ipaConsumptionRate) || 0.1
+                const butanolRate = Number(fbSettings.butanolConsumptionRate) || 0.1
+                const inkCostRate = Number(fbSettings.inkCostPerKg) || 50
+                const consumableMaterials = await tx.material.findMany({ where: { category: 'INK_SOLVENTS' } })
+                const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
+                const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
+                const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
+                const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
+                totalJobCostCalc += totalPrintedWeight * inkRate * inkCostRate
+                  + totalPrintedWeight * ipaRate * ipaCostPerLiter
+                  + totalPrintedWeight * butanolRate * butanolCostPerLiter
+                const overheadRate = Number(fbSettings.overheadRatePerKg) || 0
+                totalJobCostCalc += totalPrintedWeight * overheadRate
+              }
             }
+
+            // Prorate COGS for partial pickup
+            const cogsRatio = totalPrintedWeight > 0
+              ? quantity / totalPrintedWeight
+              : 1
+            const cogsAmount = totalJobCostCalc > 0 ? Math.round((totalJobCostCalc * cogsRatio) * 100) / 100 : 0
             
-            // Add consumables cost (ink + IPA + Butanol)
-            const settings = await tx.settings.findUnique({ where: { id: 'default' } })
-            if (settings) {
-              const inkRate = Number(settings.inkConsumptionRate) || 0.2
-              const ipaRate = Number(settings.ipaConsumptionRate) || 0.1
-              const butanolRate = Number(settings.butanolConsumptionRate) || 0.1
-              const inkCostPerLiter = Number(settings.inkCostPerKg) || 50
-              
-              // Get IPA and Butanol material costs
-              const consumableMaterials = await tx.material.findMany({
-                where: { category: 'INK_SOLVENTS' }
-              })
-              const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
-              const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
-              const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
-              const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
-              
-              const inkCost = totalPrintedWeight * inkRate * inkCostPerLiter
-              const ipaCost = totalPrintedWeight * ipaRate * ipaCostPerLiter
-              const butanolCost = totalPrintedWeight * butanolRate * butanolCostPerLiter
-              totalDeferredCost += inkCost + ipaCost + butanolCost
-              
-              // Add overhead cost
-              const overheadRate = Number(settings.overheadRatePerKg) || 0
-              const overheadCost = totalPrintedWeight * overheadRate
-              totalDeferredCost += overheadCost
-            }
-            
-            if (totalDeferredCost > 0) {
+            if (cogsAmount > 0) {
               await financeService.postJournalEntry({
                 description: `Recognize COGS - SO ${order.orderNumber}`,
                 sourceModule: 'SALES',
                 sourceId: order.id,
                 reference: order.orderNumber,
                 lines: [
-                  { accountId: cogsAccountId, debit: totalDeferredCost, credit: 0, memo: 'COGS recognized on delivery' },
-                  { accountId: deferredCogsAccountId, debit: 0, credit: totalDeferredCost, memo: 'Deferred COGS cleared' }
+                  { accountId: cogsAccountId, debit: cogsAmount, credit: 0, memo: 'COGS recognized on delivery' },
+                  { accountId: deferredCogsAccountId, debit: 0, credit: cogsAmount, memo: 'Deferred COGS cleared' }
                 ]
               }, tx)
               
-              logger.info({ orderId: order.id, orderNumber: order.orderNumber, cogsAmount: totalDeferredCost }, 'Deferred COGS recognized on pickup')
+              logger.info({ orderId: order.id, orderNumber: order.orderNumber, cogsAmount }, 'Deferred COGS recognized on pickup')
             }
           } catch (financeErr) {
             logger.error({ err: financeErr, orderId: order.id }, 'Failed to recognize Deferred COGS - continuing anyway')
@@ -432,7 +436,7 @@ export const salesOrderService = {
       }
 
       // =====================================================
-      // RECOGNIZE REVENUE (Merge payment into pickup)
+      // RECOGNIZE REVENUE (Dr AR, Cr Revenue + VAT)
       // =====================================================
       try {
         const settings = await tx.settings.findUnique({ where: { id: 'default' } })
@@ -446,15 +450,14 @@ export const salesOrderService = {
         const { exclusive: bagExclusive, vat: bagVat } = decomposeInclusive(bagValue, vatRate)
         const totalVat = deliveryVat + bagVat
 
-        const isElectronic = paymentMethod === 'Electronic'
-        const debitAccountCode = isElectronic ? '1100' : '1000'
-        const debitAccountId = await financeService.getAccountIdByCode(debitAccountCode)
         const arAccountId = await financeService.getAccountIdByCode('1200')
         const salesRevenueId = await financeService.getAccountIdByCode('4000')
         const packingBagRevenueId = await financeService.getAccountIdByCode('4100')
         const vatOutputId = await financeService.getAccountIdByCode('2100')
 
-        const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = []
+        const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = [
+          { accountId: arAccountId, debit: totalRevenue, credit: 0, memo: 'Accounts receivable' }
+        ]
 
         if (deliveryExclusive > 0) {
           lines.push({ accountId: salesRevenueId, debit: 0, credit: deliveryExclusive, memo: 'Roll revenue (excl. VAT)' })
@@ -466,18 +469,7 @@ export const salesOrderService = {
           lines.push({ accountId: vatOutputId, debit: 0, credit: totalVat, memo: 'Output VAT' })
         }
 
-        const previousPayments = Number(order.totalPaid)
-        const amountPaidNow = amountPaid || 0
-        const arToRecognize = Math.max(0, totalRevenue - amountPaidNow)
-
-        if (amountPaidNow > 0) {
-          lines.push({ accountId: debitAccountId, debit: amountPaidNow, credit: 0, memo: isElectronic ? 'Bank transfer' : 'Cash collected at pickup' })
-        }
-        if (arToRecognize > 0) {
-          lines.push({ accountId: arAccountId, debit: arToRecognize, credit: 0, memo: 'Accounts receivable' })
-        }
-
-        if (lines.length > 0) {
+        if (lines.length > 1) {
           await financeService.postJournalEntry({
             description: `Pickup & Revenue - SO ${order.orderNumber}`,
             sourceModule: 'SALES',
@@ -485,92 +477,6 @@ export const salesOrderService = {
             reference: order.orderNumber,
             lines
           }, tx)
-        }
-
-        // Record payment transaction if cash collected
-        if (amountPaidNow > 0) {
-          await tx.paymentTransaction.create({
-            data: {
-              salesOrderId: order.id,
-              customerId: order.customerId,
-              transactionType: 'PAYMENT',
-              paymentMethod: (PAYMENT_METHOD_MAP[paymentMethod || 'Cash'] || 'CASH') as any,
-              amount: new Prisma.Decimal(String(amountPaidNow)),
-              receivedById: userId,
-              paymentCategory: bagValue > 0 && deliveryValue > 0 ? 'BOTH' : bagValue > 0 ? 'BAG' : 'ROLL',
-              notes: `Payment at pickup`
-            }
-          })
-
-          // Update order payment status
-          const newTotalPaid = previousPayments + amountPaidNow
-          let paymentStatus = 'PENDING_PAYMENT'
-          if (newTotalPaid >= totalRevenue) {
-            paymentStatus = 'FULLY_PAID'
-          } else if (newTotalPaid > 0) {
-            paymentStatus = 'PARTIAL_PAYMENT'
-          }
-
-          await tx.salesOrder.update({
-            where: { id },
-            data: {
-              totalPaid: newTotalPaid,
-              balancePaid: amountPaidNow,
-              paymentStatus: paymentStatus as any
-            }
-          })
-
-          // Auto-create invoice and complete order if fully paid at pickup
-          if (paymentStatus === 'FULLY_PAID') {
-            const autoInvoiceNumber = await invoiceRepository.getNextInvoiceNumber()
-
-            const invoiceRollInclusive = quantity * Number(order.unitPrice)
-            const invoicePackingBagsQty = packingBags || 0
-            const invoiceBagInclusive = bagTotalAmount
-            const invoiceTotalInclusive = invoiceRollInclusive + invoiceBagInclusive
-            const { exclusive: invoiceRollExclusive, vat: invoiceRollVat } = decomposeInclusive(invoiceRollInclusive, vatRate)
-            const { exclusive: invoiceBagExclusive, vat: invoiceBagVat } = decomposeInclusive(invoiceBagInclusive, vatRate)
-            const invoiceVatAmount = invoiceRollVat + invoiceBagVat
-            const invoiceSubtotalExcl = invoiceRollExclusive + invoiceBagExclusive
-            const invoiceDepositApplied = Number(order.depositPaid)
-            const invoiceCoreCreditApplied = Number(order.coreCreditApplied)
-            const invoicePreviousPayments = newTotalPaid
-            const invoiceBalanceDue = Math.max(0, invoiceTotalInclusive - invoiceDepositApplied - invoiceCoreCreditApplied - invoicePreviousPayments)
-
-            const packingBagsUnitPriceVal = bagTotalAmount > 0 && (packingBags || 0) > 0
-              ? bagTotalAmount / (packingBags || 1)
-              : 0
-
-            await tx.invoice.create({
-              data: {
-                invoiceNumber: autoInvoiceNumber,
-                salesOrderId: order.id,
-                customerId: order.customerId,
-                quantityDelivered: quantity,
-                unitPrice: new Prisma.Decimal(String(Number(order.unitPrice))),
-                subtotal: new Prisma.Decimal(String(invoiceRollExclusive)),
-                vatAmount: new Prisma.Decimal(String(invoiceVatAmount)),
-                totalAmount: new Prisma.Decimal(String(invoiceTotalInclusive)),
-                depositApplied: new Prisma.Decimal(String(invoiceDepositApplied)),
-                coreCreditApplied: new Prisma.Decimal(String(invoiceCoreCreditApplied)),
-                previousPayments: new Prisma.Decimal(String(invoicePreviousPayments)),
-                balanceDue: new Prisma.Decimal(String(invoiceBalanceDue)),
-                coresReturned: 0,
-                packingBagsQuantity: invoicePackingBagsQty || 0,
-                packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPriceVal)),
-                packingBagsSubtotal: new Prisma.Decimal(String(invoiceBagExclusive)),
-                status: 'PAID' as any,
-                paidAt: new Date()
-              }
-            })
-
-            await tx.salesOrder.update({
-              where: { id },
-              data: { status: 'COMPLETED' }
-            })
-
-            logger.info({ orderId: id, invoiceNumber: autoInvoiceNumber }, 'Invoice auto-created and order completed on full payment at pickup')
-          }
         }
       } catch (financeErr) {
         logger.error({ err: financeErr, orderId: id }, 'Failed to post revenue journal at pickup - continuing anyway')
@@ -580,6 +486,17 @@ export const salesOrderService = {
 
       return updated
     })
+
+    // After transaction, auto-create invoice on first full delivery only
+    if (fullyDelivered && (!order.invoices || order.invoices.length === 0)) {
+      try {
+        await invoiceService.createInvoice({ salesOrderId: id })
+      } catch (err) {
+        logger.error({ err, orderId: id }, 'Failed to create invoice after pickup')
+      }
+    }
+
+    return result
   },
 
   async createInvoice(input: { salesOrderId: string; quantityDelivered?: number; coresReturned?: number }, userId?: string) {
@@ -622,16 +539,34 @@ export const salesOrderService = {
     const packingBagsSubtotalExcl = bagsExcl
     const totalAmount = subtotal + packingBagsInclusive
 
-    const depositApplied = Number(order.depositPaid)
+    let depositApplied = Number(order.depositPaid)
     const coreCreditApplied = Number(order.coreCreditApplied)
     const previousPayments = Number(order.balancePaid)
-    const balanceDue = totalAmount - depositApplied - coreCreditApplied - previousPayments
+    let balanceDue = totalAmount - depositApplied - coreCreditApplied - previousPayments
+
+    // Auto-apply available advance payment balance (2250) if there's an outstanding balance
+    let advancePaymentApplied = 0
+    if (balanceDue > 0) {
+      const standaloneDeposits = await prisma.paymentTransaction.aggregate({
+        where: { customerId: order.customerId, transactionType: 'DEPOSIT', salesOrderId: null },
+        _sum: { amount: true }
+      })
+      const appliedOnInvoices = await prisma.invoice.aggregate({
+        where: { customerId: order.customerId },
+        _sum: { depositApplied: true }
+      })
+      const availableAdvance = Number(standaloneDeposits._sum.amount || 0) - Number(appliedOnInvoices._sum.depositApplied || 0)
+      advancePaymentApplied = Math.min(availableAdvance, balanceDue)
+      depositApplied += advancePaymentApplied
+      balanceDue -= advancePaymentApplied
+    }
 
     const invoiceNumber = await invoiceRepository.getNextInvoiceNumber()
 
     let invoice
     try {
       invoice = await prisma.$transaction(async (tx) => {
+        const invoiceStatus = balanceDue <= 0 ? 'PAID' : advancePaymentApplied > 0 ? 'PARTIAL' : 'ISSUED'
         const createdInvoice = await tx.invoice.create({
           data: {
             invoiceNumber,
@@ -651,16 +586,72 @@ export const salesOrderService = {
             packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPrice)),
             packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotalExcl)),
             packingBagsPaid: new Prisma.Decimal('0'),
-            status: 'ISSUED' as any,
-            issuedAt: new Date()
+            status: invoiceStatus as any,
+            issuedAt: new Date(),
+            ...(invoiceStatus === 'PAID' ? { paidAt: new Date() } : {})
           },
           include: { customer: true, salesOrder: true }
         })
 
+        // Update order quantity and payment tracking if advance was applied
+        const orderUpdateData: any = {
+          quantityDelivered: new Prisma.Decimal(String(quantityDelivered))
+        }
+        if (advancePaymentApplied > 0) {
+          const newTotalPaid = Number(order.totalPaid) + advancePaymentApplied
+          let newPaymentStatus = order.paymentStatus
+          if (newTotalPaid >= Number(order.totalAmount)) {
+            newPaymentStatus = 'FULLY_PAID'
+          } else if (newTotalPaid >= Number(order.depositRequired)) {
+            newPaymentStatus = 'DEPOSIT_COMPLETE'
+          } else if (newTotalPaid > 0) {
+            newPaymentStatus = 'PARTIAL_PAYMENT'
+          }
+          orderUpdateData.totalPaid = new Prisma.Decimal(String(newTotalPaid))
+          orderUpdateData.paymentStatus = newPaymentStatus
+          if (newPaymentStatus === 'FULLY_PAID' && order.status === 'PICKED_UP') {
+            orderUpdateData.status = 'COMPLETED'
+            orderUpdateData.completedAt = new Date()
+          }
+        }
+        // Already fully paid via direct payment before pickup
+        if (Number(order.totalPaid) >= Number(order.totalAmount) && order.status === 'PICKED_UP' && !orderUpdateData.status) {
+          orderUpdateData.status = 'COMPLETED'
+          orderUpdateData.completedAt = new Date()
+        }
         await tx.salesOrder.update({
           where: { id: order.id },
-          data: { quantityDelivered: new Prisma.Decimal(String(quantityDelivered)) }
+          data: orderUpdateData
         })
+
+        // Post journal entry for advance payment application: Dr 2250, Cr 1200
+        if (advancePaymentApplied > 0) {
+          try {
+            const creditAccountCode = '2250'
+            let creditAccountId: string
+            try {
+              creditAccountId = await financeService.getAccountIdByCode(creditAccountCode)
+            } catch {
+              creditAccountId = await financeService.createAccount({
+                code: '2250', name: 'Advance Customer Payments',
+                type: 'LIABILITY', description: 'Prepayments against future invoices'
+              }).then(a => a.id)
+            }
+            const arAccountId = await financeService.getAccountIdByCode('1200')
+            await financeService.postJournalEntry({
+              description: `Advance payment applied - ${invoiceNumber}`,
+              sourceModule: 'SALES',
+              sourceId: order.id,
+              reference: invoiceNumber,
+              lines: [
+                { accountId: creditAccountId, debit: advancePaymentApplied, credit: 0, memo: 'Advance payment applied to invoice' },
+                { accountId: arAccountId, debit: 0, credit: advancePaymentApplied, memo: `Applied to ${invoiceNumber}` }
+              ]
+            }, tx)
+          } catch (jeErr) {
+            logger.error({ err: jeErr, amount: advancePaymentApplied }, 'Failed to post advance payment journal entry - continuing')
+          }
+        }
 
         return createdInvoice
       })
@@ -671,7 +662,7 @@ export const salesOrderService = {
       throw error
     }
 
-    logger.info({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, orderId: order.id }, 'Invoice created')
+    logger.info({ invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, orderId: order.id, depositApplied, advancePaymentApplied }, 'Invoice created')
 
     return invoice
   },
@@ -756,10 +747,10 @@ export const salesOrderService = {
             orderNumber,
             customerId: effectiveCustomerId,
             specsJson,
-            quantityOrdered: new Prisma.Decimal(String(input.quantity)),
-            quantityProduced: new Prisma.Decimal(String(input.quantity)),
-            quantityDelivered: new Prisma.Decimal(String(input.quantity)),
-            unitPrice: new Prisma.Decimal(String(input.unitPrice)),
+            quantityOrdered: new Prisma.Decimal('0'),
+            quantityProduced: new Prisma.Decimal('0'),
+            quantityDelivered: new Prisma.Decimal('0'),
+            unitPrice: new Prisma.Decimal('0'),
             totalAmount: new Prisma.Decimal(String(totalAmountWithVat)),
             deliveryMethod: 'PICKUP' as any,
             depositRequired: new Prisma.Decimal('0'),
@@ -777,9 +768,9 @@ export const salesOrderService = {
             invoiceNumber,
             salesOrderId: order.id,
             customerId: effectiveCustomerId,
-            quantityDelivered: input.quantity,
-            unitPrice: new Prisma.Decimal(String(input.unitPrice)),
-            subtotal: new Prisma.Decimal(String(subtotal)),
+            quantityDelivered: 0,
+            unitPrice: new Prisma.Decimal('0'),
+            subtotal: new Prisma.Decimal('0'),
             vatAmount: new Prisma.Decimal(String(vatAmount)),
             totalAmount: new Prisma.Decimal(String(totalAmountWithVat)),
             depositApplied: new Prisma.Decimal('0'),
@@ -939,6 +930,51 @@ export const salesOrderService = {
 
   async getAllCustomerBalances() {
     return salesOrderRepository.getAllCustomerBalances()
+  },
+
+  async adjustDeposit(customerId: string, amount: number, userId?: string) {
+    const customer = await prisma.customer.findUnique({ where: { id: customerId } })
+    if (!customer) throw new AppError(404, 'NOT_FOUND', 'Customer not found')
+
+    const refNumber = `ADJ-${Date.now().toString(36).toUpperCase()}`
+    const absAmount = Math.abs(amount)
+
+    const depositAccountId = await financeService.getAccountIdByCode('2200')
+    const equityAccountId = await financeService.getAccountIdByCode('3000')
+
+    await prisma.$transaction(async (tx) => {
+      await tx.paymentTransaction.create({
+        data: {
+          customerId,
+          transactionType: 'DEPOSIT',
+          paymentMethod: 'CASH',
+          amount: new Prisma.Decimal(String(amount)),
+          referenceNumber: refNumber,
+          notes: `Deposit adjustment by user ${userId || 'system'}`,
+          receivedById: userId
+        }
+      })
+
+      await financeService.postJournalEntry({
+        description: `Deposit ${amount > 0 ? 'Increase' : 'Decrease'} (${absAmount}) - ${customer.name}`,
+        sourceModule: 'SALES',
+        sourceId: customerId,
+        reference: refNumber,
+        postedById: userId,
+        lines: amount > 0
+          ? [
+              { accountId: equityAccountId, debit: absAmount, credit: 0, memo: 'Deposit increase offset' },
+              { accountId: depositAccountId, debit: 0, credit: absAmount, memo: 'Customer deposit increased' }
+            ]
+          : [
+              { accountId: depositAccountId, debit: absAmount, credit: 0, memo: 'Customer deposit decreased' },
+              { accountId: equityAccountId, debit: 0, credit: absAmount, memo: 'Deposit decrease offset' }
+            ]
+      }, tx)
+    })
+
+    const balance = await salesOrderRepository.getCustomerBalance(customerId)
+    return balance
   }
 }
 
@@ -958,28 +994,80 @@ export const paymentService = {
       throw new AppError(400, 'VALIDATION', 'Either salesOrderId or customerId is required')
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const payment = await tx.paymentTransaction.create({
-        data: {
-          salesOrderId: input.salesOrderId,
-          customerId: input.customerId!,
-          transactionType: input.transactionType as any,
-          paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
-          amount: new Prisma.Decimal(String(input.amount)),
-          referenceNumber: input.referenceNumber,
-          notes: input.notes,
-          receivedById: userId,
-          paymentCategory: input.paymentCategory as any
-        }
-      })
+    // Auto-generate reference number if not provided
+    if (!input.referenceNumber) {
+      const prefixMap: Record<string, string> = {
+        DEPOSIT: 'DEP', PAYMENT: 'PAY', CORE_BUYBACK: 'CBY',
+        CORE_CREDIT_APPLIED: 'CCA', REFUND: 'RFD'
+      }
+      const prefix = prefixMap[input.transactionType] || 'PAY'
+      const now = new Date()
+      const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+      const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
+      input.referenceNumber = `${prefix}-${ymd}-${suffix}`
+    }
 
-      // Update sales order if linked
-      if (input.salesOrderId) {
+    const result = await prisma.$transaction(async (tx) => {
+      // Compute overpayment when a PAYMENT on an order exceeds the remaining balance
+      let overpayment = 0
+      let revenuePortion = input.amount
+      if (input.salesOrderId && input.transactionType === 'PAYMENT') {
+        const order = await tx.salesOrder.findUnique({
+          where: { id: input.salesOrderId },
+          select: { totalPaid: true, totalAmount: true }
+        })
+        if (order) {
+          const previousPayments = Number(order.totalPaid)
+          const orderTotal = Number(order.totalAmount)
+          const remaining = Math.max(0, orderTotal - previousPayments)
+          if (input.amount > remaining) {
+            overpayment = input.amount - remaining
+            revenuePortion = remaining
+          }
+        }
+      }
+
+      let payment: any = null
+      if (revenuePortion > 0) {
+        payment = await tx.paymentTransaction.create({
+          data: {
+            salesOrderId: input.salesOrderId,
+            customerId: input.customerId!,
+            transactionType: input.transactionType as any,
+            paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
+            amount: new Prisma.Decimal(String(revenuePortion)),
+            referenceNumber: input.referenceNumber,
+            notes: input.notes,
+            receivedById: userId,
+            paymentCategory: input.paymentCategory as any
+          }
+        })
+      }
+
+      let overpaymentDeposit: any = null
+      // Create separate DEPOSIT for overpayment (standalone, crediting 2250)
+      if (overpayment > 0) {
+        const depRef = `OVR-${input.referenceNumber || Date.now().toString(36).toUpperCase()}`
+        overpaymentDeposit = await tx.paymentTransaction.create({
+          data: {
+            customerId: input.customerId!,
+            transactionType: 'DEPOSIT',
+            paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
+            amount: new Prisma.Decimal(String(overpayment)),
+            receivedById: userId,
+            referenceNumber: depRef,
+            notes: `Overpayment from payment ${input.referenceNumber || ''}`
+          }
+        })
+      }
+
+      // Update sales order if linked (skip if revenuePortion is 0 — no change needed)
+      if (input.salesOrderId && revenuePortion > 0) {
         const order = await tx.salesOrder.findUnique({
           where: { id: input.salesOrderId }
         })
         if (order) {
-          const newPaid = Number(order.totalPaid) + Number(input.amount)
+          const newPaid = Number(order.totalPaid) + revenuePortion
           let paymentStatus = 'PARTIAL_PAYMENT'
           if (newPaid >= Number(order.totalAmount)) {
             paymentStatus = 'FULLY_PAID'
@@ -992,7 +1080,10 @@ export const paymentService = {
             balancePaid: newPaid,
             paymentStatus: paymentStatus as any
           }
-          if (paymentStatus === 'FULLY_PAID') {
+          if (input.transactionType === 'DEPOSIT') {
+            orderUpdateData.depositPaid = new Prisma.Decimal(String(Number(order.depositPaid) + Number(input.amount)))
+          }
+          if (paymentStatus === 'FULLY_PAID' && order.status === 'PICKED_UP' && Number(order.quantityDelivered) >= Number(order.quantityOrdered)) {
             orderUpdateData.status = 'COMPLETED'
             orderUpdateData.completedAt = new Date()
           }
@@ -1008,7 +1099,7 @@ export const paymentService = {
             orderBy: { createdAt: 'desc' }
           })
           if (linkedInvoice) {
-            const newInvoiceAmountPaid = (Number(linkedInvoice.amountPaid) || 0) + Number(input.amount)
+            const newInvoiceAmountPaid = (Number(linkedInvoice.amountPaid) || 0) + revenuePortion
             const newInvoiceBalanceDue = Math.max(0, Number(linkedInvoice.totalAmount) - newInvoiceAmountPaid - Number(linkedInvoice.depositApplied) - Number(linkedInvoice.coreCreditApplied) - Number(linkedInvoice.previousPayments))
             const newInvoiceStatus = newInvoiceAmountPaid >= Number(linkedInvoice.totalAmount) ? 'PAID' : newInvoiceAmountPaid > 0 ? 'PARTIAL' : linkedInvoice.status
 
@@ -1025,31 +1116,64 @@ export const paymentService = {
         }
       }
 
-      // Post journal entry: D/Cash-or-Bank, C/AR
+      // Post journal entry:
+      //   Standalone:             D/Cash-or-Bank, C/2250
+      //   Payment within balance: D/Cash-or-Bank, C/1200
+      //   Overpayment split:      D/Cash-or-Bank, C/1200 (revenue), C/2250 (excess)
       try {
         const isElectronicPayment = input.paymentMethod === 'Electronic'
         const debitAccountCode = isElectronicPayment ? '1100' : '1000'
         const debitAccountId = await financeService.getAccountIdByCode(debitAccountCode)
-        const arAccountId = await financeService.getAccountIdByCode('1200')
 
+        const journalLines: { accountId: string; debit: number; credit: number; memo?: string }[] = [
+          { accountId: debitAccountId, debit: input.amount, credit: 0, memo: isElectronicPayment ? 'Bank transfer' : 'Cash received' }
+        ]
+
+        if (input.salesOrderId) {
+          const arAccountId = await financeService.getAccountIdByCode('1200')
+          journalLines.push({ accountId: arAccountId, debit: 0, credit: revenuePortion, memo: 'Customer payment' })
+          if (overpayment > 0) {
+            let advancePaymentAccountId: string
+            try {
+              advancePaymentAccountId = await financeService.getAccountIdByCode('2250')
+            } catch {
+              advancePaymentAccountId = await financeService.createAccount({
+                code: '2250', name: 'Advance Customer Payments',
+                type: 'LIABILITY', description: 'Prepayments against future invoices'
+              }).then(a => a.id)
+            }
+            journalLines.push({ accountId: advancePaymentAccountId, debit: 0, credit: overpayment, memo: 'Overpayment (advance credit)' })
+          }
+        } else {
+          let advancePaymentAccountId: string
+          try {
+            advancePaymentAccountId = await financeService.getAccountIdByCode('2250')
+          } catch {
+            advancePaymentAccountId = await financeService.createAccount({
+              code: '2250', name: 'Advance Customer Payments',
+              type: 'LIABILITY', description: 'Prepayments against future invoices'
+            }).then(a => a.id)
+          }
+          journalLines.push({ accountId: advancePaymentAccountId, debit: 0, credit: input.amount, memo: 'Advance payment (no order)' })
+        }
+
+        const customer = input.customerId ? await prisma.customer.findUnique({ where: { id: input.customerId }, select: { name: true } }) : null
+        const customerLabel = customer ? ` (${customer.name})` : ''
         await financeService.postJournalEntry({
-          description: `Payment received - ${input.referenceNumber || `SO payment ₦${input.amount.toLocaleString()}`}`,
+          description: `${input.salesOrderId ? 'Payment received' : 'Advance payment received'}${customerLabel} - ${input.referenceNumber || `₦${input.amount.toLocaleString()}`}`,
           sourceModule: 'PAYMENT',
           sourceId: input.salesOrderId,
           reference: input.referenceNumber,
-          lines: [
-            { accountId: debitAccountId, debit: input.amount, credit: 0, memo: isElectronicPayment ? 'Bank transfer' : 'Cash received' },
-            { accountId: arAccountId, debit: 0, credit: input.amount, memo: `Customer payment` }
-          ]
+          lines: journalLines
         }, tx)
       } catch (jeErr) {
         logger.error({ err: jeErr, amount: input.amount }, 'Failed to post payment journal entry - continuing')
       }
 
-      return payment
+      return payment || overpaymentDeposit
     })
 
-    logger.info({ paymentId: result.id, amount: input.amount }, 'Payment recorded')
+    logger.info({ paymentId: result?.id, amount: input.amount }, 'Payment recorded')
     return result
   },
 
@@ -1060,7 +1184,11 @@ export const paymentService = {
     if (options?.dateFrom || options?.dateTo) {
       where.receivedAt = {}
       if (options.dateFrom) where.receivedAt.gte = new Date(options.dateFrom)
-      if (options.dateTo) where.receivedAt.lte = new Date(options.dateTo)
+      if (options.dateTo) {
+        const endDate = new Date(options.dateTo)
+        endDate.setDate(endDate.getDate() + 1)
+        where.receivedAt.lt = endDate
+      }
     }
 
     return prisma.paymentTransaction.findMany({
@@ -1106,6 +1234,14 @@ export const invoiceService = {
   },
 
   async addPayment(invoiceId: string, amount: number, date: Date, reference?: string, notes?: string, paymentMethod?: string) {
+    // Auto-generate reference number if not provided
+    if (!reference) {
+      const now = new Date()
+      const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+      const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
+      reference = `INVPAY-${ymd}-${suffix}`
+    }
+
     const invoice = await invoiceRepository.findById(invoiceId)
     if (!invoice) throw new AppError(404, 'NOT_FOUND', 'Invoice not found')
 

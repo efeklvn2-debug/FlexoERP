@@ -411,6 +411,7 @@ export const financeService = {
       { code: '2000', name: 'Accounts Payable', type: 'LIABILITY', description: 'Money owed to suppliers' },
       { code: '2100', name: 'VAT Output', type: 'LIABILITY', isVatEnabled: true, description: 'VAT collected on sales' },
       { code: '2200', name: 'Customer Deposits', type: 'LIABILITY', description: 'Core deposits held' },
+      { code: '2250', name: 'Advance Customer Payments', type: 'LIABILITY', description: 'Prepayments against future invoices' },
 
       { code: '3000', name: 'Opening Balance Equity', type: 'EQUITY', description: 'Opening balances' },
       { code: '3100', name: 'Retained Earnings', type: 'EQUITY', description: 'Accumulated profits' },
@@ -563,44 +564,49 @@ export const financeService = {
       throw new AppError(400, 'INVALID', 'Order has no production job')
     }
 
-    // Calculate deferred amount from job
+    // Read cost snapshot from ProductionJob (saved at completion)
     const job = order.productionJob
-    const totalPrintedWeight = Number(order.quantityProduced) || 0
-    let totalDeferredCost = 0
+    let totalDeferredCost = Number(job.materialCost || 0)
+      + Number((job as any).consumablesCost || 0)
+      + Number(job.overheadCost || 0)
 
-    // Get parent rolls for material cost
-    if (job.parentRollIds && job.parentRollIds.length > 0) {
-      const parentRolls = await prisma.roll.findMany({
-        where: { id: { in: job.parentRollIds } },
-        include: { material: true }
-      })
-      
-      // Material cost: printed weight × cost per kg
-      const parentMaterial = parentRolls[0]?.material
-      const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
-      totalDeferredCost += totalPrintedWeight * costPerKg
-    }
+    // Fallback for pre-fix jobs where costs were never saved
+    if (!totalDeferredCost) {
+      const totalPrintedWeight = Number(order.quantityProduced) || 0
 
-    // Add consumables and overhead
-    const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
-    if (settings) {
-      const inkRate = Number(settings.inkConsumptionRate) || 0.2
-      const ipaRate = Number(settings.ipaConsumptionRate) || 0.1
-      const butanolRate = Number(settings.butanolConsumptionRate) || 0.1
-      const inkCostPerLiter = Number(settings.inkCostPerKg) || 50
-      
-      const consumableMaterials = await prisma.material.findMany({ where: { category: 'INK_SOLVENTS' } })
-      const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
-      const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
-      const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
-      const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
-      
-      totalDeferredCost += totalPrintedWeight * inkRate * inkCostPerLiter
-      totalDeferredCost += totalPrintedWeight * ipaRate * ipaCostPerLiter
-      totalDeferredCost += totalPrintedWeight * butanolRate * butanolCostPerLiter
-      
-      const overheadRate = Number(settings.overheadRatePerKg) || 0
-      totalDeferredCost += totalPrintedWeight * overheadRate
+      // Get parent rolls for material cost
+      if (job.parentRollIds && job.parentRollIds.length > 0) {
+        const parentRolls = await prisma.roll.findMany({
+          where: { id: { in: job.parentRollIds } },
+          include: { material: true }
+        })
+
+        const parentMaterial = parentRolls[0]?.material
+        const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
+        totalDeferredCost += totalPrintedWeight * costPerKg
+      }
+
+      // Add consumables and overhead
+      const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+      if (settings) {
+        const inkRate = Number(settings.inkConsumptionRate) || 0.2
+        const ipaRate = Number(settings.ipaConsumptionRate) || 0.1
+        const butanolRate = Number(settings.butanolConsumptionRate) || 0.1
+        const inkCostRate = Number(settings.inkCostPerKg) || 50
+
+        const consumableMaterials = await prisma.material.findMany({ where: { category: 'INK_SOLVENTS' } })
+        const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
+        const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
+        const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
+        const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
+
+        totalDeferredCost += totalPrintedWeight * inkRate * inkCostRate
+          + totalPrintedWeight * ipaRate * ipaCostPerLiter
+          + totalPrintedWeight * butanolRate * butanolCostPerLiter
+
+        const overheadRate = Number(settings.overheadRatePerKg) || 0
+        totalDeferredCost += totalPrintedWeight * overheadRate
+      }
     }
 
     if (totalDeferredCost <= 0) {

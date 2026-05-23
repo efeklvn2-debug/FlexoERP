@@ -7,6 +7,7 @@ import { healthRouter } from './modules/health'
 import { inventoryRouter } from './modules/inventory'
 import { salesRouter } from './modules/sales'
 import { procurementRouter } from './modules/procurement'
+import { supplierRouter } from './modules/suppliers'
 import { settingsRouter } from './modules/settings'
 import { productionRouter } from './modules/production'
 import { transactionRouter } from './modules/transactions'
@@ -44,6 +45,7 @@ export function createApp() {
   app.use('/api/inventory', inventoryRouter)
   app.use('/api/sales', salesRouter)
   app.use('/api/procurement', procurementRouter)
+  app.use('/api/suppliers', supplierRouter)
   app.use('/api/production', productionRouter)
   app.use('/api/transactions', transactionRouter)
   app.use('/api/settings', settingsRouter)

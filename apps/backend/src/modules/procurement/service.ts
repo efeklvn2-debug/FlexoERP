@@ -7,6 +7,7 @@ import { prisma } from '../../database'
 import { inventoryService } from '../inventory/service'
 import { financeService } from '../finance/service'
 import { decomposeInclusive } from '../../lib/vat-utils'
+import { supplierService } from '../suppliers/service'
 
 const logger = createChildLogger('procurement:service')
 
@@ -308,23 +309,9 @@ export const procurementService = {
     const po = await procurementRepository.findPOById(poId)
     if (!po) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
 
-    let customer = await prisma.customer.findFirst({
-      where: { name: po.supplier }
-    })
-    if (!customer) {
-      const code = 'SUP-' + po.supplier.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase().slice(0, 20)
-      customer = await prisma.customer.create({
-        data: {
-          name: po.supplier,
-          code,
-          isActive: true
-        }
-      })
-      logger.info({ supplierName: po.supplier, code }, 'Auto-created customer record for supplier')
-    }
-
+    const supplier = await supplierService.findOrCreateByName(po.supplier)
     const finalInvoiceNumber = invoiceNumber || await generateSupplierInvoiceNumber()
-    logger.info({ poId, invoiceNumber: finalInvoiceNumber, amount }, 'Creating supplier invoice')
+    logger.info({ poId, invoiceNumber: finalInvoiceNumber, amount, supplierId: supplier.id }, 'Creating supplier invoice')
 
     const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
     const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
@@ -356,7 +343,7 @@ export const procurementService = {
       const createdInvoice = await tx.supplierInvoice.create({
         data: {
           poId,
-          supplierId: customer.id,
+          supplierId: supplier.id,
           invoiceNumber: finalInvoiceNumber,
           date: new Date(date),
           amount,

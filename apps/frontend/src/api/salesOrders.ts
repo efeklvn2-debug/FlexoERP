@@ -203,7 +203,7 @@ export const salesOrderApi = {
   }) => api.patch<{ order: SalesOrder; productionJob: any }>(`/sales-orders/orders/${id}/start-production`, data),
   cancelOrder: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/cancel`, {}),
   markReady: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/ready`, {}),
-  recordPickup: (id: string, quantityPickedUp?: number, packingBags?: number, amountPaid?: number, paymentMethod?: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { quantityPickedUp, packingBags, amountPaid, paymentMethod }),
+  recordPickup: (id: string, quantityPickedUp?: number, packingBags?: number) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { quantityPickedUp, packingBags }),
 
   // Payments
   recordPayment: (data: {
@@ -216,10 +216,12 @@ export const salesOrderApi = {
     referenceNumber?: string
     notes?: string
   }) => api.post<PaymentTransaction>('/sales-orders/payments', data),
-  getPayments: (params?: { salesOrderId?: string; customerId?: string }) => {
+  getPayments: (params?: { salesOrderId?: string; customerId?: string; dateFrom?: string; dateTo?: string }) => {
     const query = new URLSearchParams()
     if (params?.salesOrderId) query.append('salesOrderId', params.salesOrderId)
     if (params?.customerId) query.append('customerId', params.customerId)
+    if (params?.dateFrom) query.append('dateFrom', params.dateFrom)
+    if (params?.dateTo) query.append('dateTo', params.dateTo)
     const queryStr = query.toString()
     return api.get<PaymentTransaction[]>(`/sales-orders/payments${queryStr ? '?' + queryStr : ''}`)
   },
@@ -260,6 +262,7 @@ export const salesOrderApi = {
   getCustomerBalance: (customerId: string) => api.get<CustomerBalance>(`/sales-orders/customers/${customerId}/balance`),
   getCustomerAging: (customerId: string) => api.get<CustomerAging>(`/sales-orders/customers/${customerId}/aging`),
   getAllCustomerBalances: () => api.get<CustomerBalance[]>('/sales-orders/customer-balances'),
+  adjustDeposit: (customerId: string, amount: number) => api.post<CustomerBalance>(`/sales-orders/customers/${customerId}/deposit`, { amount }),
 
   // Customers (MTO)
   getCustomers: () => api.get<Customer[]>('/sales-orders/customers'),

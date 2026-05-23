@@ -247,8 +247,9 @@ model ProductionJob {
    printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
    
    // Job costing
-   materialCost        Decimal? @default(0) @db.Decimal(12, 2)  // Snapshot at completion
-   overheadCost        Decimal? @default(0) @db.Decimal(12, 2)  // Calculated from overhead rate
+    materialCost        Decimal? @default(0) @db.Decimal(12, 2)  // Snapshot at completion (raw parent roll material)
+    consumablesCost     Decimal? @default(0) @db.Decimal(12, 2)  // Ink + IPA + Butanol at completion
+    overheadCost        Decimal? @default(0) @db.Decimal(12, 2)  // Calculated from overhead rate
    
    createdAt           DateTime @default(now())
    updatedAt           DateTime @updatedAt

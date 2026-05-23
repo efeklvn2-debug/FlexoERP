@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { salesOrderController, paymentController, invoiceController, coreBuybackController } from './controller'
-import { authenticate, loadUser } from '../../middleware/auth'
+import { authenticate, loadUser, authorize } from '../../middleware/auth'
+import { Role } from '@flexoprint/types'
 
 export const salesOrderRouter = Router()
 
@@ -44,6 +45,7 @@ salesOrderRouter.patch('/customers/:customerId', salesOrderController.updateCust
 salesOrderRouter.get('/customers/:customerId/balance', salesOrderController.getCustomerBalance)
 salesOrderRouter.get('/customers/:customerId/aging', salesOrderController.getCustomerAging)
 salesOrderRouter.get('/customer-balances', salesOrderController.getAllCustomerBalances)
+salesOrderRouter.post('/customers/:customerId/deposit', authorize(Role.ADMIN, Role.MANAGER), salesOrderController.adjustDeposit)
 
 // Packing Bag Sales
 salesOrderRouter.post('/packing-bags/sell', coreBuybackController.sellPackingBags)

@@ -323,6 +323,23 @@ export const salesOrderRepository = {
       depositHeld += Number(order.depositPaid)
     }
 
+    // Add standalone deposits (no salesOrderId) that sit in 2250 Advance Customer Payments
+    const standaloneDeposits = await prisma.paymentTransaction.aggregate({
+      where: { customerId, transactionType: 'DEPOSIT', salesOrderId: null },
+      _sum: { amount: true }
+    })
+    const standaloneDepositTotal = Number(standaloneDeposits._sum.amount || 0)
+
+    // Subtract deposits already applied to invoices
+    const appliedDeposits = await prisma.invoice.aggregate({
+      where: { customerId },
+      _sum: { depositApplied: true }
+    })
+    const appliedDepositTotal = Number(appliedDeposits._sum.depositApplied || 0)
+
+    const advancePaymentBalance = standaloneDepositTotal - appliedDepositTotal
+    depositHeld += advancePaymentBalance
+
     return {
       customerId,
       customerName: customer.name,
@@ -408,6 +425,23 @@ export const salesOrderRepository = {
         totalOutstanding += Number(order.totalAmount) - Number(order.totalPaid)
         depositHeld += Number(order.depositPaid)
       }
+
+      // Add standalone deposits (no salesOrderId) that sit in 2250
+      const standaloneDeposits = await prisma.paymentTransaction.aggregate({
+        where: { customerId: customer.id, transactionType: 'DEPOSIT', salesOrderId: null },
+        _sum: { amount: true }
+      })
+      const standaloneDepositTotal = Number(standaloneDeposits._sum.amount || 0)
+
+      // Subtract deposits already applied to invoices
+      const appliedDeposits = await prisma.invoice.aggregate({
+        where: { customerId: customer.id },
+        _sum: { depositApplied: true }
+      })
+      const appliedDepositTotal = Number(appliedDeposits._sum.depositApplied || 0)
+
+      const advancePaymentBalance = standaloneDepositTotal - appliedDepositTotal
+      depositHeld += advancePaymentBalance
 
       balances.push({
         customerId: customer.id,

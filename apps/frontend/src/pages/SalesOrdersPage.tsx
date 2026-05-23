@@ -59,6 +59,9 @@ export function SalesOrdersPage() {
   const [activeTab, setActiveTab] = useState<Tab>('orders')
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [payments, setPayments] = useState<PaymentTransaction[]>([])
+  const [paymentDateFrom, setPaymentDateFrom] = useState('')
+  const [paymentDateTo, setPaymentDateTo] = useState('')
+  const [paymentPeriod, setPaymentPeriod] = useState('')
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('')
   const [coreBuybacks, setCoreBuybacks] = useState<any[]>([])
@@ -135,8 +138,6 @@ export function SalesOrdersPage() {
     quantityToPickup: 0,
     packingBags: 0,
     packingBagPrice: 0,
-    amountPaid: 0,
-    paymentMethod: 'Cash' as 'Cash' | 'Electronic',
     notes: ''
   })
 
@@ -192,6 +193,8 @@ export function SalesOrdersPage() {
       } catch {
         console.log('Settings not available, using default roll weight')
       }
+
+      loadCustomerBalances()
     } catch (err: any) {
       console.error('Load data error:', err)
       setError(err.message || 'Failed to load orders')
@@ -209,10 +212,11 @@ export function SalesOrdersPage() {
     return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
-  const loadPayments = async () => {
+  const loadPayments = async (dateFrom?: string, dateTo?: string) => {
     try {
-      const res = await salesOrderApi.getPayments()
-      setPayments(Array.isArray(res.data) ? res.data : [])
+      const res = await salesOrderApi.getPayments({ dateFrom, dateTo })
+      const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
+      setPayments(data)
     } catch (err: any) {
       console.error('Failed to load payments:', err)
     }
@@ -248,10 +252,67 @@ export function SalesOrdersPage() {
   const loadCustomerBalances = async () => {
     try {
       const res = await salesOrderApi.getAllCustomerBalances()
-      setCustomerBalances(Array.isArray(res.data) ? res.data : [])
+      const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
+      setCustomerBalances(data)
     } catch (err: any) {
       console.error('Failed to load customer balances:', err)
     }
+  }
+
+  const getDateRange = (period: string): { from: string; to: string } => {
+    const now = new Date()
+    const y = now.getFullYear()
+    const m = now.getMonth()
+    const d = now.getDate()
+    const fmt = (dt: Date) => {
+      const yy = dt.getFullYear()
+      const mm = String(dt.getMonth() + 1).padStart(2, '0')
+      const dd = String(dt.getDate()).padStart(2, '0')
+      return `${yy}-${mm}-${dd}`
+    }
+
+    switch (period) {
+      case 'today': return { from: fmt(now), to: fmt(now) }
+      case 'yesterday': {
+        const yest = new Date(now); yest.setDate(d - 1)
+        return { from: fmt(yest), to: fmt(yest) }
+      }
+      case 'this-week': {
+        const start = new Date(now); start.setDate(d - start.getDay())
+        return { from: fmt(start), to: fmt(now) }
+      }
+      case 'last-week': {
+        const end = new Date(now); end.setDate(d - end.getDay() - 1)
+        const start = new Date(end); start.setDate(end.getDate() - 6)
+        return { from: fmt(start), to: fmt(end) }
+      }
+      case 'this-month': return { from: `${y}-${String(m + 1).padStart(2, '0')}-01`, to: fmt(now) }
+      case 'last-month': {
+        const first = new Date(y, m - 1, 1)
+        const last = new Date(y, m, 0)
+        return { from: fmt(first), to: fmt(last) }
+      }
+      case 'last-3-months': {
+        const start = new Date(y, m - 2, 1)
+        return { from: fmt(start), to: fmt(now) }
+      }
+      default: return { from: '', to: '' }
+    }
+  }
+
+  const applyPaymentPeriod = (period: string) => {
+    setPaymentPeriod(period)
+    const range = getDateRange(period)
+    setPaymentDateFrom(range.from)
+    setPaymentDateTo(range.to)
+    loadPayments(range.from || undefined, range.to || undefined)
+  }
+
+  const clearPaymentFilters = () => {
+    setPaymentPeriod('')
+    setPaymentDateFrom('')
+    setPaymentDateTo('')
+    loadPayments()
   }
 
   useEffect(() => {
@@ -259,7 +320,7 @@ export function SalesOrdersPage() {
   }, [])
 
   useEffect(() => {
-    if (activeTab === 'payments') loadPayments()
+    if (activeTab === 'payments') loadPayments(paymentDateFrom || undefined, paymentDateTo || undefined)
     if (activeTab === 'invoices') loadInvoices()
     if (activeTab === 'core-buyback') loadCoreBuybacks()
     if (activeTab === 'balances') loadCustomerBalances()
@@ -549,8 +610,6 @@ export function SalesOrdersPage() {
       quantityToPickup: remainingQty,
       packingBags: 0,
       packingBagPrice: defaultPrice,
-      amountPaid: 0,
-      paymentMethod: 'Cash',
       notes: ''
     })
     setShowPickupModal(true)
@@ -618,11 +677,9 @@ export function SalesOrdersPage() {
       const res = await salesOrderApi.recordPickup(
         productionOrder.id, 
         pickupForm.quantityToPickup,
-        pickupForm.packingBags > 0 ? pickupForm.packingBags : undefined,
-        pickupForm.amountPaid > 0 ? pickupForm.amountPaid : undefined,
-        pickupForm.paymentMethod
+        pickupForm.packingBags > 0 ? pickupForm.packingBags : undefined
       )
-      if (res.error) { setError(res.error.message); return }
+      if (res.error) { setShowPickupModal(false); setProductionOrder(null); setError(res.error.message); return }
       setShowPickupModal(false)
       setProductionOrder(null)
       loadData()
@@ -632,6 +689,7 @@ export function SalesOrdersPage() {
         if (order) setShowOrderDetails(order)
       }
     } catch (err: any) {
+      setShowPickupModal(false); setProductionOrder(null)
       setError(err.message || 'Failed to record pickup')
     }
   }
@@ -655,8 +713,9 @@ export function SalesOrdersPage() {
         actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
         break
       case 'PICKED_UP':
-        if (!order.invoices || order.invoices.length === 0) {
-          actions.push({ label: 'Create Invoice', action: 'invoice', variant: 'bg-blue-600 hover:bg-blue-700' })
+        // Allow additional pickups if not fully delivered
+        if (Number(order.quantityDelivered) < Number(order.quantityOrdered)) {
+          actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
         }
         break
     }
@@ -678,6 +737,16 @@ export function SalesOrdersPage() {
   }
 
   const coreBuybackValue = coreBuybackForm.coresQuantity * 150
+
+  const getCustomerDeposit = (customerId: string) => {
+    return customerBalances.find(b => b.customerId === customerId)?.depositHeld || 0
+  }
+
+  const DepositBadge = ({ customerId }: { customerId: string }) => {
+    const deposit = getCustomerDeposit(customerId)
+    if (deposit <= 0) return null
+    return <span className="ml-2 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Deposit: ₦{deposit.toLocaleString()}</span>
+  }
 
   return (
     <Layout>
@@ -752,7 +821,7 @@ export function SalesOrdersPage() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200">
                   <table className="min-w-full divide-y divide-slate-200">
                     <thead className="bg-slate-50">
                       <tr>
@@ -816,7 +885,7 @@ export function SalesOrdersPage() {
                                     {a.label}
                                   </button>
                                 ))}
-                                {['PICKED_UP'].includes(o.status) && o.paymentStatus !== 'FULLY_PAID' && o.paymentStatus !== 'OVERPAID' && (
+                                {['PICKED_UP', 'COMPLETED'].includes(o.status) && o.paymentStatus !== 'FULLY_PAID' && o.paymentStatus !== 'OVERPAID' && (
                                   <button onClick={() => openPaymentModal(o)} className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-700">
                                     Pay
                                   </button>
@@ -841,12 +910,60 @@ export function SalesOrdersPage() {
             )}
 
             {activeTab === 'payments' && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-4 border-b border-slate-200 flex justify-between items-center">
-                  <h2 className="font-semibold">Payment Transactions</h2>
-                  <button onClick={() => openPaymentModal()} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                    + Record Payment
-                  </button>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+                <div className="p-4 border-b border-slate-200 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h2 className="font-semibold">Payment Transactions</h2>
+                    <button onClick={() => openPaymentModal()} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                      + Record Payment
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    <div className="flex gap-2 flex-wrap">
+                      {[
+                        { key: 'today', label: 'Today' },
+                        { key: 'yesterday', label: 'Yesterday' },
+                        { key: 'this-week', label: 'This Week' },
+                        { key: 'last-week', label: 'Last Week' },
+                        { key: 'this-month', label: 'This Month' },
+                        { key: 'last-month', label: 'Last Month' },
+                        { key: 'last-3-months', label: 'Last 3 Months' },
+                      ].map(p => (
+                        <button key={p.key}
+                          onClick={() => applyPaymentPeriod(p.key)}
+                          className={`px-3 py-1.5 text-sm rounded-lg border ${
+                            paymentPeriod === p.key
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-4 items-center flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-slate-600">From:</label>
+                        <input type="date" value={paymentDateFrom}
+                          onChange={e => { setPaymentPeriod(''); setPaymentDateFrom(e.target.value); loadPayments(e.target.value || undefined, paymentDateTo || undefined) }}
+                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-slate-600">To:</label>
+                        <input type="date" value={paymentDateTo}
+                          onChange={e => { setPaymentPeriod(''); setPaymentDateTo(e.target.value); loadPayments(paymentDateFrom || undefined, e.target.value || undefined) }}
+                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      {(paymentPeriod || paymentDateFrom || paymentDateTo) && (
+                        <button onClick={clearPaymentFilters}
+                          className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50">
@@ -910,7 +1027,7 @@ export function SalesOrdersPage() {
                     )}
                   </div>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200">
                   <table className="min-w-full divide-y divide-slate-200">
                     <thead className="bg-slate-50">
                       <tr>
@@ -948,7 +1065,7 @@ export function SalesOrdersPage() {
             )}
 
             {activeTab === 'core-buyback' && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200">
                 <div className="p-4 border-b border-slate-200 flex justify-between items-center">
                   <h2 className="font-semibold">Core Buybacks</h2>
                   <button onClick={() => setShowCoreBuybackModal(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
@@ -973,7 +1090,7 @@ export function SalesOrdersPage() {
                       coreBuybacks.map(cb => (
                         <tr key={cb.id} className="hover:bg-slate-50">
                           <td className="px-6 py-4 text-sm text-slate-600">{new Date(cb.date).toLocaleDateString()}</td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{cb.customer?.name || cb.sellerName || '-'}</td>
+                          <td className="px-6 py-4 text-sm text-slate-600">{cb.customer?.name || cb.sellerName || '-'}<DepositBadge customerId={cb.customerId || ''} /></td>
                           <td className="px-6 py-4 text-sm text-slate-900 text-right">{cb.coresQuantity}</td>
                           <td className="px-6 py-4 text-sm text-slate-600 text-right">₦{Number(cb.ratePerCore).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm font-medium text-purple-600 text-right">₦{Number(cb.totalValue).toLocaleString()}</td>
@@ -987,7 +1104,7 @@ export function SalesOrdersPage() {
             )}
 
             {activeTab === 'balances' && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200">
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50">
                     <tr>
@@ -996,7 +1113,7 @@ export function SalesOrdersPage() {
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Deposit Held</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Core Credit</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Available Credit</th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Orders</th>
+                      <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Pending Orders</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
@@ -1135,6 +1252,7 @@ export function SalesOrdersPage() {
                     <option value="">Select customer</option>
                     {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  {orderForm.customerId && <DepositBadge customerId={orderForm.customerId} />}
                 </div>
 
                 <div>
@@ -1244,7 +1362,7 @@ export function SalesOrdersPage() {
         {/* Payment Modal */}
         {showPaymentModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
               <h2 className="text-xl font-bold mb-4">Record Payment</h2>
               <form onSubmit={handleRecordPayment} className="space-y-4">
                 <div>
@@ -1253,6 +1371,7 @@ export function SalesOrdersPage() {
                     <option value="">Select customer</option>
                     {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  {paymentForm.customerId && <DepositBadge customerId={paymentForm.customerId} />}
                 </div>
 
                     {paymentForm.salesOrderId && (
@@ -1316,7 +1435,7 @@ export function SalesOrdersPage() {
         {/* Core Buyback Modal */}
         {showCoreBuybackModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
               <h2 className="text-xl font-bold mb-4">Core Buyback</h2>
               <form onSubmit={handleRecordCoreBuyback} className="space-y-4">
                 <div>
@@ -1325,6 +1444,7 @@ export function SalesOrdersPage() {
                     <option value="">-- Select customer (optional) --</option>
                     {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  {coreBuybackForm.customerId && <DepositBadge customerId={coreBuybackForm.customerId} />}
                 </div>
 
                 {!coreBuybackForm.customerId && (
@@ -1546,7 +1666,7 @@ export function SalesOrdersPage() {
         {/* Pickup Modal */}
         {showPickupModal && productionOrder && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
               <h2 className="text-xl font-bold mb-4">Record Pickup - {productionOrder.orderNumber}</h2>
               
               <div className="mb-4 p-3 bg-teal-50 rounded-lg border border-teal-200">
@@ -1578,6 +1698,16 @@ export function SalesOrdersPage() {
                   <div>
                     <span className="text-slate-500">Pickup Value:</span>
                     <span className="ml-2 font-medium text-teal-600">₦{((productionOrder.unitPrice || 0) * pickupForm.quantityToPickup).toLocaleString()}</span>
+                  </div>
+                  {pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 && (
+                    <div>
+                      <span className="text-slate-500">Packing Bags:</span>
+                      <span className="ml-2 font-medium text-teal-600">+₦{(pickupForm.packingBags * pickupForm.packingBagPrice).toLocaleString()}</span>
+                    </div>
+                  )}
+                  <div className="border-t border-teal-300 pt-1 mt-1">
+                    <span className="text-sm font-semibold text-slate-700">Pickup Value:</span>
+                    <span className="ml-2 font-bold text-teal-700">₦{((productionOrder.unitPrice || 0) * pickupForm.quantityToPickup + (pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 ? pickupForm.packingBags * pickupForm.packingBagPrice : 0)).toLocaleString()}</span>
                   </div>
                 </div>
               </div>
@@ -1641,39 +1771,6 @@ export function SalesOrdersPage() {
                   )}
                 </div>
 
-                <div className="border-t border-slate-200 pt-4 mt-4">
-                  <h4 className="text-sm font-medium text-slate-700 mb-3">Payment (Optional)</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Amount Paid (₦)</label>
-                      <input
-                        type="number"
-                        value={pickupForm.amountPaid || ''}
-                        onChange={e => setPickupForm({...pickupForm, amountPaid: parseFloat(e.target.value) || 0})}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        min="0"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Payment Method</label>
-                      <select
-                        value={pickupForm.paymentMethod}
-                        onChange={e => setPickupForm({...pickupForm, paymentMethod: e.target.value as 'Cash' | 'Electronic'})}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                      >
-                        <option value="Cash">Cash</option>
-                        <option value="Electronic">Electronic</option>
-                      </select>
-                    </div>
-                  </div>
-                  {pickupForm.amountPaid > 0 && (
-                    <p className="text-sm text-blue-600 mt-2 font-medium">
-                      Balance after payment: ₦{Math.max(0, ((productionOrder?.unitPrice || 0) * pickupForm.quantityToPickup) - pickupForm.amountPaid).toLocaleString()}
-                    </p>
-                  )}
-                </div>
-
                 <div className="flex justify-end space-x-3 pt-4">
                   <button type="button" onClick={() => setShowPickupModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
                   <button onClick={handleRecordPickup} className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700">Record Pickup</button>
@@ -1700,7 +1797,7 @@ export function SalesOrdersPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-xs text-slate-500">Customer</p>
-                    <p className="text-sm font-medium">{showOrderDetails.customer?.name}</p>
+                    <p className="text-sm font-medium">{showOrderDetails.customer?.name}<DepositBadge customerId={showOrderDetails.customerId} /></p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Status</p>
@@ -1806,15 +1903,30 @@ export function SalesOrdersPage() {
                 <div className="flex justify-between items-center pt-4 border-t border-slate-200">
                   <p className="text-xs text-slate-500">Created: {new Date(showOrderDetails.createdAt).toLocaleDateString()}</p>
                   <div className="flex space-x-2">
-                    {showOrderDetails.paymentStatus !== 'FULLY_PAID' && showOrderDetails.paymentStatus !== 'OVERPAID' && (
-                      <button onClick={() => openPaymentModal(showOrderDetails)} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                        Record Payment
-                      </button>
-                    )}
+                    {showOrderDetails.paymentStatus !== 'FULLY_PAID' && showOrderDetails.paymentStatus !== 'OVERPAID' && (() => {
+                      const outstanding = showOrderDetails.totalAmount - showOrderDetails.totalPaid
+                      const deposit = getCustomerDeposit(showOrderDetails.customerId)
+                      const disabled = deposit >= outstanding
+                      return (
+                        <button
+                          onClick={() => { if (!disabled) { setShowOrderDetails(null); openPaymentModal(showOrderDetails) }}}
+                          className={`px-4 py-2 rounded-lg ${disabled ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
+                          title={disabled ? `Customer has ₦${deposit.toLocaleString()} deposit — record pickup first to auto-apply deposit` : 'Record Payment'}
+                        >
+                          Record Payment
+                        </button>
+                      )
+                    })()}
                     {getAvailableActions(showOrderDetails).map(a => (
                       <button
                         key={a.action}
-                        onClick={() => a.action === 'invoice' ? handleCreateInvoice(showOrderDetails.id) : handleOrderAction(showOrderDetails.id, a.action as any)}
+                        onClick={() => {
+                          if (a.action === 'pickup') { setShowOrderDetails(null); openPickupModal(showOrderDetails) }
+                          else if (a.action === 'startProduction') { setShowOrderDetails(null); handleOrderAction(showOrderDetails.id, a.action as any, showOrderDetails) }
+                          else if (a.action === 'viewProduction') navigate('/production')
+                          else if (a.action === 'invoice') handleCreateInvoice(showOrderDetails.id)
+                          else handleOrderAction(showOrderDetails.id, a.action as any)
+                        }}
                         className={`px-4 py-2 text-white rounded-lg ${a.variant}`}
                       >
                         {a.label}
@@ -1844,7 +1956,7 @@ export function SalesOrdersPage() {
         {/* Customer Balance Modal */}
         {showCustomerBalance && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCustomerBalance(null)}>
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h2 className="text-xl font-bold mb-4">{showCustomerBalance.customerName}</h2>
               <div className="space-y-4">
                 <div className="p-4 bg-red-50 rounded-xl">
@@ -1906,7 +2018,7 @@ export function SalesOrdersPage() {
 
                 <div className="p-4 bg-slate-50 rounded-xl">
                   <p className="text-xs text-slate-500">Customer</p>
-                  <p className="font-medium">{currentInvoice.customer?.name || currentInvoice.salesOrder?.customer?.name || 'N/A'}</p>
+                  <p className="font-medium">{currentInvoice.customer?.name || currentInvoice.salesOrder?.customer?.name || 'N/A'}<DepositBadge customerId={currentInvoice.customerId} /></p>
                 </div>
 
                 {businessAddress && (
@@ -1916,7 +2028,7 @@ export function SalesOrdersPage() {
                   </div>
                 )}
 
-                <div className="border rounded-xl overflow-hidden">
+                <div className="border rounded-xl">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-100">
                       <tr>
@@ -1927,12 +2039,14 @@ export function SalesOrdersPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      <tr>
-                        <td className="px-4 py-2">Printed Rolls</td>
-                        <td className="px-4 py-2 text-right">{Number(currentInvoice.quantityDelivered || 0).toFixed(1)}</td>
-                        <td className="px-4 py-2 text-right">kg</td>
-                        <td className="px-4 py-2 text-right">₦{(Number(currentInvoice.subtotal) || 0).toLocaleString()}</td>
-                      </tr>
+                      {(Number(currentInvoice.subtotal) || 0) > 0 && (
+                        <tr>
+                          <td className="px-4 py-2">Printed Rolls</td>
+                          <td className="px-4 py-2 text-right">{Number(currentInvoice.quantityDelivered || 0).toFixed(1)}</td>
+                          <td className="px-4 py-2 text-right">kg</td>
+                          <td className="px-4 py-2 text-right">₦{(Number(currentInvoice.subtotal) || 0).toLocaleString()}</td>
+                        </tr>
+                      )}
                       {currentInvoice.packingBagsQuantity && currentInvoice.packingBagsQuantity > 0 && (
                         <tr>
                           <td className="px-4 py-2">Packing Bags</td>

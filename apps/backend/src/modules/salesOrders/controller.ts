@@ -101,8 +101,8 @@ export const salesOrderController = {
   async recordPickup(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const { quantityPickedUp, packingBags, amountPaid, paymentMethod } = req.body
-      const order = await salesOrderService.recordPickup(id, (req as any).user?.id, quantityPickedUp, packingBags, amountPaid, paymentMethod)
+      const { quantityPickedUp, packingBags } = req.body
+      const order = await salesOrderService.recordPickup(id, (req as any).user?.id, quantityPickedUp, packingBags)
       res.json({ data: order })
     } catch (error: any) {
       logger.error(error, 'Error recording pickup')
@@ -180,6 +180,22 @@ export const salesOrderController = {
       res.json({ data: balances })
     } catch (error: any) {
       logger.error(error, 'Error fetching customer balances')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+    }
+  },
+
+  async adjustDeposit(req: Request, res: Response) {
+    try {
+      const { customerId } = req.params
+      const { amount } = req.body
+      const userId = (req as any).user?.id
+      if (!amount || typeof amount !== 'number' || amount === 0) {
+        return res.status(400).json({ error: 'Amount must be a non-zero number' })
+      }
+      const result = await salesOrderService.adjustDeposit(customerId, amount, userId)
+      res.json({ data: result })
+    } catch (error: any) {
+      logger.error(error, 'Error adjusting deposit')
       res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
     }
   }
@@ -365,5 +381,5 @@ export const coreBuybackController = {
       logger.error(error, 'Error selling packing bags')
       res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
     }
-  }
+  },
 }

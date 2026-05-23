@@ -385,8 +385,12 @@ export const productionService = {
     }
 
     // =====================================================
-    // DEFERRED COGS POSTING
+    // DEFERRED COGS POSTING & COST SNAPSHOT
     // =====================================================
+    let materialCost = 0
+    let consumablesCost = 0
+    let overheadCost = 0
+
     try {
       const totalPrintedWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed || 0), 0)
       
@@ -400,7 +404,7 @@ export const productionService = {
         // Calculate material cost based on printed weight × cost per kg (not remaining weight deltas)
         const parentMaterial = parentRolls[0]?.material
         const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
-        const materialCost = totalPrintedWeight * costPerKg
+        materialCost = totalPrintedWeight * costPerKg
         
         // Get settings for ink/solvent and overhead rates
         const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
@@ -426,11 +430,11 @@ export const productionService = {
         const inkCost = totalPrintedWeight * inkRate * inkCostRate
         const ipaCost = totalPrintedWeight * ipaRate * ipaCostPerLiter
         const butanolCost = totalPrintedWeight * butanolRate * butanolCostPerLiter
-        const consumablesCost = inkCost + ipaCost + butanolCost
+        consumablesCost = inkCost + ipaCost + butanolCost
         
         // Calculate overhead cost
         const overheadRate = settings?.overheadRatePerKg ? Number(settings.overheadRatePerKg) : 0
-        const overheadCost = totalPrintedWeight * overheadRate
+        overheadCost = totalPrintedWeight * overheadRate
         
         const totalDeferredCost = materialCost + consumablesCost + overheadCost
         
@@ -478,7 +482,10 @@ export const productionService = {
       where: { id: jobId },
       data: {
         status: 'COMPLETED',
-        endDate: new Date()
+        endDate: new Date(),
+        materialCost,
+        consumablesCost,
+        overheadCost
       },
       include: {
         printedRolls: {

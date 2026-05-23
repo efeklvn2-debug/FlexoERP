@@ -1,5 +1,6 @@
 import path from 'path'
 import { prisma } from '../../database'
+import { salesOrderRepository } from './repository'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pdfmake = require('pdfmake')
@@ -41,6 +42,13 @@ export async function generateInvoicePdf(invoiceId: string): Promise<Buffer> {
   const footerText = settings?.invoiceFooter || 'Thank you for your business!'
 
   const customerName = invoice.customer?.name || invoice.salesOrder?.customer?.name || 'N/A'
+  let depositHeld = 0
+  if (invoice.customerId) {
+    try {
+      const balance = await salesOrderRepository.getCustomerBalance(invoice.customerId)
+      depositHeld = balance.depositHeld
+    } catch { /* balance not available */ }
+  }
   const rollExcl = Number(invoice.subtotal)
   const bagExcl = Number(invoice.packingBagsSubtotal || 0)
   const vatAmount = Number(invoice.vatAmount)
@@ -149,6 +157,28 @@ export async function generateInvoicePdf(invoiceId: string): Promise<Buffer> {
         },
         margin: [0, 8, 0, 0]
       },
+      ...(invoice.customerId
+        ? [{
+            table: {
+              widths: ['*'],
+              body: [
+                [{ text: `Customer Deposit Balance: ${formatNaira(depositHeld)}`, alignment: 'center', style: 'depositCallout' }]
+              ]
+            },
+            layout: {
+              hLineWidth: (i: number, node: any) => (i === 0 || i === node.table.body.length) ? 2 : 0,
+              vLineWidth: () => 2,
+              hLineColor: () => '#3b82f6',
+              vLineColor: () => '#3b82f6',
+              fillColor: () => '#eff6ff',
+              paddingLeft: () => 10,
+              paddingRight: () => 10,
+              paddingTop: () => 8,
+              paddingBottom: () => 8
+            },
+            margin: [0, 12, 0, 0]
+          }]
+        : []),
       { text: footerText, style: 'footer', margin: [0, 24, 0, 0] }
     ],
     styles: {
@@ -168,6 +198,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<Buffer> {
       deductionValue: { fontSize: 9, color: accentColor },
       balanceDueLabel: { fontSize: 10, bold: true, color: accentColor },
       balanceDueValue: { fontSize: 10, bold: true, color: accentColor },
+      depositCallout: { fontSize: 11, bold: true, color: '#1d4ed8' },
       footer: { fontSize: 9, color: '#94a3b8', alignment: 'center' }
     }
   }

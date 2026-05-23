@@ -12,6 +12,15 @@ export function CustomersPage() {
   const [search, setSearch] = useState('')
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
 
+  const [customerBalances, setCustomerBalances] = useState<Record<string, number>>({})
+  const [depositModalCustomer, setDepositModalCustomer] = useState<Customer | null>(null)
+  const [depositAmount, setDepositAmount] = useState('')
+  const [depositError, setDepositError] = useState('')
+
+  const userStr = localStorage.getItem('user')
+  const user = userStr ? JSON.parse(userStr) : null
+  const canAdjustDeposit = user?.role === 'ADMIN' || user?.role === 'MANAGER'
+
   const [form, setForm] = useState({
     name: '',
     code: '',
@@ -23,7 +32,20 @@ export function CustomersPage() {
 
   useEffect(() => {
     loadCustomers()
+    loadBalances()
   }, [])
+
+  const loadBalances = async () => {
+    try {
+      const res = await salesOrderApi.getAllCustomerBalances()
+      const balances = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
+      const map: Record<string, number> = {}
+      for (const b of balances) {
+        map[b.customerId] = b.depositHeld
+      }
+      setCustomerBalances(map)
+    } catch { /* ignore */ }
+  }
 
   const loadCustomers = async () => {
     setLoading(true)
@@ -127,7 +149,7 @@ export function CustomersPage() {
               placeholder="Search customers..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+              className="w-full max-w-md px-4 py-2 border border-slate-300 rounded-lg"
             />
           </div>
 
@@ -143,6 +165,7 @@ export function CustomersPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Email</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Phone</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Deposit Held</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Ink Colors</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
                 </tr>
@@ -154,6 +177,11 @@ export function CustomersPage() {
                     <td className="px-6 py-4 text-sm text-slate-600">{c.name}</td>
                     <td className="px-6 py-4 text-sm text-slate-600">{c.email || '-'}</td>
                     <td className="px-6 py-4 text-sm text-slate-600">{c.phone || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {customerBalances[c.id] !== undefined ? (
+                        <span className="font-medium text-blue-600">₦{customerBalances[c.id].toLocaleString()}</span>
+                      ) : '-'}
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-wrap gap-1">
                         {c.colors?.map((color: string) => (
@@ -175,7 +203,7 @@ export function CustomersPage() {
           )}
         </div>
 
-        {/* Add Customer Modal */}
+        {/* Add/Edit Customer Modal */}
         {showModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-2xl p-6 w-full max-w-md">
@@ -218,6 +246,42 @@ export function CustomersPage() {
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                   />
                 </div>
+
+                {editingCustomer && canAdjustDeposit && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-700">Deposit Balance</span>
+                      <span className="text-lg font-bold text-blue-700">₦{(customerBalances[editingCustomer.id] || 0).toLocaleString()}</span>
+                    </div>
+                    {!depositModalCustomer ? (
+                      <button type="button" onClick={() => { setDepositModalCustomer(editingCustomer); setDepositAmount(''); setDepositError('') }} className="w-full px-3 py-2 text-sm border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100">
+                        Adjust Deposit
+                      </button>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2">
+                          <input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} placeholder="Amount (+/-)" className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg" />
+                          <span className="text-xs text-slate-500 whitespace-nowrap">→ ₦{((customerBalances[editingCustomer.id] || 0) + (parseFloat(depositAmount) || 0)).toLocaleString()}</span>
+                        </div>
+                        <div className="flex space-x-2">
+                          <button type="button" onClick={async () => {
+                            const amount = parseFloat(depositAmount)
+                            if (isNaN(amount) || amount === 0) { setDepositError('Enter a non-zero amount'); return }
+                            setDepositError('')
+                            const res = await salesOrderApi.adjustDeposit(editingCustomer.id, amount)
+                            if (res.error) { setDepositError(res.error.message); return }
+                            setDepositModalCustomer(null)
+                            setDepositAmount('')
+                            loadBalances()
+                          }} className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg">Apply</button>
+                          <button type="button" onClick={() => { setDepositModalCustomer(null); setDepositError('') }} className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg">Cancel</button>
+                        </div>
+                        {depositError && <p className="text-xs text-red-500">{depositError}</p>}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Ink Colors <span className="text-red-500">*</span></label>
                   <div className="grid grid-cols-3 gap-2">
@@ -243,9 +307,9 @@ export function CustomersPage() {
                     <p className="text-xs text-red-500 mt-1">Please select at least one color</p>
                   )}
                 </div>
-                <div className="flex justify-end space-x-3 pt-4">
-                  <button type="button" onClick={() => { setShowModal(false); setEditingCustomer(null); setForm({ name: '', code: '', email: '', phone: '', address: '', colors: [] }) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
-                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg">{editingCustomer ? 'Update' : 'Add'}</button>
+                <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+                  <button type="button" onClick={() => { setShowModal(false); setEditingCustomer(null); setDepositModalCustomer(null); setDepositError(''); setForm({ name: '', code: '', email: '', phone: '', address: '', colors: [] }) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg">{editingCustomer ? 'Update Customer' : 'Add Customer'}</button>
                 </div>
               </form>
             </div>

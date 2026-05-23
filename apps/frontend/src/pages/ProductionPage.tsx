@@ -525,7 +525,7 @@ export function ProductionPage() {
               {(selectedJob.parentRolls || (selectedJob.parentRollIds && selectedJob.parentRollIds.length > 0)) && (
                 <div className="mb-6">
                   <h3 className="text-sm font-semibold text-slate-900 mb-3">Parent Rolls Used</h3>
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <div className="border border-slate-200 rounded-lg">
                     <table className="min-w-full divide-y divide-slate-200">
                       <thead className="bg-slate-50">
                         <tr>
@@ -558,7 +558,7 @@ export function ProductionPage() {
               {/* Printed Rolls Table */}
               <div className="mb-6">
                 <h3 className="text-sm font-semibold text-slate-900 mb-3">Printed Rolls ({selectedJob.printedRolls?.length || 0})</h3>
-                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <div className="border border-slate-200 rounded-lg">
                   <table className="min-w-full divide-y divide-slate-200">
                     <thead className="bg-slate-50">
                       <tr>

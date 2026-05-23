@@ -544,7 +544,7 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
           </div>
         </div>
       </div>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
@@ -602,7 +602,7 @@ function MaterialsTab({ materials, filter, setFilter, sort, setSort, sortOrder, 
           </div>
         </div>
       </div>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
@@ -695,7 +695,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
           <span className="text-xs text-slate-500 ml-auto">{rolls.length} of {total} rolls</span>
         </div>
       </div>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>

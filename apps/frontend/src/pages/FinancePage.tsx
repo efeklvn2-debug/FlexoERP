@@ -33,6 +33,7 @@ export function FinancePage() {
   const [deferredCogs, setDeferredCogs] = useState<DeferredCogsSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [reversing, setReversing] = useState<string | null>(null)
+  const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null)
 
   const userStr = localStorage.getItem('user')
   const user = userStr ? JSON.parse(userStr) : null
@@ -319,7 +320,11 @@ export function FinancePage() {
                       ) : journalEntries.map(entry => (
                         <tr key={entry.id} className="hover:bg-slate-50">
                           <td className="px-6 py-4 text-sm text-slate-900">{formatDate(entry.date)}</td>
-                          <td className="px-6 py-4 text-sm font-mono text-blue-600">{entry.entryNumber}</td>
+                          <td className="px-6 py-4 text-sm font-mono">
+                            <button onClick={() => setSelectedEntry(entry)} className="text-blue-600 hover:text-blue-800 hover:underline">
+                              {entry.entryNumber}
+                            </button>
+                          </td>
                           <td className="px-6 py-4 text-sm text-slate-900">{entry.description}</td>
                           <td className="px-6 py-4 text-sm text-slate-500">{entry.sourceModule}</td>
                           <td className="px-6 py-4 text-sm text-right text-slate-900">
@@ -543,6 +548,76 @@ export function FinancePage() {
           </>
         )}
       </div>
+
+      {/* Journal Entry Detail Modal */}
+      {selectedEntry && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedEntry(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">{selectedEntry.entryNumber}</h2>
+                <p className="text-sm text-slate-500">{selectedEntry.description}</p>
+              </div>
+              <button onClick={() => setSelectedEntry(null)} className="p-1 hover:bg-slate-100 rounded">
+                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div><span className="text-slate-500">Date:</span> <span className="font-medium">{formatDate(selectedEntry.date)}</span></div>
+                <div><span className="text-slate-500">Source:</span> <span className="font-medium">{selectedEntry.sourceModule}</span></div>
+                {selectedEntry.reference && (
+                  <div><span className="text-slate-500">Reference:</span> <span className="font-medium">{selectedEntry.reference}</span></div>
+                )}
+                {selectedEntry.sourceId && (
+                  <div><span className="text-slate-500">Source ID:</span> <span className="font-medium font-mono text-xs">{selectedEntry.sourceId}</span></div>
+                )}
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase">Account</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase">Debit</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase">Credit</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase">Memo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {selectedEntry.lines.map(line => (
+                    <tr key={line.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2">
+                        <span className="font-mono text-xs text-slate-500">{line.account.code}</span>
+                        <span className="ml-2">{line.account.name}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-green-700">
+                        {Number(line.debit) > 0 ? formatCurrency(Number(line.debit)) : ''}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-red-700">
+                        {Number(line.credit) > 0 ? formatCurrency(Number(line.credit)) : ''}
+                      </td>
+                      <td className="px-3 py-2 text-slate-500 text-xs">{line.memo || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-slate-50 font-medium">
+                  <tr>
+                    <td className="px-3 py-2 text-slate-700">Total</td>
+                    <td className="px-3 py-2 text-right font-mono text-green-700">
+                      {formatCurrency(selectedEntry.lines.reduce((s, l) => s + Number(l.debit), 0))}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-red-700">
+                      {formatCurrency(selectedEntry.lines.reduce((s, l) => s + Number(l.credit), 0))}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   )
 }

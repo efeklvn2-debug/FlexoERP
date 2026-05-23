@@ -10,6 +10,9 @@ export interface ProductionJob {
   machine: string
   wasteWeight?: number
   notes?: string
+  materialCost?: number
+  consumablesCost?: number
+  overheadCost?: number
   createdAt: string
   updatedAt: string
   printedRolls?: PrintedRoll[]
