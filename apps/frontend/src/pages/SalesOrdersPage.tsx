@@ -6,7 +6,7 @@ import { settingsApi } from '../api/settings'
 import { productionApi, ParentRoll } from '../api/production'
 import { Layout } from '../components/Layout'
 
-type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'REFUND'
+type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'DEPOSIT_APPLIED' | 'REFUND'
 type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 type QuantityType = 'rolls' | 'kg'
 
@@ -62,6 +62,9 @@ export function SalesOrdersPage() {
   const [paymentDateFrom, setPaymentDateFrom] = useState('')
   const [paymentDateTo, setPaymentDateTo] = useState('')
   const [paymentPeriod, setPaymentPeriod] = useState('')
+  const [coreBuybackDateFrom, setCoreBuybackDateFrom] = useState('')
+  const [coreBuybackDateTo, setCoreBuybackDateTo] = useState('')
+  const [coreBuybackPeriod, setCoreBuybackPeriod] = useState('')
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('')
   const [coreBuybacks, setCoreBuybacks] = useState<any[]>([])
@@ -150,6 +153,9 @@ export function SalesOrdersPage() {
     notes: ''
   })
 
+  const [packingBagDeposit, setPackingBagDeposit] = useState(0)
+  const [showDepositConfirm, setShowDepositConfirm] = useState(false)
+
   const loadData = async () => {
     setLoading(true)
     setError('')
@@ -212,6 +218,16 @@ export function SalesOrdersPage() {
     return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
+  useEffect(() => {
+    if (packingBagForm.customerId) {
+      salesOrderApi.getCustomerBalance(packingBagForm.customerId).then(res => {
+        if ((res.data as any)?.data) setPackingBagDeposit((res.data as any).data.depositHeld || 0)
+      }).catch(() => setPackingBagDeposit(0))
+    } else {
+      setPackingBagDeposit(0)
+    }
+  }, [packingBagForm.customerId])
+
   const loadPayments = async (dateFrom?: string, dateTo?: string) => {
     try {
       const res = await salesOrderApi.getPayments({ dateFrom, dateTo })
@@ -232,9 +248,9 @@ export function SalesOrdersPage() {
     }
   }
 
-  const loadCoreBuybacks = async () => {
+  const loadCoreBuybacks = async (dateFrom?: string, dateTo?: string) => {
     try {
-      const res = await salesOrderApi.getCoreBuybacks()
+      const res = await salesOrderApi.getCoreBuybacks({ dateFrom, dateTo })
       console.log('Core buybacks response:', res)
       let buybacks: any[] = []
       if (Array.isArray(res.data)) {
@@ -315,14 +331,25 @@ export function SalesOrdersPage() {
     loadPayments()
   }
 
-  useEffect(() => {
-    loadData()
-  }, [])
+  const applyCoreBuybackPeriod = (period: string) => {
+    setCoreBuybackPeriod(period)
+    const range = getDateRange(period)
+    setCoreBuybackDateFrom(range.from)
+    setCoreBuybackDateTo(range.to)
+    loadCoreBuybacks(range.from || undefined, range.to || undefined)
+  }
+
+  const clearCoreBuybackFilters = () => {
+    setCoreBuybackPeriod('')
+    setCoreBuybackDateFrom('')
+    setCoreBuybackDateTo('')
+    loadCoreBuybacks()
+  }
 
   useEffect(() => {
     if (activeTab === 'payments') loadPayments(paymentDateFrom || undefined, paymentDateTo || undefined)
     if (activeTab === 'invoices') loadInvoices()
-    if (activeTab === 'core-buyback') loadCoreBuybacks()
+    if (activeTab === 'core-buyback') loadCoreBuybacks(coreBuybackDateFrom || undefined, coreBuybackDateTo || undefined)
     if (activeTab === 'balances') loadCustomerBalances()
   }, [activeTab])
 
@@ -427,6 +454,15 @@ export function SalesOrdersPage() {
     if (packingBagForm.quantity <= 0) { setError('Quantity must be greater than 0'); return }
     if (packingBagForm.unitPrice <= 0) { setError('Unit price must be greater than 0'); return }
 
+    if (packingBagDeposit > 0) {
+      setShowDepositConfirm(true)
+      return
+    }
+
+    await submitPackingBagSale(false)
+  }
+
+  const submitPackingBagSale = async (applyDeposit: boolean) => {
     try {
       const res = await salesOrderApi.sellPackingBags({
         customerId: packingBagForm.customerId,
@@ -434,7 +470,8 @@ export function SalesOrdersPage() {
         unitPrice: packingBagForm.unitPrice,
         paymentMethod: packingBagForm.paymentMethod,
         referenceNumber: packingBagForm.referenceNumber || undefined,
-        notes: packingBagForm.notes || undefined
+        notes: packingBagForm.notes || undefined,
+        applyDeposit
       })
       
       if (res.error) { 
@@ -442,7 +479,12 @@ export function SalesOrdersPage() {
         return 
       }
       
-      alert(`Packing bag sale recorded!\nQuantity: ${packingBagForm.quantity} bags\nTotal: ₦${(packingBagForm.quantity * packingBagForm.unitPrice).toLocaleString()}`)
+      const data = res.data as any
+      let msg = `Packing bag sale recorded!\nQuantity: ${packingBagForm.quantity} bags\nTotal: ₦${(packingBagForm.quantity * packingBagForm.unitPrice).toLocaleString()}`
+      if (data.depositApplied > 0) {
+        msg += `\nDeposit applied: ₦${data.depositApplied.toLocaleString()}`
+      }
+      alert(msg)
       
       setPackingBagForm({
         customerId: '',
@@ -915,7 +957,7 @@ export function SalesOrdersPage() {
                   <div className="flex justify-between items-center">
                     <h2 className="font-semibold">Payment Transactions</h2>
                     <button onClick={() => openPaymentModal()} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                      + Record Payment
+                      + Deposit
                     </button>
                   </div>
                   <div className="flex flex-wrap gap-4">
@@ -988,6 +1030,7 @@ export function SalesOrdersPage() {
                               p.transactionType === 'DEPOSIT' ? 'bg-blue-100 text-blue-800' :
                               p.transactionType === 'PAYMENT' ? 'bg-green-100 text-green-800' :
                               p.transactionType === 'CORE_CREDIT_APPLIED' ? 'bg-purple-100 text-purple-800' :
+                              p.transactionType === 'DEPOSIT_APPLIED' ? 'bg-yellow-100 text-yellow-800' :
                               p.transactionType === 'REFUND' ? 'bg-red-100 text-red-800' :
                               'bg-slate-100 text-slate-800'
                             }`}>
@@ -1066,11 +1109,59 @@ export function SalesOrdersPage() {
 
             {activeTab === 'core-buyback' && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200">
-                <div className="p-4 border-b border-slate-200 flex justify-between items-center">
-                  <h2 className="font-semibold">Core Buybacks</h2>
-                  <button onClick={() => setShowCoreBuybackModal(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                    + New Buyback
-                  </button>
+                <div className="p-4 border-b border-slate-200 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h2 className="font-semibold">Core Buybacks</h2>
+                    <button onClick={() => setShowCoreBuybackModal(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                      + New Buyback
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    <div className="flex gap-2 flex-wrap">
+                      {[
+                        { key: 'today', label: 'Today' },
+                        { key: 'yesterday', label: 'Yesterday' },
+                        { key: 'this-week', label: 'This Week' },
+                        { key: 'last-week', label: 'Last Week' },
+                        { key: 'this-month', label: 'This Month' },
+                        { key: 'last-month', label: 'Last Month' },
+                        { key: 'last-3-months', label: 'Last 3 Months' },
+                      ].map(p => (
+                        <button key={p.key}
+                          onClick={() => applyCoreBuybackPeriod(p.key)}
+                          className={`px-3 py-1.5 text-sm rounded-lg border ${
+                            coreBuybackPeriod === p.key
+                              ? 'bg-purple-600 text-white border-purple-600'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-4 items-center flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-slate-600">From:</label>
+                        <input type="date" value={coreBuybackDateFrom}
+                          onChange={e => { setCoreBuybackPeriod(''); setCoreBuybackDateFrom(e.target.value); loadCoreBuybacks(e.target.value || undefined, coreBuybackDateTo || undefined) }}
+                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-slate-600">To:</label>
+                        <input type="date" value={coreBuybackDateTo}
+                          onChange={e => { setCoreBuybackPeriod(''); setCoreBuybackDateTo(e.target.value); loadCoreBuybacks(coreBuybackDateFrom || undefined, e.target.value || undefined) }}
+                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      {(coreBuybackPeriod || coreBuybackDateFrom || coreBuybackDateTo) && (
+                        <button onClick={clearCoreBuybackFilters}
+                          className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50">
@@ -1078,21 +1169,19 @@ export function SalesOrdersPage() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer/Seller</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Cores</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Rate</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Total</th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Method</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
                     {coreBuybacks.length === 0 ? (
-                      <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">No core buybacks found</td></tr>
+                      <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">No core buybacks found</td></tr>
                     ) : (
                       coreBuybacks.map(cb => (
                         <tr key={cb.id} className="hover:bg-slate-50">
                           <td className="px-6 py-4 text-sm text-slate-600">{new Date(cb.date).toLocaleDateString()}</td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{cb.customer?.name || cb.sellerName || '-'}<DepositBadge customerId={cb.customerId || ''} /></td>
+                          <td className="px-6 py-4 text-sm text-slate-600">{cb.customer?.name || cb.sellerName || '-'}</td>
                           <td className="px-6 py-4 text-sm text-slate-900 text-right">{cb.coresQuantity}</td>
-                          <td className="px-6 py-4 text-sm text-slate-600 text-right">₦{Number(cb.ratePerCore).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm font-medium text-purple-600 text-right">₦{Number(cb.totalValue).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm text-slate-600">{cb.paymentMethod}</td>
                         </tr>
@@ -1111,21 +1200,19 @@ export function SalesOrdersPage() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Outstanding</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Deposit Held</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Core Credit</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Available Credit</th>
                       <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Pending Orders</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
                     {customerBalances.length === 0 ? (
-                      <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">No customer balances found</td></tr>
+                      <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">No customer balances found</td></tr>
                     ) : (
                       customerBalances.map(cb => (
                         <tr key={cb.customerId} className="hover:bg-slate-50 cursor-pointer" onClick={() => setShowCustomerBalance(cb)}>
                           <td className="px-6 py-4 text-sm font-medium text-slate-900">{cb.customerName}</td>
                           <td className="px-6 py-4 text-sm text-red-600 text-right">₦{Number(cb.totalOutstanding).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm text-blue-600 text-right">₦{Number(cb.depositHeld).toLocaleString()}</td>
-                          <td className="px-6 py-4 text-sm text-purple-600 text-right">₦{Number(cb.coreCreditBalance).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm text-green-600 text-right">₦{Number(cb.availableCredit).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm text-slate-600 text-center">{cb.ordersCount}</td>
                         </tr>
@@ -1237,10 +1324,8 @@ export function SalesOrdersPage() {
                 </div>
               </div>
             )}
-          </>
-        )}
 
-        {/* New Order Modal */}
+            {/* New Order Modal */}
         {showOrderModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -1385,7 +1470,6 @@ export function SalesOrdersPage() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Transaction Type</label>
                   <select value={paymentForm.transactionType} onChange={e => setPaymentForm({...paymentForm, transactionType: e.target.value as TransactionType})} className="w-full px-4 py-2 border border-slate-300 rounded-lg">
                     <option value="DEPOSIT">Deposit</option>
-                    <option value="PAYMENT">Payment</option>
                     <option value="CORE_CREDIT_APPLIED">Apply Core Credit</option>
                   </select>
                 </div>
@@ -1952,6 +2036,32 @@ export function SalesOrdersPage() {
             </div>
           </div>
         )}
+          {showDepositConfirm && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+                <h3 className="text-lg font-semibold mb-3">Deposit Available</h3>
+                <p className="text-sm text-slate-600 mb-6">
+                  This customer has ₦{packingBagDeposit.toLocaleString()} available deposit. Would you like it applied for this sale?
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={async () => { setShowDepositConfirm(false); await submitPackingBagSale(false) }}
+                    className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200"
+                  >
+                    No
+                  </button>
+                  <button
+                    onClick={async () => { setShowDepositConfirm(false); await submitPackingBagSale(true) }}
+                    className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700"
+                  >
+                    Yes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          </>
+        )}
 
         {/* Customer Balance Modal */}
         {showCustomerBalance && (
@@ -1963,15 +2073,9 @@ export function SalesOrdersPage() {
                   <p className="text-xs text-red-600">Total Outstanding</p>
                   <p className="text-2xl font-bold text-red-700">₦{Number(showCustomerBalance.totalOutstanding).toLocaleString()}</p>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-blue-50 rounded-xl">
-                    <p className="text-xs text-blue-600">Deposit Held</p>
-                    <p className="text-lg font-bold text-blue-700">₦{Number(showCustomerBalance.depositHeld).toLocaleString()}</p>
-                  </div>
-                  <div className="p-4 bg-purple-50 rounded-xl">
-                    <p className="text-xs text-purple-600">Core Credit</p>
-                    <p className="text-lg font-bold text-purple-700">₦{Number(showCustomerBalance.coreCreditBalance).toLocaleString()}</p>
-                  </div>
+                <div className="p-4 bg-blue-50 rounded-xl">
+                  <p className="text-xs text-blue-600">Deposit Held</p>
+                  <p className="text-lg font-bold text-blue-700">₦{Number(showCustomerBalance.depositHeld).toLocaleString()}</p>
                 </div>
                 <div className="p-4 bg-green-50 rounded-xl">
                   <p className="text-xs text-green-600">Available Credit</p>
@@ -2075,12 +2179,6 @@ export function SalesOrdersPage() {
                         <td colSpan={3} className="px-4 py-2 text-right font-medium">Deposit Applied:</td>
                         <td className="px-4 py-2 text-right">-₦{(Number(currentInvoice.depositApplied) || 0).toLocaleString()}</td>
                       </tr>
-                      {Number(currentInvoice.coreCreditApplied) > 0 && (
-                        <tr>
-                          <td colSpan={3} className="px-4 py-2 text-right font-medium">Core Credit:</td>
-                          <td className="px-4 py-2 text-right">-₦{(Number(currentInvoice.coreCreditApplied) || 0).toLocaleString()}</td>
-                        </tr>
-                      )}
                       {Number(currentInvoice.previousPayments) > 0 && (
                         <tr>
                           <td colSpan={3} className="px-4 py-2 text-right font-medium">Previous Payments:</td>

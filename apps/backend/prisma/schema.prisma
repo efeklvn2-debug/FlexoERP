@@ -550,6 +550,7 @@ enum MTATransactionType {
   PAYMENT
   CORE_BUYBACK
   CORE_CREDIT_APPLIED
+  DEPOSIT_APPLIED
   REFUND
 }
 
@@ -591,9 +592,6 @@ model Customer {
   depositPercentDefault Decimal         @default(0) @db.Decimal(5, 2)
   paymentTermsDays      Int             @default(0)  // 0 = at pickup, 7/15/30 = credit
   
-  // Core Credit Balance
-  coreCreditBalance     Decimal         @default(0) @db.Decimal(15, 2)
-  
   // Notification Preferences
   notifyEmail           Boolean         @default(true)
   notifyWhatsApp        Boolean         @default(true)
@@ -632,9 +630,6 @@ model SalesOrder {
   balancePaid          Decimal          @default(0) @db.Decimal(15, 2)
   totalPaid            Decimal          @default(0) @db.Decimal(15, 2)
   paymentStatus         MTOPaymentStatus @default(PENDING_PAYMENT)
-  
-  // Core Credit
-  coreCreditApplied     Decimal          @default(0) @db.Decimal(15, 2)
   
   // Packing Bags Tracking
   packingBagsQuantity  Int              @default(0)
@@ -684,7 +679,6 @@ model PaymentTransaction {
   // For core buyback (random seller)
   sellerName            String?   // if no customer (random person)
   coresQuantity         Int?      // for core buyback
-  coreCreditBalance     Decimal?  // customer's new credit balance after transaction
   
   // Tracking
   receivedById          String?
@@ -714,7 +708,6 @@ model Invoice {
   
   // Adjustments
   depositApplied        Decimal          @default(0) @db.Decimal(15, 2)
-  coreCreditApplied     Decimal          @default(0) @db.Decimal(15, 2)
   previousPayments      Decimal          @default(0) @db.Decimal(15, 2)
   balanceDue            Decimal          @db.Decimal(15, 2)
   

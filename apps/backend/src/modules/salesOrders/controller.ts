@@ -350,20 +350,9 @@ export const coreBuybackController = {
     }
   },
 
-  async getCustomerCoreBalance(req: Request, res: Response) {
-    try {
-      const { customerId } = req.params
-      const balance = await coreBuybackService.getCustomerCoreBalance(customerId)
-      res.json({ data: balance })
-    } catch (error: any) {
-      logger.error(error, 'Error fetching core balance')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
-    }
-  },
-
   async sellPackingBags(req: Request, res: Response) {
     try {
-      const { customerId, quantity, unitPrice, paymentMethod, referenceNumber, notes } = req.body
+      const { customerId, quantity, unitPrice, paymentMethod, referenceNumber, notes, applyDeposit } = req.body
       const userId = (req as any).user?.id
 
       const result = await salesOrderService.sellPackingBags({
@@ -373,7 +362,8 @@ export const coreBuybackController = {
         paymentMethod,
         referenceNumber,
         notes,
-        userId
+        userId,
+        applyDeposit
       })
 
       res.status(201).json({ data: result })

@@ -540,9 +540,8 @@ export const salesOrderService = {
     const totalAmount = subtotal + packingBagsInclusive
 
     let depositApplied = Number(order.depositPaid)
-    const coreCreditApplied = Number(order.coreCreditApplied)
     const previousPayments = Number(order.balancePaid)
-    let balanceDue = totalAmount - depositApplied - coreCreditApplied - previousPayments
+    let balanceDue = totalAmount - depositApplied - previousPayments
 
     // Auto-apply available advance payment balance (2250) if there's an outstanding balance
     let advancePaymentApplied = 0
@@ -578,7 +577,6 @@ export const salesOrderService = {
             vatAmount: new Prisma.Decimal(String(vatAmount)),
             totalAmount: new Prisma.Decimal(String(totalAmount)),
             depositApplied: new Prisma.Decimal(String(depositApplied)),
-            coreCreditApplied: new Prisma.Decimal(String(coreCreditApplied)),
             previousPayments: new Prisma.Decimal(String(previousPayments)),
             balanceDue: new Prisma.Decimal(String(balanceDue)),
             coresReturned: input.coresReturned || 0,
@@ -675,6 +673,7 @@ export const salesOrderService = {
     referenceNumber?: string
     notes?: string
     userId?: string
+    applyDeposit?: boolean
   }) {
     const material = await prisma.material.findFirst({
       where: { code: 'PBAG' }
@@ -732,6 +731,23 @@ export const salesOrderService = {
     const orderNumber = await salesOrderRepository.generateUniqueOrderNumber()
     const invoiceNumber = await invoiceRepository.getNextInvoiceNumber()
 
+    // Compute available deposit if requested
+    let depositToApply = 0
+    if (input.applyDeposit && customerId) {
+      const standaloneDeposits = await prisma.paymentTransaction.aggregate({
+        where: { customerId, transactionType: 'DEPOSIT', salesOrderId: null },
+        _sum: { amount: true }
+      })
+      const appliedOnInvoices = await prisma.invoice.aggregate({
+        where: { customerId },
+        _sum: { depositApplied: true }
+      })
+      const availableDeposit = Number(standaloneDeposits._sum.amount || 0) - Number(appliedOnInvoices._sum.depositApplied || 0)
+      depositToApply = Math.min(availableDeposit, totalAmountWithVat)
+    }
+
+    const cashPaymentAmount = totalAmountWithVat - depositToApply
+
     try {
       await prisma.$transaction(async (tx) => {
         await inventoryService.recordPackingBagChange(
@@ -773,30 +789,44 @@ export const salesOrderService = {
             subtotal: new Prisma.Decimal('0'),
             vatAmount: new Prisma.Decimal(String(vatAmount)),
             totalAmount: new Prisma.Decimal(String(totalAmountWithVat)),
-            depositApplied: new Prisma.Decimal('0'),
-            coreCreditApplied: new Prisma.Decimal('0'),
+            depositApplied: new Prisma.Decimal(String(depositToApply)),
             previousPayments: new Prisma.Decimal('0'),
             balanceDue: new Prisma.Decimal('0'),
             coresReturned: 0,
             packingBagsQuantity: input.quantity,
             packingBagsUnitPrice: new Prisma.Decimal(String(input.unitPrice)),
             packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotal)),
-            packingBagsPaid: new Prisma.Decimal(String(totalAmountWithVat)),
+            packingBagsPaid: new Prisma.Decimal(String(cashPaymentAmount)),
             amountPaid: new Prisma.Decimal(String(totalAmountWithVat)),
             status: 'PAID' as any,
             paidAt: new Date()
           }
         })
 
-        if (customerId) {
+        if (customerId && cashPaymentAmount > 0) {
           await tx.paymentTransaction.create({
             data: {
               customerId,
               transactionType: 'PAYMENT',
               paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
-              amount: new Prisma.Decimal(String(totalAmountWithVat)),
+              amount: new Prisma.Decimal(String(cashPaymentAmount)),
               referenceNumber: input.referenceNumber,
               notes: input.notes || `Packing bag sale: ${input.quantity} bags (Invoice ${invoiceNumber})`,
+              receivedById: input.userId,
+              salesOrderId: order.id
+            }
+          })
+        }
+
+        if (depositToApply > 0) {
+          await tx.paymentTransaction.create({
+            data: {
+              customerId,
+              transactionType: 'DEPOSIT_APPLIED',
+              paymentMethod: 'CASH' as any,
+              amount: new Prisma.Decimal(String(depositToApply)),
+              referenceNumber: input.referenceNumber,
+              notes: `Deposit applied to packing bag sale: ${input.quantity} bags (Invoice ${invoiceNumber})`,
               receivedById: input.userId,
               salesOrderId: order.id
             }
@@ -838,16 +868,32 @@ export const salesOrderService = {
             ]
           }, tx)
 
-          await financeService.postJournalEntry({
-            description: `Payment - Packing Bags ${invoiceNumber}`,
-            sourceModule: 'PAYMENT',
-            sourceId: invoice.id,
-            reference: input.referenceNumber || invoiceNumber,
-            lines: [
-              { accountId: debitAccountId, debit: totalAmountWithVat, credit: 0, memo: isElectronic ? 'Bank transfer' : 'Cash received' },
-              { accountId: arAccountId, debit: 0, credit: totalAmountWithVat, memo: 'AR cleared' }
-            ]
-          }, tx)
+          if (cashPaymentAmount > 0) {
+            await financeService.postJournalEntry({
+              description: `Payment - Packing Bags ${invoiceNumber}`,
+              sourceModule: 'PAYMENT',
+              sourceId: invoice.id,
+              reference: input.referenceNumber || invoiceNumber,
+              lines: [
+                { accountId: debitAccountId, debit: cashPaymentAmount, credit: 0, memo: isElectronic ? 'Bank transfer' : 'Cash received' },
+                { accountId: arAccountId, debit: 0, credit: cashPaymentAmount, memo: 'AR cleared (cash portion)' }
+              ]
+            }, tx)
+          }
+
+          if (depositToApply > 0) {
+            const depositLiabilityId = await financeService.getAccountIdByCode('2250')
+            await financeService.postJournalEntry({
+              description: `Deposit Applied - Packing Bags ${invoiceNumber}`,
+              sourceModule: 'SALES',
+              sourceId: invoice.id,
+              reference: invoiceNumber,
+              lines: [
+                { accountId: depositLiabilityId, debit: depositToApply, credit: 0, memo: 'Customer deposit applied' },
+                { accountId: arAccountId, debit: 0, credit: depositToApply, memo: 'AR cleared (deposit portion)' }
+              ]
+            }, tx)
+          }
         } catch (financeError: any) {
           logger.error({ error: financeError }, 'Failed to post journal entries for packing bag sale')
           throw new AppError(503, 'SERVICE_UNAVAILABLE', 'Cannot complete packing bag sale; accounting system temporarily unavailable.')
@@ -869,7 +915,8 @@ export const salesOrderService = {
       unitPrice: input.unitPrice,
       subtotal,
       vatAmount,
-      totalAmount: totalAmountWithVat
+      totalAmount: totalAmountWithVat,
+      depositApplied: depositToApply
     }
   },
 
@@ -1100,7 +1147,7 @@ export const paymentService = {
           })
           if (linkedInvoice) {
             const newInvoiceAmountPaid = (Number(linkedInvoice.amountPaid) || 0) + revenuePortion
-            const newInvoiceBalanceDue = Math.max(0, Number(linkedInvoice.totalAmount) - newInvoiceAmountPaid - Number(linkedInvoice.depositApplied) - Number(linkedInvoice.coreCreditApplied) - Number(linkedInvoice.previousPayments))
+            const newInvoiceBalanceDue = Math.max(0, Number(linkedInvoice.totalAmount) - newInvoiceAmountPaid - Number(linkedInvoice.depositApplied) - Number(linkedInvoice.previousPayments))
             const newInvoiceStatus = newInvoiceAmountPaid >= Number(linkedInvoice.totalAmount) ? 'PAID' : newInvoiceAmountPaid > 0 ? 'PARTIAL' : linkedInvoice.status
 
             await tx.invoice.update({
@@ -1319,43 +1366,130 @@ export const invoiceService = {
 
 // Core Buyback Service
 export const coreBuybackService = {
-  async recordBuyback(input: {
+  async recordCoreBuyback(input: {
     customerId?: string
     sellerName: string
     coresQuantity: number
-    ratePerCore: number
+    ratePerCore?: number
     paymentMethod: string
     paidAmount?: number
-  }) {
-    const totalValue = input.coresQuantity * input.ratePerCore
-    
-    const buyback = await coreBuybackRepository.create({
-      customerId: input.customerId,
-      sellerName: input.sellerName,
-      coresQuantity: input.coresQuantity,
-      ratePerCore: input.ratePerCore,
-      totalValue,
-      paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
-      paidAmount: input.paidAmount || totalValue
-    })
-
-    // Update customer core credit if applicable
-    if (input.customerId) {
-      const customer = await prisma.customer.findUnique({ where: { id: input.customerId } })
-      if (customer) {
-        const newBalance = Number(customer.coreCreditBalance) + totalValue
-        await prisma.customer.update({
-          where: { id: input.customerId },
-          data: { coreCreditBalance: new Prisma.Decimal(String(newBalance)) }
-        })
-      }
+  }, userId?: string) {
+    if (!input.ratePerCore) {
+      const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+      input.ratePerCore = Number(settings?.coreDepositValue || 150)
     }
+    const totalValue = input.coresQuantity * input.ratePerCore
+
+    // If customer selected, credit their deposit + post journal entry
+    if (input.customerId) {
+      const otherIncomeId = await financeService.getAccountIdByCode('4200')
+      const depositLiabilityId = await financeService.getAccountIdByCode('2200')
+
+      const effectiveRate = input.ratePerCore!
+      const { buyback } = await prisma.$transaction(async (tx) => {
+        const buyback = await coreBuybackRepository.create({
+          customerId: input.customerId,
+          sellerName: input.sellerName,
+          coresQuantity: input.coresQuantity,
+          ratePerCore: effectiveRate,
+          totalValue,
+          paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
+          paidAmount: 0,
+          recordedById: userId
+        }, tx)
+
+        await inventoryService.recordCoreChange(input.coresQuantity, 'CORE_BUYBACK', undefined, userId, tx)
+
+        await tx.paymentTransaction.create({
+          data: {
+            customerId: input.customerId,
+            transactionType: 'DEPOSIT',
+            paymentMethod: 'CASH' as any,
+            amount: new Prisma.Decimal(String(totalValue)),
+            referenceNumber: `CORE-${buyback.id.slice(-8)}`,
+            notes: `Core buyback: ${input.coresQuantity} cores (₦${totalValue.toLocaleString()})`,
+            receivedById: userId,
+            salesOrderId: null
+          }
+        })
+
+        await financeService.postJournalEntry({
+          description: `Core buyback - ${input.coresQuantity} cores (₦${totalValue.toLocaleString()})`,
+          sourceModule: 'SALES',
+          sourceId: buyback.id,
+          reference: `CORE-${buyback.id.slice(-8)}`,
+          postedById: userId,
+          lines: [
+            { accountId: otherIncomeId, debit: totalValue, credit: 0, memo: 'Core buyback - cores received' },
+            { accountId: depositLiabilityId, debit: 0, credit: totalValue, memo: 'Customer deposit credited for cores' }
+          ]
+        }, tx)
+
+        return { buyback }
+      })
+
+      logger.info({ buybackId: buyback.id, cores: input.coresQuantity, value: totalValue }, 'Core buyback recorded')
+      return buyback
+    }
+
+    // Walk-in: record cash payout + post journal entry
+    const otherIncomeId = await financeService.getAccountIdByCode('4200')
+    const cashPayoutCode = input.paymentMethod === 'Electronic' ? '1100' : '1000'
+    const cashAccountId = await financeService.getAccountIdByCode(cashPayoutCode)
+    const paidAmount = input.paidAmount || totalValue
+
+    const { buyback } = await prisma.$transaction(async (tx) => {
+      const buyback = await coreBuybackRepository.create({
+        customerId: input.customerId,
+        sellerName: input.sellerName,
+        coresQuantity: input.coresQuantity,
+        ratePerCore: input.ratePerCore!,
+        totalValue,
+        paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
+        paidAmount,
+        recordedById: userId
+      }, tx)
+
+      await inventoryService.recordCoreChange(input.coresQuantity, 'CORE_BUYBACK', undefined, userId, tx)
+
+      await tx.paymentTransaction.create({
+        data: {
+          transactionType: 'CORE_BUYBACK',
+          paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
+          amount: new Prisma.Decimal(String(paidAmount)),
+          referenceNumber: `CORE-${buyback.id.slice(-8)}`,
+          notes: `Core buyback - ${input.sellerName}: ${input.coresQuantity} cores (₦${paidAmount.toLocaleString()})`,
+          receivedById: userId,
+          sellerName: input.sellerName,
+          coresQuantity: input.coresQuantity
+        }
+      })
+
+      await financeService.postJournalEntry({
+        description: `Core buyback (walk-in) - ${input.sellerName}: ${input.coresQuantity} cores (₦${paidAmount.toLocaleString()})`,
+        sourceModule: 'SALES',
+        sourceId: buyback.id,
+        reference: `CORE-${buyback.id.slice(-8)}`,
+        postedById: userId,
+        lines: [
+          { accountId: otherIncomeId, debit: paidAmount, credit: 0, memo: 'Core buyback - cores received' },
+          { accountId: cashAccountId, debit: 0, credit: paidAmount, memo: `Cash paid to ${input.sellerName}` }
+        ]
+      }, tx)
+
+      return { buyback }
+    })
 
     logger.info({ buybackId: buyback.id, cores: input.coresQuantity, value: totalValue }, 'Core buyback recorded')
     return buyback
   },
 
-  async getBuybacks(customerId?: string) {
-    return coreBuybackRepository.findAll(customerId)
-  }
+  async getCoreBuybacks(options?: { customerId?: string; dateFrom?: string; dateTo?: string }) {
+    return coreBuybackRepository.findAll({
+      customerId: options?.customerId,
+      dateFrom: options?.dateFrom ? new Date(options.dateFrom) : undefined,
+      dateTo: options?.dateTo ? new Date(options.dateTo) : undefined
+    })
+  },
+
 }

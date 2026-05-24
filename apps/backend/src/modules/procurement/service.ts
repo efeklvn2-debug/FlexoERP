@@ -357,36 +357,35 @@ export const procurementService = {
         }
       })
 
-      try {
-        const rawMaterialAccountId = await financeService.getAccountIdByCode('1300')
-        const packagingAccountId = await financeService.getAccountIdByCode('1510')
-        const vatInputId = await financeService.getAccountIdByCode('1400')
-        const apAccountId = await financeService.getAccountIdByCode('2000')
+      const rawMaterialAccountId = await financeService.getAccountIdByCode('1300')
+      const packagingAccountId = await financeService.getAccountIdByCode('1510')
+      const vatInputId = await financeService.getAccountIdByCode('1400')
+      const apAccountId = await financeService.getAccountIdByCode('2000')
 
-        const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = []
+      const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = []
 
-        if (rawMaterialExclusive > 0) {
-          lines.push({ accountId: rawMaterialAccountId, debit: rawMaterialExclusive, credit: 0, memo: 'Raw material inventory (excl. VAT)' })
-        }
-        if (packagingExclusive > 0) {
-          lines.push({ accountId: packagingAccountId, debit: packagingExclusive, credit: 0, memo: 'Packaging inventory (excl. VAT)' })
-        }
-        if (totalVat > 0) {
-          lines.push({ accountId: vatInputId, debit: totalVat, credit: 0, memo: 'Input VAT on purchase' })
-        }
-        lines.push({ accountId: apAccountId, debit: 0, credit: amount, memo: `Supplier invoice ${finalInvoiceNumber}` })
-
-        await financeService.postJournalEntry({
-          description: `Supplier Invoice ${finalInvoiceNumber} - ${po.supplier}`,
-          sourceModule: 'PROCUREMENT',
-          sourceId: createdInvoice.id,
-          reference: finalInvoiceNumber,
-          date: new Date(date),
-          lines
-        }, tx)
-      } catch (financeErr) {
-        logger.error({ err: financeErr }, 'Failed to post procurement journal entry - continuing')
+      if (rawMaterialExclusive > 0) {
+        lines.push({ accountId: rawMaterialAccountId, debit: rawMaterialExclusive, credit: 0, memo: 'Raw material inventory (excl. VAT)' })
       }
+      if (packagingExclusive > 0) {
+        lines.push({ accountId: packagingAccountId, debit: packagingExclusive, credit: 0, memo: 'Packaging inventory (excl. VAT)' })
+      }
+      if (totalVat > 0) {
+        lines.push({ accountId: vatInputId, debit: totalVat, credit: 0, memo: 'Input VAT on purchase' })
+      }
+      lines.push({ accountId: apAccountId, debit: 0, credit: amount, memo: `Supplier invoice ${finalInvoiceNumber}` })
+
+      logger.info({ lines, totalVat, rawMaterialExclusive, packagingExclusive, amount }, 'Posting procurement journal entry')
+
+      await financeService.postJournalEntry({
+        description: `Supplier Invoice ${finalInvoiceNumber} - ${po.supplier}`,
+        sourceModule: 'PROCUREMENT',
+        sourceId: createdInvoice.id,
+        reference: finalInvoiceNumber,
+        lines
+      }, tx)
+
+      logger.info({ invoiceNumber: finalInvoiceNumber, invoiceId: createdInvoice.id }, 'Procurement journal entry posted successfully')
 
       return createdInvoice
     })
@@ -450,25 +449,20 @@ export const procurementService = {
         }
       })
 
-      try {
-        const cashAccountCode = paymentMethod === 'Cash' ? '1000' : '1100'
-        const apAccountId = await financeService.getAccountIdByCode('2000')
-        const cashAccountId = await financeService.getAccountIdByCode(cashAccountCode)
+      const cashAccountCode = paymentMethod === 'Cash' ? '1000' : '1100'
+      const apAccountId = await financeService.getAccountIdByCode('2000')
+      const cashAccountId = await financeService.getAccountIdByCode(cashAccountCode)
 
-        await financeService.postJournalEntry({
-          description: `Payment for ${inv.invoiceNumber} - ${inv.po?.supplier || ''}`,
-          sourceModule: 'PROCUREMENT',
-          sourceId: inv.id,
-          reference: reference || inv.invoiceNumber,
-          date: new Date(date),
-          lines: [
-            { accountId: apAccountId, debit: amount, credit: 0, memo: `Payment to supplier ${inv.invoiceNumber}` },
-            { accountId: cashAccountId, debit: 0, credit: amount, memo: paymentMethod === 'Cash' ? 'Cash payment' : 'Bank transfer' }
-          ]
-        }, tx)
-      } catch (jeErr) {
-        logger.error({ err: jeErr }, 'Failed to post payment journal entry - continuing')
-      }
+      await financeService.postJournalEntry({
+        description: `Payment for ${inv.invoiceNumber} - ${inv.po?.supplier || ''}`,
+        sourceModule: 'PROCUREMENT',
+        sourceId: inv.id,
+        reference: reference || inv.invoiceNumber,
+        lines: [
+          { accountId: apAccountId, debit: amount, credit: 0, memo: `Payment to supplier ${inv.invoiceNumber}` },
+          { accountId: cashAccountId, debit: 0, credit: amount, memo: paymentMethod === 'Cash' ? 'Cash payment' : 'Bank transfer' }
+        ]
+      }, tx)
 
       return payment
     })

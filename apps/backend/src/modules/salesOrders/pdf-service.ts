@@ -54,7 +54,6 @@ export async function generateInvoicePdf(invoiceId: string): Promise<Buffer> {
   const vatAmount = Number(invoice.vatAmount)
   const totalIncl = Number(invoice.totalAmount)
   const depositApplied = Number(invoice.depositApplied)
-  const coreCredit = Number(invoice.coreCreditApplied)
   const previousPayments = Number(invoice.previousPayments)
   const balanceDue = Number(invoice.balanceDue)
 
@@ -143,7 +142,6 @@ export async function generateInvoicePdf(invoiceId: string): Promise<Buffer> {
             ...(vatAmount > 0 ? [[{ text: `VAT (${vatRate}%)`, alignment: 'right', style: 'totalLabel' }, { text: formatNaira(vatAmount), alignment: 'right', style: 'totalValue' }]] : []),
             [{ text: 'Total (incl. VAT)', alignment: 'right', style: 'grandTotalLabel' }, { text: formatNaira(totalIncl), alignment: 'right', style: 'grandTotalValue' }],
             ...(depositApplied > 0 ? [[{ text: 'Deposit Applied', alignment: 'right', style: 'totalLabel' }, { text: `-${formatNaira(depositApplied)}`, alignment: 'right', style: 'deductionValue' }]] : []),
-            ...(coreCredit > 0 ? [[{ text: 'Core Credit', alignment: 'right', style: 'totalLabel' }, { text: `-${formatNaira(coreCredit)}`, alignment: 'right', style: 'deductionValue' }]] : []),
             ...(previousPayments > 0 ? [[{ text: 'Previous Payments', alignment: 'right', style: 'totalLabel' }, { text: `-${formatNaira(previousPayments)}`, alignment: 'right', style: 'deductionValue' }]] : []),
             ...(balanceDue > 0
               ? [[{ text: 'Balance Due', alignment: 'right', style: 'balanceDueLabel' }, { text: formatNaira(balanceDue), alignment: 'right', style: 'balanceDueValue' }]]

@@ -5,7 +5,7 @@ import { procurementApi, Roll } from '../api/procurement'
 import { productionApi, PrintedRollDisplay } from '../api/production'
 import { Layout } from '../components/Layout'
 
-type TabType = 'plain-rolls' | 'ink-solvents' | 'packaging' | 'printed-rolls' | 'initial-stock'
+type TabType = 'plain-rolls' | 'ink-solvents' | 'cores' | 'packing-bags' | 'printed-rolls' | 'initial-stock'
 
 interface InitialStockItem {
   materialId: string
@@ -85,7 +85,7 @@ export function InventoryPage() {
       if (activeTab === 'plain-rolls') {
         const res = await procurementApi.getRolls()
         setRolls(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
-      } else if (activeTab === 'ink-solvents' || activeTab === 'packaging') {
+      } else if (activeTab === 'ink-solvents') {
         const res = await inventoryApi.getMaterials()
         setMaterials(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
       } else if (activeTab === 'printed-rolls') {
@@ -142,23 +142,6 @@ export function InventoryPage() {
     return result
   }, [inkSolvents, materialsFilter, materialsSort, materialsSortOrder])
 
-  const packaging = materials.filter(m => m.category === 'PACKAGING')
-  const filteredPackaging = useMemo(() => {
-    let result = [...packaging]
-    if (materialsFilter.search) {
-      const term = materialsFilter.search.toLowerCase()
-      result = result.filter(m => (m.name || '').toLowerCase().includes(term) || (m.code || '').toLowerCase().includes(term))
-    }
-    result.sort((a, b) => {
-      let comparison = 0
-      if (materialsSort === 'name') comparison = (a.name || '').localeCompare(b.name || '')
-      else if (materialsSort === 'code') comparison = (a.code || '').localeCompare(b.code || '')
-      else comparison = Number(a.totalStock) - Number(b.totalStock)
-      return materialsSortOrder === 'desc' ? -comparison : comparison
-    })
-    return result
-  }, [packaging, materialsFilter, materialsSort, materialsSortOrder])
-
   const filteredPrintedRolls = useMemo(() => {
     let result = [...printedRolls]
     if (printedRollFilter.search) {
@@ -205,7 +188,8 @@ export function InventoryPage() {
           <div className="flex space-x-2">
             <button onClick={() => setActiveTab('plain-rolls')} className={`px-4 py-2 rounded-lg ${activeTab === 'plain-rolls' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Plain Rolls</button>
             <button onClick={() => setActiveTab('ink-solvents')} className={`px-4 py-2 rounded-lg ${activeTab === 'ink-solvents' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Inks / Solvents</button>
-            <button onClick={() => setActiveTab('packaging')} className={`px-4 py-2 rounded-lg ${activeTab === 'packaging' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Cores & Packaging</button>
+            <button onClick={() => setActiveTab('cores')} className={`px-4 py-2 rounded-lg ${activeTab === 'cores' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Cores</button>
+            <button onClick={() => setActiveTab('packing-bags')} className={`px-4 py-2 rounded-lg ${activeTab === 'packing-bags' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Packing Bags</button>
             <button onClick={() => setActiveTab('printed-rolls')} className={`px-4 py-2 rounded-lg ${activeTab === 'printed-rolls' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`}>Printed Rolls</button>
             <button onClick={() => setActiveTab('initial-stock')} className={`px-4 py-2 rounded-lg ${activeTab === 'initial-stock' ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 border border-purple-200'}`}>Initial Stock</button>
           </div>
@@ -241,8 +225,11 @@ export function InventoryPage() {
                 isAdmin={isAdmin}
               />
             )}
-            {activeTab === 'packaging' && (
-              <CoresAndPackagingTab packagingMaterials={filteredPackaging} onAdjust={isAdmin ? setAdjustMaterial : undefined} isAdmin={isAdmin} />
+            {activeTab === 'cores' && (
+              <CoresTab />
+            )}
+            {activeTab === 'packing-bags' && (
+              <PackingBagsTab onAdjust={isAdmin ? setAdjustMaterial : undefined} />
             )}
             {activeTab === 'printed-rolls' && (
               <PrintedRollsTab
@@ -742,60 +729,41 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
   )
 }
 
-function CoresAndPackagingTab({ packagingMaterials, onAdjust, isAdmin }: { packagingMaterials: MaterialWithStock[], onAdjust?: (m: MaterialWithStock) => void, isAdmin?: boolean }) {
+function CoresTab() {
   const [coreStock, setCoreStock] = useState<number>(0)
   const [coreMovements, setCoreMovements] = useState<any[]>([])
-  const [packingBagMovements, setPackingBagMovements] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadData()
+    ;(async () => {
+      setLoading(true)
+      try {
+        const res = await inventoryApi.getCoreStock()
+        if (!res.error) {
+          const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data
+          if (data) {
+            setCoreStock(data.stock || 0)
+            setCoreMovements(data.movements || [])
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load core stock:', err)
+      }
+      setLoading(false)
+    })()
   }, [])
-
-  const loadData = async () => {
-    setLoading(true)
-    try {
-      const [coreRes, packingRes] = await Promise.all([
-        inventoryApi.getCoreStock(),
-        inventoryApi.getPackingBagStock(60)
-      ])
-
-      if (!coreRes.error) {
-        const coreData = Array.isArray(coreRes.data) ? coreRes.data : (coreRes.data as any)?.data
-        if (coreData) {
-          setCoreStock(coreData.stock || 0)
-          setCoreMovements(coreData.movements || [])
-        }
-      } else {
-        console.error('Core stock error:', coreRes.error)
-      }
-
-      if (!packingRes.error) {
-        const packingData = Array.isArray(packingRes.data) ? packingRes.data : (packingRes.data as any)?.data
-        if (packingData) {
-          setPackingBagMovements(packingData.movements || [])
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load packaging data:', err)
-    }
-    setLoading(false)
-  }
 
   if (loading) {
     return <div className="text-center py-12">Loading...</div>
   }
 
-  const nonCorePackaging = packagingMaterials.filter(m => m.subCategory !== 'CORE')
-
   return (
-    <div className="space-y-6">
-      {/* Core Stock Section */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-        <div className="flex justify-between items-center mb-4">
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-semibold text-slate-900">Core Stock</h3>
           <div className="text-right">
-            <p className="text-xs text-slate-500">In Stock</p>
+            <p className="text-xs text-slate-500">Total In Stock</p>
             <p className="text-3xl font-bold text-blue-600">{coreStock} <span className="text-lg font-normal text-slate-500">pcs</span></p>
           </div>
         </div>
@@ -803,31 +771,38 @@ function CoresAndPackagingTab({ packagingMaterials, onAdjust, isAdmin }: { packa
         {coreMovements.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200">
+              <colgroup>
+                <col className="w-[22%]" />
+                <col className="w-[13%]" />
+                <col className="w-[10%]" />
+                <col className="w-[25%]" />
+                <col className="w-[30%]" />
+              </colgroup>
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Qty</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Reference</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Notes</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date / Time</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Qty</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Reference</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Notes</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {coreMovements.slice(0, 20).map((m: any) => (
                   <tr key={m.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-2 text-sm text-slate-600">{new Date(m.createdAt).toLocaleDateString()}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-6 py-4 text-sm text-slate-600">{new Date(m.createdAt).toLocaleString()}</td>
+                    <td className="px-6 py-4">
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                         m.type === 'IN' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                       }`}>
                         {m.type === 'IN' ? 'In' : 'Out'}
                       </span>
                     </td>
-                    <td className={`px-4 py-2 text-sm text-right font-medium ${m.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
+                    <td className={`px-6 py-4 text-sm text-right font-medium tabular-nums ${m.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
                       {m.type === 'IN' ? '+' : '-'}{m.quantity}
                     </td>
-                    <td className="px-4 py-2 text-sm text-slate-600">{m.reference || '-'}</td>
-                    <td className="px-4 py-2 text-sm text-slate-500">{m.notes || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600">{m.reference || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-500">{m.notes || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -837,17 +812,59 @@ function CoresAndPackagingTab({ packagingMaterials, onAdjust, isAdmin }: { packa
           <p className="text-sm text-slate-500 text-center py-4">No core movements recorded yet</p>
         )}
       </div>
+    </div>
+  )
+}
 
-      {/* Packing Bags Section */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+function PackingBagsTab({ onAdjust }: { onAdjust?: (m: MaterialWithStock) => void }) {
+  const [packagingMaterials, setPackagingMaterials] = useState<MaterialWithStock[]>([])
+  const [packingBagMovements, setPackingBagMovements] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    ;(async () => {
+      setLoading(true)
+      try {
+        const [materialsRes, packingRes] = await Promise.all([
+          inventoryApi.getMaterials(),
+          inventoryApi.getPackingBagStock(60)
+        ])
+
+        if (!materialsRes.error) {
+          const data = Array.isArray(materialsRes.data) ? materialsRes.data : (materialsRes.data as any)?.data
+          if (data) {
+            setPackagingMaterials(data.filter((m: any) => m.category === 'PACKAGING' && m.subCategory !== 'CORE'))
+          }
+        }
+
+        if (!packingRes.error) {
+          const data = Array.isArray(packingRes.data) ? packingRes.data : (packingRes.data as any)?.data
+          if (data) {
+            setPackingBagMovements(data.movements || [])
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load packing bag data:', err)
+      }
+      setLoading(false)
+    })()
+  }, [])
+
+  if (loading) {
+    return <div className="text-center py-12">Loading...</div>
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">Packing Bags</h3>
 
-        {nonCorePackaging.length > 0 ? (
+        {packagingMaterials.length > 0 ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            {nonCorePackaging.map(m => (
-              <div key={m.id} className="bg-slate-50 rounded-lg p-3">
+            {packagingMaterials.map(m => (
+              <div key={m.id} className="bg-slate-50 rounded-lg p-4">
                 <p className="text-xs text-slate-500 truncate">{m.name}</p>
-                <p className="text-xl font-bold text-slate-900">{m.totalStock || 0}</p>
+                <p className="text-2xl font-bold text-slate-900">{m.totalStock || 0}</p>
                 <p className="text-xs text-slate-400">{m.unitOfMeasure || 'pcs'}</p>
                 {onAdjust && (
                   <button onClick={() => onAdjust(m)} className="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium">
@@ -864,31 +881,38 @@ function CoresAndPackagingTab({ packagingMaterials, onAdjust, isAdmin }: { packa
         {packingBagMovements.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200">
+              <colgroup>
+                <col className="w-[22%]" />
+                <col className="w-[22%]" />
+                <col className="w-[13%]" />
+                <col className="w-[13%]" />
+                <col className="w-[30%]" />
+              </colgroup>
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Material</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Qty</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Reference</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date / Time</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Material</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Qty</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Reference</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {packingBagMovements.slice(0, 20).map((m: any) => (
                   <tr key={m.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-2 text-sm text-slate-600">{new Date(m.createdAt).toLocaleDateString()}</td>
-                    <td className="px-4 py-2 text-sm text-slate-600">{m.material?.name || '-'}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-6 py-4 text-sm text-slate-600">{new Date(m.createdAt).toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600">{m.material?.name || '-'}</td>
+                    <td className="px-6 py-4">
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                         m.type === 'IN' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                       }`}>
                         {m.type === 'IN' ? 'Purchase' : 'Sale'}
                       </span>
                     </td>
-                    <td className={`px-4 py-2 text-sm text-right font-medium ${m.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
+                    <td className={`px-6 py-4 text-sm text-right font-medium tabular-nums ${m.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
                       {m.type === 'IN' ? '+' : '-'}{m.quantity}
                     </td>
-                    <td className="px-4 py-2 text-sm text-slate-600">{m.reference || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600">{m.reference || '-'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -78,16 +78,6 @@ export const coreManagementService = {
       )
     }
     
-    // Credit customer's core balance
-    await prisma.customer.update({
-      where: { id: order.customerId },
-      data: {
-        coreCreditBalance: {
-          increment: new Prisma.Decimal(String(coreValue))
-        }
-      }
-    })
-    
     logger.info({ 
       salesOrderId, 
       coresReturned, 
@@ -165,54 +155,6 @@ export const coreManagementService = {
     return coreBuyback
   },
 
-  /**
-   * Apply core credit to an invoice at pickup or invoicing
-   * @param salesOrderId The sales order ID
-   * @param amount The amount of core credit to apply (optional, defaults to available balance)
-   * @param userId The user ID recording the transaction
-   */
-  async applyCoreCreditToInvoice(
-    salesOrderId: string, 
-    amount?: number, 
-    userId?: string
-  ): Promise<number> {
-    const order = await salesOrderService.getOrderById(salesOrderId)
-    const customer = await prisma.customer.findUnique({
-      where: { id: order.customerId }
-    })
-    
-    if (!customer) {
-      throw new AppError(404, 'NOT_FOUND', 'Customer not found')
-    }
-    
-    const availableCoreCredit = Number(customer.coreCreditBalance)
-    const amountToApply = amount !== undefined ? Math.min(amount, availableCoreCredit) : availableCoreCredit
-    
-    if (amountToApply <= 0) {
-      return 0
-    }
-    
-    // Record a payment transaction for core credit applied
-    await paymentService.recordPayment({
-      salesOrderId,
-      transactionType: 'CORE_CREDIT_APPLIED',
-      paymentMethod: 'CORE_CREDIT',
-      amount: amountToApply
-    }, userId)
-    
-    logger.info({ 
-      salesOrderId, 
-      amountToApply, 
-      customerId: order.customerId 
-    }, 'Core credit applied to invoice')
-    
-    return amountToApply
-  },
-
-  /**
-   * Get the total core stock available in the system
-   * @returns Total quantity of cores in stock
-   */
   async getTotalCoreStock(): Promise<number> {
     // Find core material
     const coreMaterial = await prisma.material.findFirst({
@@ -233,20 +175,4 @@ export const coreManagementService = {
     return stockItem ? stockItem.totalStock : 0
   },
 
-  /**
-   * Get the core credit balance for a customer
-   * @param customerId The customer ID
-   * @returns The core credit balance
-   */
-  async getCustomerCoreCreditBalance(customerId: string): Promise<number> {
-    const customer = await prisma.customer.findUnique({
-      where: { id: customerId }
-    })
-    
-    if (!customer) {
-      throw new AppError(404, 'NOT_FOUND', 'Customer not found')
-    }
-    
-    return Number(customer.coreCreditBalance)
-  }
 }

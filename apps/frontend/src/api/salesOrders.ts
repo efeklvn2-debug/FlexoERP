@@ -3,7 +3,7 @@ import { api } from './client'
 export type DeliveryMethod = 'PICKUP' | 'SHIPPING'
 export type MTOOrderStatus = 'PENDING' | 'APPROVED' | 'MRP_PENDING' | 'IN_PRODUCTION' | 'READY' | 'PICKED_UP' | 'COMPLETED' | 'CANCELLED'
 export type MTOPaymentStatus = 'PENDING_PAYMENT' | 'PARTIAL_DEPOSIT' | 'DEPOSIT_COMPLETE' | 'PARTIAL_PAYMENT' | 'FULLY_PAID' | 'OVERPAID'
-export type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'REFUND'
+export type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'DEPOSIT_APPLIED' | 'REFUND'
 export type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'CANCELLED'
 
@@ -28,7 +28,6 @@ export interface Customer {
   creditLimit: number
   depositPercentDefault: number
   paymentTermsDays: number
-  coreCreditBalance: number
   notifyEmail: boolean
   notifyWhatsApp: boolean
 }
@@ -52,7 +51,6 @@ export interface SalesOrder {
   balancePaid: number
   totalPaid: number
   paymentStatus: MTOPaymentStatus
-  coreCreditApplied: number
   status: MTOOrderStatus
   productionJobId?: string
   createdAt: string
@@ -75,7 +73,6 @@ export interface PaymentTransaction {
   notes?: string
   sellerName?: string
   coresQuantity?: number
-  coreCreditBalance?: number
   receivedAt: string
   customer?: Customer
   salesOrder?: SalesOrder
@@ -92,7 +89,6 @@ export interface Invoice {
   vatAmount: number
   totalAmount: number
   depositApplied: number
-  coreCreditApplied: number
   previousPayments: number
   balanceDue: number
   coresReturned: number
@@ -138,7 +134,6 @@ export interface CustomerBalance {
   customerName: string
   totalOutstanding: number
   depositHeld: number
-  coreCreditBalance: number
   availableCredit: number
   ordersCount: number
 }
@@ -250,13 +245,14 @@ export const salesOrderApi = {
     paymentMethod: PaymentMethod
     notes?: string
   }) => api.post<CoreBuyback>('/sales-orders/core-buyback', data),
-  getCoreBuybacks: (params?: { customerId?: string }) => {
+  getCoreBuybacks: (params?: { customerId?: string; dateFrom?: string; dateTo?: string }) => {
     const query = new URLSearchParams()
     if (params?.customerId) query.append('customerId', params.customerId)
+    if (params?.dateFrom) query.append('dateFrom', params.dateFrom)
+    if (params?.dateTo) query.append('dateTo', params.dateTo)
     const queryStr = query.toString()
     return api.get<CoreBuyback[]>(`/sales-orders/core-buyback${queryStr ? '?' + queryStr : ''}`)
   },
-  getCustomerCoreBalance: (customerId: string) => api.get<{ customerId: string; customerName: string; coreCreditBalance: number }>(`/sales-orders/core-buyback/customer/${customerId}`),
 
   // Customer Balance
   getCustomerBalance: (customerId: string) => api.get<CustomerBalance>(`/sales-orders/customers/${customerId}/balance`),
@@ -303,6 +299,7 @@ export const salesOrderApi = {
     paymentMethod: PaymentMethod
     referenceNumber?: string
     notes?: string
+    applyDeposit?: boolean
   }) => api.post<{
     success: boolean
     order: { id: string; orderNumber: string }
@@ -313,6 +310,7 @@ export const salesOrderApi = {
     subtotal: number
     vatAmount: number
     totalAmount: number
+    depositApplied: number
   }>('/sales-orders/packing-bags/sell', data),
 
   downloadInvoicePdf: async (id: string) => {

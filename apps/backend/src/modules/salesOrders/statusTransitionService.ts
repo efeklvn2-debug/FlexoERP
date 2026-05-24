@@ -240,7 +240,6 @@ export const salesOrderStatusTransitionService = {
           vatAmount: new Prisma.Decimal('0'),
           totalAmount: new Prisma.Decimal('0'),
           depositApplied: order.depositPaid,
-          coreCreditApplied: order.coreCreditApplied,
           previousPayments: order.balancePaid,
           balanceDue: new Prisma.Decimal('0'),
           coresReturned,
@@ -370,19 +369,6 @@ export const salesOrderStatusTransitionService = {
         coreMaterial.id,
         coresReturned // Positive because we're receiving cores
       )
-      
-      // Credit customer's core balance
-      const settings = await settingsService.getSettings()
-      const coreValue = coresReturned * Number(settings.coreDepositValue || 150)
-      
-      await tx.customer.update({
-        where: { id: order.customerId },
-        data: {
-          coreCreditBalance: {
-            increment: new Prisma.Decimal(String(coreValue))
-          }
-        }
-      })
     }
   },
 
@@ -433,7 +419,6 @@ export const salesOrderStatusTransitionService = {
     
     const balanceDue = totalAmount - 
       Number(invoice.depositApplied) - 
-      Number(invoice.coreCreditApplied) - 
       Number(invoice.previousPayments) -
       Number(invoice.packingBagsPaid)
     

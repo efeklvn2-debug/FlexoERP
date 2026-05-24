@@ -101,7 +101,7 @@ export const salesOrderRepository = {
         return orderNumber
       }
     }
-    throw new AppError('Failed to generate unique order number', 500)
+    throw new AppError(500, 'GENERATION_FAILED', 'Failed to generate unique order number')
   },
 
   async create(data: {
@@ -174,7 +174,6 @@ export const salesOrderRepository = {
     balancePaid?: Prisma.Decimal | number
     totalPaid?: Prisma.Decimal | number
     paymentStatus?: string
-    coreCreditApplied?: Prisma.Decimal | number
   }) {
     const updateData: any = {}
     
@@ -189,9 +188,6 @@ export const salesOrderRepository = {
     }
     if (data.paymentStatus !== undefined) {
       updateData.paymentStatus = data.paymentStatus as any
-    }
-    if (data.coreCreditApplied !== undefined) {
-      updateData.coreCreditApplied = new Prisma.Decimal(String(data.coreCreditApplied))
     }
 
     return prisma.salesOrder.update({
@@ -345,7 +341,6 @@ export const salesOrderRepository = {
       customerName: customer.name,
       totalOutstanding,
       depositHeld,
-      coreCreditBalance: Number(customer.coreCreditBalance),
       availableCredit: Number(customer.creditLimit) - totalOutstanding,
       ordersCount
     }
@@ -448,7 +443,6 @@ export const salesOrderRepository = {
         customerName: customer.name,
         totalOutstanding,
         depositHeld,
-        coreCreditBalance: Number(customer.coreCreditBalance),
         availableCredit: Number(customer.creditLimit) - totalOutstanding,
         ordersCount
       })
@@ -469,7 +463,6 @@ export const paymentRepository = {
     notes?: string
     sellerName?: string
     coresQuantity?: number
-    coreCreditBalance?: Prisma.Decimal | number
     receivedById?: string
   }) {
     return prisma.paymentTransaction.create({
@@ -483,7 +476,6 @@ export const paymentRepository = {
         notes: data.notes,
         sellerName: data.sellerName,
         coresQuantity: data.coresQuantity,
-        coreCreditBalance: data.coreCreditBalance ? new Prisma.Decimal(String(data.coreCreditBalance)) : null,
         receivedById: data.receivedById
       }
     })
@@ -556,7 +548,6 @@ export const invoiceRepository = {
     vatAmount: Prisma.Decimal | number
     totalAmount: Prisma.Decimal | number
     depositApplied: Prisma.Decimal | number
-    coreCreditApplied: Prisma.Decimal | number
     previousPayments: Prisma.Decimal | number
     balanceDue: Prisma.Decimal | number
     coresReturned?: number
@@ -576,7 +567,6 @@ export const invoiceRepository = {
         vatAmount: new Prisma.Decimal(String(data.vatAmount)),
         totalAmount: new Prisma.Decimal(String(data.totalAmount)),
         depositApplied: new Prisma.Decimal(String(data.depositApplied)),
-        coreCreditApplied: new Prisma.Decimal(String(data.coreCreditApplied)),
         previousPayments: new Prisma.Decimal(String(data.previousPayments)),
         balanceDue: new Prisma.Decimal(String(data.balanceDue)),
         coresReturned: data.coresReturned || 0,
@@ -642,8 +632,9 @@ export const coreBuybackRepository = {
     paidAmount?: Prisma.Decimal | number
     recordedById?: string
     notes?: string
-  }) {
-    return prisma.coreBuyback.create({
+  }, tx?: Prisma.TransactionClient) {
+    const db = tx || prisma
+    return db.coreBuyback.create({
       data: {
         customerId: data.customerId,
         sellerName: data.sellerName,

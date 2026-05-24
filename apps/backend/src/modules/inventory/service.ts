@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { inventoryRepository } from './repository'
 import { MaterialInput, MaterialUpdateInput, StockMovementInput } from './validation'
 import { Material, MaterialWithStock, StockMovement } from './types'
@@ -155,8 +156,6 @@ export const inventoryService = {
     
     const stock = await inventoryRepository.getOrCreateStock(materialId, 'MAIN')
     
-    await inventoryRepository.updateStockQuantity(stock.id, quantity)
-    
     return inventoryRepository.createStockMovement({
       materialId,
       stockId: stock.id,
@@ -168,8 +167,10 @@ export const inventoryService = {
     })
   },
 
-  async recordCoreChange(quantity: number, type: 'PRODUCTION_OUT' | 'CORE_RECOVERY' | 'CORE_BUYBACK', reference?: string, userId?: string): Promise<StockMovement | null> {
-    let coreMaterial = await prisma.material.findFirst({
+  async recordCoreChange(quantity: number, type: 'PRODUCTION_OUT' | 'CORE_RECOVERY' | 'CORE_BUYBACK', reference?: string, userId?: string, tx?: Prisma.TransactionClient): Promise<StockMovement | null> {
+    const db = tx || prisma
+
+    let coreMaterial = await db.material.findFirst({
       where: {
         category: 'PACKAGING',
         subCategory: 'CORE'
@@ -178,7 +179,7 @@ export const inventoryService = {
 
     if (!coreMaterial) {
       logger.info('Creating core material for inventory tracking...')
-      coreMaterial = await prisma.material.create({
+      coreMaterial = await db.material.create({
         data: {
           code: 'CORE',
           name: 'Core',
@@ -190,9 +191,6 @@ export const inventoryService = {
         }
       })
     }
-
-    const stock = await inventoryRepository.getOrCreateStock(coreMaterial.id, 'MAIN')
-    await inventoryRepository.updateStockQuantity(stock.id, quantity)
 
     let movementType = 'IN'
     let notes = ''
@@ -212,6 +210,34 @@ export const inventoryService = {
         break
     }
 
+    if (tx) {
+      const stock = await db.stock.upsert({
+        where: { materialId_location: { materialId: coreMaterial.id, location: 'MAIN' } },
+        create: { materialId: coreMaterial.id, quantity: 0, location: 'MAIN' },
+        update: {}
+      })
+
+      const qty = movementType === 'IN' ? Math.abs(quantity) : -Math.abs(quantity)
+      await db.stock.update({
+        where: { id: stock.id },
+        data: { quantity: { increment: qty } }
+      })
+
+      const movement = await db.stockMovement.create({
+        data: {
+          materialId: coreMaterial.id,
+          stockId: stock.id,
+          type: movementType as any,
+          quantity: Math.abs(quantity),
+          reference,
+          notes,
+          createdById: userId
+        }
+      })
+      return movement as StockMovement
+    }
+
+    const stock = await inventoryRepository.getOrCreateStock(coreMaterial.id, 'MAIN')
     return inventoryRepository.createStockMovement({
       materialId: coreMaterial.id,
       stockId: stock.id,
@@ -231,12 +257,6 @@ export const inventoryService = {
 
     const stock = await inventoryRepository.getOrCreateStock(materialId, 'MAIN')
     
-    if (type === 'PURCHASE') {
-      await inventoryRepository.updateStockQuantity(stock.id, Math.abs(quantity))
-    } else {
-      await inventoryRepository.updateStockQuantity(stock.id, -Math.abs(quantity))
-    }
-
     return inventoryRepository.createStockMovement({
       materialId,
       stockId: stock.id,

@@ -35,7 +35,6 @@ salesOrderRouter.get('/invoices/:id/pdf', invoiceController.downloadPdf)
 // Core Buyback
 salesOrderRouter.post('/core-buyback', coreBuybackController.recordCoreBuyback)
 salesOrderRouter.get('/core-buyback', coreBuybackController.getCoreBuybacks)
-salesOrderRouter.get('/core-buyback/customer/:customerId', coreBuybackController.getCustomerCoreBalance)
 
 // Customer Balance & Aging
 salesOrderRouter.get('/customers', salesOrderController.getCustomers)
