@@ -607,7 +607,9 @@ export const productionService = {
         await inventoryService.recordCoreChange(
           numPrintedRolls,
           'CORE_RECOVERY',
-          `Job ${job.jobNumber} deleted`
+          `Job ${job.jobNumber} deleted`,
+          undefined,
+          tx
         )
       }
 

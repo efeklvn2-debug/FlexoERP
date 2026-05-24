@@ -101,8 +101,9 @@ export const inventoryRepository = {
     return prisma.stock.findMany({ where: { materialId } }) as Promise<Stock[]>
   },
 
-  async getOrCreateStock(materialId: string, location?: string): Promise<Stock> {
-    const stock = await prisma.stock.upsert({
+  async getOrCreateStock(materialId: string, location?: string, tx?: Prisma.TransactionClient): Promise<Stock> {
+    const client = tx || prisma
+    const stock = await client.stock.upsert({
       where: { materialId_location: { materialId, location: location || '' } },
       create: { materialId, quantity: 0, location: location || '' },
       update: {},
@@ -119,9 +120,9 @@ export const inventoryRepository = {
     reference?: string
     notes?: string
     createdById?: string
-  }): Promise<StockMovement> {
-    return prisma.$transaction(async (tx) => {
-      const movement = await tx.stockMovement.create({
+  }, tx?: Prisma.TransactionClient): Promise<StockMovement> {
+    const execute = async (client: Prisma.TransactionClient) => {
+      const movement = await client.stockMovement.create({
         data: {
           materialId: data.materialId,
           stockId: data.stockId,
@@ -134,7 +135,7 @@ export const inventoryRepository = {
       })
 
       if (data.stockId) {
-        const stock = await tx.stock.findUnique({ where: { id: data.stockId } })
+        const stock = await client.stock.findUnique({ where: { id: data.stockId } })
         if (stock) {
           let newQuantity = stock.quantity
           if (data.type === 'IN' || data.type === 'ADJUSTMENT') {
@@ -142,7 +143,7 @@ export const inventoryRepository = {
           } else if (data.type === 'OUT') {
             newQuantity -= data.quantity
           }
-          await tx.stock.update({
+          await client.stock.update({
             where: { id: data.stockId },
             data: { quantity: newQuantity }
           })
@@ -151,7 +152,10 @@ export const inventoryRepository = {
 
       logger.info({ movementId: movement.id, type: data.type, materialId: data.materialId }, 'Stock movement created')
       return movement as StockMovement
-    })
+    }
+
+    if (tx) return execute(tx)
+    return prisma.$transaction(execute)
   },
 
   async getStockMovements(materialId?: string, limit = 50): Promise<StockMovement[]> {

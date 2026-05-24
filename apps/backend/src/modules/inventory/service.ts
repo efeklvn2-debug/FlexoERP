@@ -159,8 +159,8 @@ export const inventoryService = {
     return inventoryRepository.createStockMovement({
       materialId,
       stockId: stock.id,
-      type: 'IN',
-      quantity,
+      type: quantity >= 0 ? 'IN' : 'OUT',
+      quantity: Math.abs(quantity),
       reference,
       notes,
       createdById: userId
@@ -210,34 +210,7 @@ export const inventoryService = {
         break
     }
 
-    if (tx) {
-      const stock = await db.stock.upsert({
-        where: { materialId_location: { materialId: coreMaterial.id, location: 'MAIN' } },
-        create: { materialId: coreMaterial.id, quantity: 0, location: 'MAIN' },
-        update: {}
-      })
-
-      const qty = movementType === 'IN' ? Math.abs(quantity) : -Math.abs(quantity)
-      await db.stock.update({
-        where: { id: stock.id },
-        data: { quantity: { increment: qty } }
-      })
-
-      const movement = await db.stockMovement.create({
-        data: {
-          materialId: coreMaterial.id,
-          stockId: stock.id,
-          type: movementType as any,
-          quantity: Math.abs(quantity),
-          reference,
-          notes,
-          createdById: userId
-        }
-      })
-      return movement as StockMovement
-    }
-
-    const stock = await inventoryRepository.getOrCreateStock(coreMaterial.id, 'MAIN')
+    const stock = await inventoryRepository.getOrCreateStock(coreMaterial.id, 'MAIN', tx)
     return inventoryRepository.createStockMovement({
       materialId: coreMaterial.id,
       stockId: stock.id,
@@ -246,7 +219,7 @@ export const inventoryService = {
       reference,
       notes,
       createdById: userId
-    })
+    }, tx)
   },
 
   async recordPackingBagChange(materialId: string, quantity: number, type: 'PURCHASE' | 'SALE', reference?: string, userId?: string): Promise<StockMovement | null> {
