@@ -1990,12 +1990,12 @@ export function SalesOrdersPage() {
                     {showOrderDetails.paymentStatus !== 'FULLY_PAID' && showOrderDetails.paymentStatus !== 'OVERPAID' && (() => {
                       const outstanding = showOrderDetails.totalAmount - showOrderDetails.totalPaid
                       const deposit = getCustomerDeposit(showOrderDetails.customerId)
-                      const disabled = deposit >= outstanding
+                      const disabled = deposit > 0 && showOrderDetails.status !== 'PICKED_UP'
                       return (
                         <button
                           onClick={() => { if (!disabled) { setShowOrderDetails(null); openPaymentModal(showOrderDetails) }}}
                           className={`px-4 py-2 rounded-lg ${disabled ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
-                          title={disabled ? `Customer has ₦${deposit.toLocaleString()} deposit — record pickup first to auto-apply deposit` : 'Record Payment'}
+                          title={disabled ? `Customer has ₦${deposit.toLocaleString()} deposit — complete pickup first to auto-apply` : 'Record Payment'}
                         >
                           Record Payment
                         </button>
