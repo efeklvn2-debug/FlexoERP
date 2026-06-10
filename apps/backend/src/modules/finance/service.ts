@@ -3,6 +3,7 @@ import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { financeRepository } from './repository'
 import { Prisma, Account, JournalEntry } from '@prisma/client'
+import { dateFromInput, dateStartOfDay, dateEndOfDay } from '../../utils/dates'
 
 const logger = createChildLogger('finance:service')
 
@@ -119,7 +120,7 @@ export const financeService = {
       }
     }
 
-    const entryDate = date || new Date()
+    const entryDate = dateFromInput(date as string | undefined)
     await this.validateJournalDate(entryDate, db)
 
     const entryNumber = await financeRepository.getNextEntryNumber(db)
@@ -166,8 +167,8 @@ export const financeService = {
     offset?: number
   }) {
     return financeRepository.getJournalEntries({
-      dateFrom: options?.dateFrom ? new Date(options.dateFrom) : undefined,
-      dateTo: options?.dateTo ? new Date(options.dateTo) : undefined,
+      dateFrom: options?.dateFrom ? dateStartOfDay(options.dateFrom) : undefined,
+      dateTo: options?.dateTo ? dateEndOfDay(options.dateTo) : undefined,
       sourceModule: options?.sourceModule,
       accountId: options?.accountId,
       limit: options?.limit,
@@ -184,19 +185,19 @@ export const financeService = {
   async getAccountBalance(accountId: string, asOfDate?: string) {
     return financeRepository.getAccountBalance(
       accountId,
-      asOfDate ? new Date(asOfDate) : undefined
+      asOfDate ? dateEndOfDay(asOfDate) : undefined
     )
   },
 
   async getAllAccountBalances(asOfDate?: string) {
     return financeRepository.getAllAccountBalances(
-      asOfDate ? new Date(asOfDate) : undefined
+      asOfDate ? dateEndOfDay(asOfDate) : undefined
     )
   },
 
   async getTrialBalance(asOfDate?: string) {
     const balances = await financeRepository.getAllAccountBalances(
-      asOfDate ? new Date(asOfDate) : undefined
+      asOfDate ? dateEndOfDay(asOfDate) : undefined
     )
 
     const totals = balances.reduce((acc: any, b: any) => ({
@@ -222,7 +223,7 @@ export const financeService = {
     const expenses = await financeRepository.getExpensesByPeriod(startOfMonth, tomorrow)
     const cogs = await financeRepository.getCogsByPeriod(startOfMonth, tomorrow)
 
-    const totalRevenue = revenue.sales + revenue.packing
+    const totalRevenue = revenue.sales + revenue.packing + revenue.otherIncome
     const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0)
 
     const receivablesAccount = await financeRepository.findAccountByCode('1200')
@@ -270,8 +271,8 @@ export const financeService = {
   },
 
   async getVatSummary(dateFrom?: string, dateTo?: string) {
-    const from = dateFrom ? new Date(dateFrom) : new Date(new Date().getFullYear(), 0, 1)
-    const to = dateTo ? new Date(dateTo) : new Date()
+    const from = dateFrom ? dateStartOfDay(dateFrom) : new Date(new Date().getFullYear(), 0, 1)
+    const to = dateTo ? dateEndOfDay(dateTo) : new Date()
 
     const outputVat = await financeRepository.getOutputVat(from, to)
     const inputVat = await financeRepository.getInputVat(from, to)
@@ -322,14 +323,15 @@ export const financeService = {
     const expenses = await financeRepository.getExpensesByPeriod(startOfMonth, endOfMonth)
     const cogs = await financeRepository.getCogsByPeriod(startOfMonth, endOfMonth)
 
-    const totalRevenue = revenue.sales + revenue.packing
+    const totalRevenue = revenue.sales + revenue.packing + revenue.otherIncome
     const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0)
 
     return {
       revenue: totalRevenue,
       breakdown: {
         salesRevenue: revenue.sales,
-        packingRevenue: revenue.packing
+        packingRevenue: revenue.packing,
+        otherIncome: revenue.otherIncome
       },
       costOfGoodsSold: cogs,
       expenses: totalExpenses,
@@ -344,7 +346,7 @@ export const financeService = {
 
     const openingBalance = await financeRepository.getAccountBalance(
       accountId,
-      dateFrom ? new Date(dateFrom) : undefined
+      dateFrom ? dateStartOfDay(dateFrom) : undefined
     )
 
     const entries = await prisma.journalLine.findMany({
@@ -352,8 +354,8 @@ export const financeService = {
         accountId,
         journalEntry: {
           date: {
-            ...(dateFrom && { gte: new Date(dateFrom) }),
-            ...(dateTo && { lte: new Date(dateTo) })
+            ...(dateFrom && { gte: dateStartOfDay(dateFrom) }),
+            ...(dateTo && { lte: dateEndOfDay(dateTo) })
           }
         }
       },

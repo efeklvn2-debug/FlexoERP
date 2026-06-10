@@ -1,6 +1,7 @@
 import { prisma } from '../../database'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
+import { dateFromInput, dateStartOfDay, dateEndOfDay } from '../../utils/dates'
 
 const logger = createChildLogger('transactions:service')
 
@@ -28,12 +29,10 @@ export const transactionService = {
     if (filters?.dateFrom || filters?.dateTo) {
       where.date = {}
       if (filters.dateFrom) {
-        where.date.gte = new Date(filters.dateFrom)
+        where.date.gte = dateStartOfDay(filters.dateFrom)
       }
       if (filters.dateTo) {
-        const toDate = new Date(filters.dateTo)
-        toDate.setHours(23, 59, 59, 999)
-        where.date.lte = toDate
+        where.date.lte = dateEndOfDay(filters.dateTo)
       }
     }
 
@@ -131,7 +130,7 @@ export const transactionService = {
           printedRollIds: printedRollIds ?? [],
           packingBags: packingBags ?? 0,
           amountPaid: amountPaid ?? 0,
-          date: date ? new Date(date) : new Date()
+          date: dateFromInput(date)
         },
         include: {
           customer: true

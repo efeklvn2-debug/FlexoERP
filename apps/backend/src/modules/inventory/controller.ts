@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { inventoryService } from './service'
+import { dateFromInput } from '../../utils/dates'
 import { MaterialInput, StockMovementInput } from './validation'
 import { AuthenticatedRequest } from '../../middleware/auth'
 import { AppError } from '../../middleware/errorHandler'
@@ -144,7 +145,7 @@ export const inventoryController = {
         throw new AppError(400, 'INVALID', 'Materials array is required')
       }
 
-      const result = await inventoryService.initializeStock(materials, new Date(date || Date.now()), userId)
+      const result = await inventoryService.initializeStock(materials, date || dateFromInput(), userId)
       res.json({ data: result })
     } catch (error) {
       next(error)

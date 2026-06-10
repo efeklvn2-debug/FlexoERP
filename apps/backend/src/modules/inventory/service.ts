@@ -146,7 +146,8 @@ export const inventoryService = {
     return inventoryRepository.getMaterialRolls(materialId)
   },
 
-  async addStock(materialId: string, quantity: number, notes?: string, reference?: string, userId?: string): Promise<StockMovement> {
+  async addStock(materialId: string, quantity: number, notes?: string, reference?: string, userId?: string, tx?: Prisma.TransactionClient): Promise<StockMovement> {
+    const db = tx || prisma
     const material = await inventoryRepository.findMaterialById(materialId)
     if (!material) {
       throw new AppError(404, 'NOT_FOUND', 'Material not found')
@@ -154,7 +155,7 @@ export const inventoryService = {
 
     logger.info({ materialId, quantity, reference }, 'Adding stock')
     
-    const stock = await inventoryRepository.getOrCreateStock(materialId, 'MAIN')
+    const stock = await inventoryRepository.getOrCreateStock(materialId, 'MAIN', tx)
     
     return inventoryRepository.createStockMovement({
       materialId,
@@ -164,7 +165,7 @@ export const inventoryService = {
       reference,
       notes,
       createdById: userId
-    })
+    }, tx)
   },
 
   async recordCoreChange(quantity: number, type: 'PRODUCTION_OUT' | 'CORE_RECOVERY' | 'CORE_BUYBACK', reference?: string, userId?: string, tx?: Prisma.TransactionClient): Promise<StockMovement | null> {

@@ -3,6 +3,7 @@ import { CustomerInput, CustomerUpdateInput, OrderInput, OrderUpdateInput } from
 import { Customer, Order } from './types'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
+import { dateFromInput } from '../../utils/dates'
 
 const logger = createChildLogger('sales:service')
 
@@ -90,7 +91,7 @@ export const salesService = {
       customerId: input.customerId,
       totalAmount,
       notes: input.notes,
-      dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
+      dueDate: input.dueDate ? dateFromInput(input.dueDate) : undefined,
       createdById: userId,
       items
     })

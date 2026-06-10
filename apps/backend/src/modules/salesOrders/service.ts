@@ -6,6 +6,7 @@ import { salesOrderRepository, paymentRepository, invoiceRepository, coreBuyback
 import { decomposeInclusive } from '../../lib/vat-utils'
 import { inventoryService } from '../inventory/service'
 import { financeService } from '../finance/service'
+import { dateFromInput, dateStartOfDay, dateEndOfDay } from '../../utils/dates'
 import type { SpecsJson, SalesOrderInput, SalesOrderUpdateInput, PaymentInput, CoreBuybackInput } from './types'
 
 const logger = createChildLogger('salesOrders:service')
@@ -374,11 +375,7 @@ export const salesOrderService = {
       
       let bagPricePerUnit = 0
       if (packingBagMaterial) {
-        const priceList = await tx.priceList.findFirst({
-          where: { materialId: packingBagMaterial.id },
-          orderBy: { effectiveFrom: 'desc' }
-        })
-        bagPricePerUnit = priceList?.pricePerPack ? Number(priceList.pricePerPack) : 0
+        bagPricePerUnit = packingBagMaterial.costPrice ? Number(packingBagMaterial.costPrice) : 0
       }
       
       const bagTotalAmount = packingBags && packingBags > 0 
@@ -726,6 +723,8 @@ export const salesOrderService = {
     const subtotal = input.quantity * input.unitPrice
     const { exclusive: bagsExclusive, vat: vatAmount } = decomposeInclusive(subtotal, vatRate)
     const packingBagsSubtotal = bagsExclusive
+    const packingBagCostPrice = material.costPrice ? Number(material.costPrice) : 0
+    const packingBagsCost = packingBagCostPrice > 0 ? input.quantity * packingBagCostPrice : packingBagsSubtotal
     const totalAmountWithVat = subtotal
 
     const orderNumber = await salesOrderRepository.generateUniqueOrderNumber()
@@ -863,8 +862,8 @@ export const salesOrderService = {
             sourceId: invoice.id,
             reference: invoiceNumber,
             lines: [
-              { accountId: cogsId, debit: packingBagsSubtotal, credit: 0, memo: 'COGS - Packing Bags' },
-              { accountId: packingBagInventoryId, debit: 0, credit: packingBagsSubtotal, memo: 'Packing Bag Inventory' }
+              { accountId: cogsId, debit: packingBagsCost, credit: 0, memo: 'COGS - Packing Bags' },
+              { accountId: packingBagInventoryId, debit: 0, credit: packingBagsCost, memo: 'Packing Bag Inventory' }
             ]
           }, tx)
 
@@ -987,7 +986,7 @@ export const salesOrderService = {
     const absAmount = Math.abs(amount)
 
     const depositAccountId = await financeService.getAccountIdByCode('2200')
-    const equityAccountId = await financeService.getAccountIdByCode('3000')
+    const otherIncomeId = await financeService.getAccountIdByCode('4200')
 
     await prisma.$transaction(async (tx) => {
       await tx.paymentTransaction.create({
@@ -1010,12 +1009,12 @@ export const salesOrderService = {
         postedById: userId,
         lines: amount > 0
           ? [
-              { accountId: equityAccountId, debit: absAmount, credit: 0, memo: 'Deposit increase offset' },
+              { accountId: otherIncomeId, debit: absAmount, credit: 0, memo: 'Deposit increase offset' },
               { accountId: depositAccountId, debit: 0, credit: absAmount, memo: 'Customer deposit increased' }
             ]
           : [
               { accountId: depositAccountId, debit: absAmount, credit: 0, memo: 'Customer deposit decreased' },
-              { accountId: equityAccountId, debit: 0, credit: absAmount, memo: 'Deposit decrease offset' }
+              { accountId: otherIncomeId, debit: 0, credit: absAmount, memo: 'Deposit decrease offset' }
             ]
       }, tx)
     })
@@ -1230,12 +1229,8 @@ export const paymentService = {
     if (options?.customerId) where.customerId = options.customerId
     if (options?.dateFrom || options?.dateTo) {
       where.receivedAt = {}
-      if (options.dateFrom) where.receivedAt.gte = new Date(options.dateFrom)
-      if (options.dateTo) {
-        const endDate = new Date(options.dateTo)
-        endDate.setDate(endDate.getDate() + 1)
-        where.receivedAt.lt = endDate
-      }
+      if (options.dateFrom) where.receivedAt.gte = dateStartOfDay(options.dateFrom)
+      if (options.dateTo) where.receivedAt.lte = dateEndOfDay(options.dateTo)
     }
 
     return prisma.paymentTransaction.findMany({
@@ -1280,7 +1275,7 @@ export const invoiceService = {
     return invoiceRepository.update(id, { status: 'ISSUED' as any, issuedAt: new Date() })
   },
 
-  async addPayment(invoiceId: string, amount: number, date: Date, reference?: string, notes?: string, paymentMethod?: string) {
+  async addPayment(invoiceId: string, amount: number, date: string | Date, reference?: string, notes?: string, paymentMethod?: string) {
     // Auto-generate reference number if not provided
     if (!reference) {
       const now = new Date()
@@ -1304,7 +1299,7 @@ export const invoiceService = {
           data: {
             invoiceId,
             amount: new Prisma.Decimal(String(amount)),
-            date: new Date(date),
+            date: typeof date === 'string' ? dateFromInput(date) : date,
             reference,
             notes,
             paymentMethod
@@ -1331,7 +1326,7 @@ export const invoiceService = {
             sourceModule: 'PAYMENT',
             sourceId: createdPayment.id,
             reference: reference || `Inv ${invoice.invoiceNumber}`,
-            date: new Date(date),
+            date: typeof date === 'string' ? dateFromInput(date) : date,
             lines: [
               { accountId: debitAccountId, debit: amount, credit: 0, memo: isElectronicPayment ? 'Bank transfer' : 'Cash received' },
               { accountId: arAccountId, debit: 0, credit: amount, memo: `Payment against ${invoice.invoiceNumber}` }
@@ -1382,7 +1377,7 @@ export const coreBuybackService = {
 
     // If customer selected, credit their deposit + post journal entry
     if (input.customerId) {
-      const otherIncomeId = await financeService.getAccountIdByCode('4200')
+      const expenseAccountId = await financeService.getAccountIdByCode('6600')
       const depositLiabilityId = await financeService.getAccountIdByCode('2200')
 
       const effectiveRate = input.ratePerCore!
@@ -1420,7 +1415,7 @@ export const coreBuybackService = {
           reference: `CORE-${buyback.id.slice(-8)}`,
           postedById: userId,
           lines: [
-            { accountId: otherIncomeId, debit: totalValue, credit: 0, memo: 'Core buyback - cores received' },
+            { accountId: expenseAccountId, debit: totalValue, credit: 0, memo: 'Core buyback expense' },
             { accountId: depositLiabilityId, debit: 0, credit: totalValue, memo: 'Customer deposit credited for cores' }
           ]
         }, tx)
@@ -1433,7 +1428,7 @@ export const coreBuybackService = {
     }
 
     // Walk-in: record cash payout + post journal entry
-    const otherIncomeId = await financeService.getAccountIdByCode('4200')
+    const expenseAccountId = await financeService.getAccountIdByCode('6600')
     const cashPayoutCode = input.paymentMethod === 'Electronic' ? '1100' : '1000'
     const cashAccountId = await financeService.getAccountIdByCode(cashPayoutCode)
     const paidAmount = input.paidAmount || totalValue
@@ -1472,7 +1467,7 @@ export const coreBuybackService = {
         reference: `CORE-${buyback.id.slice(-8)}`,
         postedById: userId,
         lines: [
-          { accountId: otherIncomeId, debit: paidAmount, credit: 0, memo: 'Core buyback - cores received' },
+          { accountId: expenseAccountId, debit: paidAmount, credit: 0, memo: 'Core buyback expense' },
           { accountId: cashAccountId, debit: 0, credit: paidAmount, memo: `Cash paid to ${input.sellerName}` }
         ]
       }, tx)
@@ -1487,8 +1482,8 @@ export const coreBuybackService = {
   async getCoreBuybacks(options?: { customerId?: string; dateFrom?: string; dateTo?: string }) {
     return coreBuybackRepository.findAll({
       customerId: options?.customerId,
-      dateFrom: options?.dateFrom ? new Date(options.dateFrom) : undefined,
-      dateTo: options?.dateTo ? new Date(options.dateTo) : undefined
+      dateFrom: options?.dateFrom ? dateStartOfDay(options.dateFrom) : undefined,
+      dateTo: options?.dateTo ? dateEndOfDay(options.dateTo) : undefined
     })
   },
 

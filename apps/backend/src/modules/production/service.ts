@@ -216,33 +216,42 @@ export const productionService = {
 
     const comboPrintedRollIds: string[] = []
     const parentRollUpdates: { id: string; newRemainingWeight: number; newStatus: string }[] = []
-    const printedRollMapping: Record<string, string> = {}
+    const printedRollMapping: Record<string, Record<string, number>> = {}
 
     if (parentRollIds.length > 0) {
       const parentRolls = await prisma.roll.findMany({
-        where: { id: { in: parentRollIds } },
-        orderBy: { createdAt: 'asc' }
+        where: { id: { in: parentRollIds } }
       })
+      parentRolls.sort((a, b) => Number(a.remainingWeight) - Number(b.remainingWeight))
 
       let parentRollIndex = 0
       let remainingInCurrentRoll = Number(parentRolls[0]?.remainingWeight || 0)
 
       for (const printedRoll of job.printedRolls) {
-        const weightNeeded = Number(printedRoll.weightUsed)
+        let weightNeeded = Number(printedRoll.weightUsed)
         let isCombo = false
-
-        printedRollMapping[printedRoll.id] = parentRolls[parentRollIndex]?.id || ''
+        const contributions: Record<string, number> = {}
 
         while (weightNeeded > remainingInCurrentRoll && parentRollIndex < parentRolls.length - 1) {
           isCombo = true
+          const currentRoll = parentRolls[parentRollIndex]
+          contributions[currentRoll.id] = remainingInCurrentRoll
+          weightNeeded -= remainingInCurrentRoll
           remainingInCurrentRoll = 0
           parentRollIndex++
           remainingInCurrentRoll = Number(parentRolls[parentRollIndex]?.remainingWeight || 0)
         }
 
+        const currentRoll = parentRolls[parentRollIndex]
+        if (currentRoll) {
+          contributions[currentRoll.id] = weightNeeded
+        }
+
         if (remainingInCurrentRoll > 0) {
           remainingInCurrentRoll -= weightNeeded
         }
+
+        printedRollMapping[printedRoll.id] = contributions
 
         if (isCombo) {
           comboPrintedRollIds.push(printedRoll.id)
@@ -261,7 +270,7 @@ export const productionService = {
           newRemainingWeight = Number(roll.remainingWeight)
         }
 
-        const newStatus = newRemainingWeight < 2 ? 'CONSUMED' : 'IN_PRODUCTION'
+        const newStatus = newRemainingWeight < 2 ? 'CONSUMED' : 'AVAILABLE'
         parentRollUpdates.push({ id: roll.id, newRemainingWeight, newStatus })
       }
     }
@@ -292,159 +301,148 @@ export const productionService = {
           printedRollMapping: Object.keys(printedRollMapping).length > 0 ? JSON.parse(JSON.stringify(printedRollMapping)) : undefined
         }
       })
-    })
 
-    const consumedRollsCount = parentRollUpdates.filter(u => u.newStatus === 'CONSUMED').length
-    if (consumedRollsCount > 0) {
-      const { inventoryService } = require('../inventory/service')
-      await inventoryService.recordCoreChange(
-        consumedRollsCount,
-        'CORE_RECOVERY',
-        job.jobNumber
-      )
-    }
+      const consumedRollsCount = parentRollUpdates.filter(u => u.newStatus === 'CONSUMED').length
+      if (consumedRollsCount > 0) {
+        await inventoryService.recordCoreChange(
+          consumedRollsCount,
+          'CORE_RECOVERY',
+          job.jobNumber,
+          undefined,
+          tx
+        )
+      }
 
-    const totalPrintedWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed), 0)
+      const totalPrintedWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed), 0)
 
-    if (totalPrintedWeight > 0 && job.customerName) {
-      const customer = await prisma.customer.findFirst({
-        where: { name: { contains: job.customerName, mode: 'insensitive' } }
-      })
-
-      if (customer) {
-        const rates = await settingsService.getConsumptionRates()
-        const customerColors = customer.colors || []
-        const colorCount = customerColors.length || 1
-
-        const inkNeeded = totalPrintedWeight * rates.inkConsumptionRate
-        const ipaNeeded = totalPrintedWeight * rates.ipaConsumptionRate
-        const butanolNeeded = totalPrintedWeight * rates.butanolConsumptionRate
-
-        const materials = await prisma.material.findMany({
-          where: { category: 'INK_SOLVENTS' }
+      if (totalPrintedWeight > 0 && job.customerName) {
+        const customer = await tx.customer.findFirst({
+          where: { name: { contains: job.customerName, mode: 'insensitive' } }
         })
 
-        const inkColorMap: Record<string, string> = {
-          'Red': 'Red-Ink',
-          'Yellow': 'Yellow-Ink',
-          'White': 'White-Ink',
-          'RoyalBlue': 'RoyalBlue-Ink',
-          'VioletBlue': 'VioletBlue-Ink',
-          'SkyBlue': 'SkyBlue-Ink'
-        }
+        if (customer) {
+          const rates = await settingsService.getConsumptionRates()
+          const customerColors = customer.colors || []
+          const colorCount = customerColors.length || 1
 
-        for (const mat of materials) {
-          if (mat.subCategory === 'IPA' && ipaNeeded > 0) {
-            await inventoryService.addStock(mat.id, -ipaNeeded, `Job ${job.jobNumber} completed`, jobId)
+          const inkNeeded = totalPrintedWeight * rates.inkConsumptionRate
+          const ipaNeeded = totalPrintedWeight * rates.ipaConsumptionRate
+          const butanolNeeded = totalPrintedWeight * rates.butanolConsumptionRate
+
+          const materials = await tx.material.findMany({
+            where: { category: 'INK_SOLVENTS' }
+          })
+
+          const inkColorMap: Record<string, string> = {
+            'Red': 'Red-Ink',
+            'Yellow': 'Yellow-Ink',
+            'White': 'White-Ink',
+            'RoyalBlue': 'RoyalBlue-Ink',
+            'VioletBlue': 'VioletBlue-Ink',
+            'SkyBlue': 'SkyBlue-Ink'
           }
-          if (mat.subCategory === 'Butanol' && butanolNeeded > 0) {
-            await inventoryService.addStock(mat.id, -butanolNeeded, `Job ${job.jobNumber} completed`, jobId)
-          }
-          
-          if (customerColors.length > 0 && inkNeeded > 0) {
-            const customerColorSubCategories = customerColors.map(c => inkColorMap[c]).filter(Boolean)
-            if (customerColorSubCategories.includes(mat.subCategory || '')) {
-              const inkPerColor = inkNeeded / colorCount
-              await inventoryService.addStock(mat.id, -inkPerColor, `Job ${job.jobNumber} completed`, jobId)
+
+          for (const mat of materials) {
+            if (mat.subCategory === 'IPA' && ipaNeeded > 0) {
+              await inventoryService.addStock(mat.id, -ipaNeeded, `Job ${job.jobNumber} completed`, jobId, undefined, tx)
+            }
+            if (mat.subCategory === 'Butanol' && butanolNeeded > 0) {
+              await inventoryService.addStock(mat.id, -butanolNeeded, `Job ${job.jobNumber} completed`, jobId, undefined, tx)
+            }
+            
+            if (customerColors.length > 0 && inkNeeded > 0) {
+              const customerColorSubCategories = customerColors.map(c => inkColorMap[c]).filter(Boolean)
+              if (customerColorSubCategories.includes(mat.subCategory || '')) {
+                const inkPerColor = inkNeeded / colorCount
+                await inventoryService.addStock(mat.id, -inkPerColor, `Job ${job.jobNumber} completed`, jobId, undefined, tx)
+              }
             }
           }
         }
       }
-    }
 
-    // Deduct cores on production completion
-    const totalPrintedRolls = job.printedRolls.length
-    if (totalPrintedRolls > 0) {
-      await inventoryService.recordCoreChange(
-        -totalPrintedRolls,
-        'PRODUCTION_OUT',
-        job.jobNumber
-      )
-    }
-
-    // Update sales order to READY
-    if (job.salesOrderId) {
-      const actualWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed || 0), 0)
-      const salesOrder = await prisma.salesOrder.findUnique({
-        where: { id: job.salesOrderId }
-      })
-      if (salesOrder) {
-        const unitPrice = Number(salesOrder.unitPrice)
-        const totalAmount = actualWeight * unitPrice
-        
-        await prisma.salesOrder.update({
-          where: { id: job.salesOrderId },
-          data: {
-            status: 'READY',
-            quantityProduced: actualWeight,
-            totalAmount
-          }
-        })
-        logger.info({ salesOrderId: job.salesOrderId, actualWeight, totalAmount }, 'Sales order updated to READY after production completion')
+      // Deduct cores on production completion
+      const totalPrintedRolls = job.printedRolls.length
+      if (totalPrintedRolls > 0) {
+        await inventoryService.recordCoreChange(
+          -totalPrintedRolls,
+          'PRODUCTION_OUT',
+          job.jobNumber,
+          undefined,
+          tx
+        )
       }
-    }
 
-    // =====================================================
-    // DEFERRED COGS POSTING & COST SNAPSHOT
-    // =====================================================
-    let materialCost = 0
-    let consumablesCost = 0
-    let overheadCost = 0
+      // Update sales order to READY
+      if (job.salesOrderId) {
+        const actualWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed || 0), 0)
+        const salesOrder = await tx.salesOrder.findUnique({
+          where: { id: job.salesOrderId }
+        })
+        if (salesOrder) {
+          const unitPrice = Number(salesOrder.unitPrice)
+          const totalAmount = actualWeight * unitPrice
+          
+          await tx.salesOrder.update({
+            where: { id: job.salesOrderId },
+            data: {
+              status: 'READY',
+              quantityProduced: actualWeight,
+              totalAmount
+            }
+          })
+          logger.info({ salesOrderId: job.salesOrderId, actualWeight, totalAmount }, 'Sales order updated to READY after production completion')
+        }
+      }
 
-    try {
-      const totalPrintedWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed || 0), 0)
-      
+      // =====================================================
+      // DEFERRED COGS POSTING & COST SNAPSHOT
+      // =====================================================
+      let materialCost = 0
+      let consumablesCost = 0
+      let overheadCost = 0
+
       if (totalPrintedWeight > 0) {
-        // Calculate material cost from parent rolls
-        const parentRolls = await prisma.roll.findMany({
+        const parentRolls = await tx.roll.findMany({
           where: { id: { in: parentRollIds } },
           include: { material: true }
         })
         
-        // Calculate material cost based on printed weight × cost per kg (not remaining weight deltas)
         const parentMaterial = parentRolls[0]?.material
         const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
         materialCost = totalPrintedWeight * costPerKg
         
-        // Get settings for ink/solvent and overhead rates
-        const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+        const settings = await tx.settings.findUnique({ where: { id: 'default' } })
         
-        // Get material costs from database
-        const consumableMaterials = await prisma.material.findMany({
+        const consumableMaterials = await tx.material.findMany({
           where: { category: 'INK_SOLVENTS' }
         })
         
-        // Find individual costs per liter
         const ipaMaterial = consumableMaterials.find(m => m.subCategory === 'IPA')
         const butanolMaterial = consumableMaterials.find(m => m.subCategory === 'Butanol')
         const ipaCostPerLiter = ipaMaterial?.costPrice ? Number(ipaMaterial.costPrice) : 500
         const butanolCostPerLiter = butanolMaterial?.costPrice ? Number(butanolMaterial.costPrice) : 600
         
-        // Calculate ink/solvent consumption rates (L per kg of printed roll)
         const inkRate = settings?.inkConsumptionRate ? Number(settings.inkConsumptionRate) : 0.2
         const ipaRate = settings?.ipaConsumptionRate ? Number(settings.ipaConsumptionRate) : 0.1
         const butanolRate = settings?.butanolConsumptionRate ? Number(settings.butanolConsumptionRate) : 0.1
         
-        // Calculate individual costs
         const inkCostRate = settings?.inkCostPerKg ? Number(settings.inkCostPerKg) : 50
         const inkCost = totalPrintedWeight * inkRate * inkCostRate
         const ipaCost = totalPrintedWeight * ipaRate * ipaCostPerLiter
         const butanolCost = totalPrintedWeight * butanolRate * butanolCostPerLiter
         consumablesCost = inkCost + ipaCost + butanolCost
         
-        // Calculate overhead cost
         const overheadRate = settings?.overheadRatePerKg ? Number(settings.overheadRatePerKg) : 0
         overheadCost = totalPrintedWeight * overheadRate
         
         const totalDeferredCost = materialCost + consumablesCost + overheadCost
         
         if (totalDeferredCost > 0) {
-          // Get account IDs
           const deferredCogsAccountId = await financeService.getAccountIdByCode('1330')
           const inventoryAccountId = await financeService.getAccountIdByCode('1300')
           const productionCostsAccountId = await financeService.getAccountIdByCode('5200')
           
-          // Post journal entry for raw materials + consumables (ink + IPA + Butanol)
           const materialsAndConsumablesCost = materialCost + consumablesCost
           await financeService.postJournalEntry({
             description: `Job ${job.jobNumber} completed - Material & Consumables`,
@@ -455,9 +453,8 @@ export const productionService = {
               { accountId: deferredCogsAccountId, debit: materialsAndConsumablesCost, credit: 0, memo: 'Raw materials & consumables' },
               { accountId: inventoryAccountId, debit: 0, credit: materialsAndConsumablesCost, memo: 'Materials & consumables consumed' }
             ]
-          })
+          }, tx)
           
-          // Post journal entry for overhead
           if (overheadCost > 0) {
             await financeService.postJournalEntry({
               description: `Job ${job.jobNumber} - Overhead allocated`,
@@ -468,30 +465,28 @@ export const productionService = {
                 { accountId: deferredCogsAccountId, debit: overheadCost, credit: 0, memo: 'Overhead allocated' },
                 { accountId: productionCostsAccountId, debit: 0, credit: overheadCost, memo: 'Production overhead' }
               ]
-            })
+            }, tx)
           }
           
           logger.info({ jobId: job.id, jobNumber: job.jobNumber, materialCost, inkCost, overheadCost, totalDeferredCost }, 'Deferred COGS posted')
         }
       }
-    } catch (financeError) {
-      logger.error({ error: financeError, jobId: job.id }, 'Failed to post Deferred COGS - continuing anyway')
-    }
 
-    return prisma.productionJob.update({
-      where: { id: jobId },
-      data: {
-        status: 'COMPLETED',
-        endDate: new Date(),
-        materialCost,
-        consumablesCost,
-        overheadCost
-      },
-      include: {
-        printedRolls: {
-          include: { roll: true }
+      return tx.productionJob.update({
+        where: { id: jobId },
+        data: {
+          status: 'COMPLETED',
+          endDate: new Date(),
+          materialCost,
+          consumablesCost,
+          overheadCost
+        },
+        include: {
+          printedRolls: {
+            include: { roll: true }
+          }
         }
-      }
+      })
     })
   },
 
@@ -677,32 +672,51 @@ export const productionService = {
 
     const printedRolls = []
     for (const job of jobs) {
-      const mapping = (job as any).printedRollMapping as Record<string, string> || {}
+      const mapping = (job as any).printedRollMapping as Record<string, any> || {}
       
       for (const pr of job.printedRolls) {
         if (status && pr.status !== status) continue
         
+        const entry = mapping[pr.id]
         let parentRollsDisplay: string[] = []
+        let parentRollContributions: { rollNumber: string; totalWeight: number; contributedWeight: number }[] = []
         
-        if (pr.isCombination) {
-          parentRollsDisplay = (job.parentRollIds || [])
-            .map(id => {
-              const pr = parentRollsMap.get(id)
-              return pr ? `${pr.rollNumber} (${pr.weight}kg)` : null
-            })
-            .filter(Boolean) as string[]
-        } else if (mapping[pr.id]) {
-          const parentRoll = parentRollsMap.get(mapping[pr.id])
-          if (parentRoll) {
-            parentRollsDisplay = [`${parentRoll.rollNumber} (${parentRoll.weight}kg)`]
+        if (typeof entry === 'object' && entry !== null) {
+          // New format: { parentRollId: contributedWeight, ... }
+          for (const [parentId, cw] of Object.entries(entry)) {
+            const p = parentRollsMap.get(parentId)
+            const rn = p?.rollNumber || parentId
+            const tw = p?.weight || 0
+            parentRollsDisplay.push(`${rn} (${Number(cw).toFixed(2)}kg of ${Number(tw).toFixed(2)}kg)`)
+            parentRollContributions.push({ rollNumber: rn, totalWeight: tw, contributedWeight: Number(cw) })
+          }
+        } else if (pr.isCombination) {
+          // Legacy combo — mapping stores only first parent roll; distribute weight across all
+          const parentIds = job.parentRollIds || []
+          const weightPerRoll = parentIds.length > 0 ? Number(pr.weightUsed) / parentIds.length : 0
+          for (const id of parentIds) {
+            const p = parentRollsMap.get(id)
+            if (p) {
+              parentRollsDisplay.push(`${p.rollNumber} (${p.weight}kg)`)
+              parentRollContributions.push({ rollNumber: p.rollNumber, totalWeight: p.weight, contributedWeight: weightPerRoll })
+            }
+          }
+        } else if (typeof entry === 'string' && entry) {
+          // Legacy single — mapping stores the exact parent roll ID
+          const p = parentRollsMap.get(entry)
+          if (p) {
+            parentRollsDisplay.push(`${p.rollNumber} (${p.weight}kg)`)
+            parentRollContributions.push({ rollNumber: p.rollNumber, totalWeight: p.weight, contributedWeight: Number(pr.weightUsed) })
           }
         } else {
-          parentRollsDisplay = (job.parentRollIds || [])
-            .map(id => {
-              const pr = parentRollsMap.get(id)
-              return pr ? `${pr.rollNumber} (${pr.weight}kg)` : null
-            })
-            .filter(Boolean) as string[]
+          // No mapping — fallback to all job parent rolls
+          for (const id of (job.parentRollIds || [])) {
+            const p = parentRollsMap.get(id)
+            if (p) {
+              parentRollsDisplay.push(`${p.rollNumber} (${p.weight}kg)`)
+              parentRollContributions.push({ rollNumber: p.rollNumber, totalWeight: p.weight, contributedWeight: 0 })
+            }
+          }
         }
         
         printedRolls.push({
@@ -715,6 +729,7 @@ export const productionService = {
           status: pr.status,
           isCombination: pr.isCombination,
           parentRolls: parentRollsDisplay,
+          parentRollContributions,
           pickedUpAt: pr.pickedUpAt,
           createdAt: pr.createdAt
         })
@@ -735,6 +750,58 @@ export const productionService = {
       return `PRD-${year}-${String(lastNum + 1).padStart(4, '0')}`
     }
     return `PRD-${year}-0001`
+  },
+
+  async getPrintedRollsByParentRoll(parentRollId: string) {
+    const jobs = await prisma.productionJob.findMany({
+      where: { parentRollIds: { has: parentRollId } },
+      include: {
+        printedRolls: {
+          include: {
+            roll: { include: { material: true } },
+            customer: true
+          }
+        },
+        salesOrder: { include: { customer: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    })
+
+    const result: any[] = []
+    for (const job of jobs) {
+      const mapping = (job as any).printedRollMapping as Record<string, any> || {}
+      for (const pr of job.printedRolls) {
+        const entry = mapping[pr.id]
+        let contributedWeight = 0
+        let relevant = false
+
+        if (typeof entry === 'object' && entry !== null) {
+          contributedWeight = Number(entry[parentRollId]) || 0
+          relevant = contributedWeight > 0
+        } else {
+          const mappedParentId = typeof entry === 'string' ? entry : undefined
+          relevant = !mappedParentId || mappedParentId === parentRollId ||
+            (pr.isCombination && job.parentRollIds?.includes(parentRollId))
+          contributedWeight = relevant ? Number(pr.weightUsed) : 0
+        }
+
+        if (!relevant) continue
+        result.push({
+          id: pr.id,
+          rollNumber: pr.roll?.rollNumber || 'N/A',
+          weightUsed: Number(pr.weightUsed),
+          contributedWeight,
+          status: pr.status,
+          jobNumber: job.jobNumber,
+          customerName: job.customerName || pr.customer?.name || job.salesOrder?.customer?.name || 'N/A',
+          pickedUpAt: pr.pickedUpAt,
+          createdAt: pr.createdAt,
+          isCombination: pr.isCombination,
+          isPartialContribution: contributedWeight > 0 && contributedWeight < Number(pr.weightUsed)
+        })
+      }
+    }
+    return result
   },
 
   async getRollTypes() {

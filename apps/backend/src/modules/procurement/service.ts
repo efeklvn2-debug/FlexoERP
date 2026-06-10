@@ -7,6 +7,7 @@ import { prisma } from '../../database'
 import { inventoryService } from '../inventory/service'
 import { financeService } from '../finance/service'
 import { decomposeInclusive } from '../../lib/vat-utils'
+import { dateFromInput } from '../../utils/dates'
 import { supplierService } from '../suppliers/service'
 
 const logger = createChildLogger('procurement:service')
@@ -44,7 +45,7 @@ export const procurementService = {
     return procurementRepository.createPOWithItems({
       poNumber,
       supplier: input.supplier,
-      expectedDate: input.expectedDate ? new Date(input.expectedDate) : undefined,
+      expectedDate: input.expectedDate ? dateFromInput(input.expectedDate) : undefined,
       notes: input.notes,
       createdById: userId,
       totalAmount,
@@ -68,7 +69,7 @@ export const procurementService = {
     logger.info({ poId: id, updates: input }, 'Updating purchase order')
     return procurementRepository.updatePO(id, {
       supplier: input.supplier,
-      expectedDate: input.expectedDate ? new Date(input.expectedDate) : undefined,
+      expectedDate: input.expectedDate ? dateFromInput(input.expectedDate) : undefined,
       notes: input.notes
     })
   },
@@ -305,7 +306,7 @@ export const procurementService = {
     }
   },
 
-  async createSupplierInvoice(poId: string, date: Date, amount: number, invoiceNumber?: string): Promise<SupplierInvoice> {
+  async createSupplierInvoice(poId: string, date: string | Date, amount: number, invoiceNumber?: string): Promise<SupplierInvoice> {
     const po = await procurementRepository.findPOById(poId)
     if (!po) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
 
@@ -345,7 +346,7 @@ export const procurementService = {
           poId,
           supplierId: supplier.id,
           invoiceNumber: finalInvoiceNumber,
-          date: new Date(date),
+          date: typeof date === 'string' ? dateFromInput(date) : date,
           amount,
           status: 'PENDING',
           amountPaid: 0
@@ -387,6 +388,18 @@ export const procurementService = {
 
       logger.info({ invoiceNumber: finalInvoiceNumber, invoiceId: createdInvoice.id }, 'Procurement journal entry posted successfully')
 
+      // Update material costPrice from PO item prices
+      for (const item of poItems) {
+        const material = await tx.material.findUnique({ where: { id: item.materialId } })
+        if (material && material.category !== 'PACKAGING' && Number(item.unitPrice) > 0) {
+          await tx.material.update({
+            where: { id: item.materialId },
+            data: { costPrice: item.unitPrice }
+          })
+          logger.info({ materialId: item.materialId, costPrice: item.unitPrice }, 'Material costPrice updated from supplier invoice')
+        }
+      }
+
       return createdInvoice
     })
 
@@ -417,12 +430,17 @@ export const procurementService = {
     }
   },
 
-  async addPayment(supplierInvoiceId: string, amount: number, date: Date, paymentMethod: 'Cash' | 'Bank Transfer', reference?: string, notes?: string): Promise<PaymentMade> {
+  async addPayment(supplierInvoiceId: string, amount: number, date: string | Date, paymentMethod: 'Cash' | 'Bank Transfer', reference?: string, notes?: string): Promise<PaymentMade> {
     const inv = await prisma.supplierInvoice.findUnique({
       where: { id: supplierInvoiceId },
       include: { po: true, supplier: true }
     })
     if (!inv) throw new AppError(404, 'NOT_FOUND', 'Supplier invoice not found')
+
+    const remainingBalance = Number(inv.amount) - Number(inv.amountPaid)
+    if (amount > remainingBalance) {
+      throw new AppError(400, 'INVALID_AMOUNT', `Payment N${amount} exceeds remaining balance N${remainingBalance}`)
+    }
 
     const newAmountPaid = Number(inv.amountPaid) + amount
     const newStatus = newAmountPaid >= Number(inv.amount) ? 'PAID' : newAmountPaid > 0 ? 'PARTIAL' : 'PENDING'
@@ -434,7 +452,7 @@ export const procurementService = {
         data: {
           supplierInvoiceId,
           amount,
-          date: new Date(date),
+          date: typeof date === 'string' ? dateFromInput(date) : date,
           reference,
           notes,
           paymentMethod

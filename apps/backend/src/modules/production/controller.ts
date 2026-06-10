@@ -36,6 +36,17 @@ export const productionController = {
     }
   },
 
+  async getPrintedRollsByParentRoll(req: Request, res: Response) {
+    try {
+      const { parentRollId } = req.params
+      const rolls = await productionService.getPrintedRollsByParentRoll(parentRollId)
+      res.json({ data: rolls })
+    } catch (error) {
+      logger.error(error, 'Error fetching printed rolls by parent roll')
+      res.status(500).json({ error: 'Failed to fetch printed rolls' })
+    }
+  },
+
   async getRollTypes(req: Request, res: Response) {
     try {
       const rollTypes = await productionService.getRollTypes()

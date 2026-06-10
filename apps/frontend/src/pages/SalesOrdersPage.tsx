@@ -5,6 +5,7 @@ import { pricingApi } from '../api/pricing'
 import { settingsApi } from '../api/settings'
 import { productionApi, ParentRoll } from '../api/production'
 import { Layout } from '../components/Layout'
+import { DateInput } from '../components/DateInput'
 
 type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'DEPOSIT_APPLIED' | 'REFUND'
 type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
@@ -986,14 +987,14 @@ export function SalesOrdersPage() {
                     <div className="flex gap-4 items-center flex-wrap">
                       <div className="flex items-center gap-2">
                         <label className="text-sm text-slate-600">From:</label>
-                        <input type="date" value={paymentDateFrom}
+                        <DateInput value={paymentDateFrom}
                           onChange={e => { setPaymentPeriod(''); setPaymentDateFrom(e.target.value); loadPayments(e.target.value || undefined, paymentDateTo || undefined) }}
                           className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
                         />
                       </div>
                       <div className="flex items-center gap-2">
                         <label className="text-sm text-slate-600">To:</label>
-                        <input type="date" value={paymentDateTo}
+                        <DateInput value={paymentDateTo}
                           onChange={e => { setPaymentPeriod(''); setPaymentDateTo(e.target.value); loadPayments(paymentDateFrom || undefined, e.target.value || undefined) }}
                           className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
                         />
@@ -1142,14 +1143,14 @@ export function SalesOrdersPage() {
                     <div className="flex gap-4 items-center flex-wrap">
                       <div className="flex items-center gap-2">
                         <label className="text-sm text-slate-600">From:</label>
-                        <input type="date" value={coreBuybackDateFrom}
+                        <DateInput value={coreBuybackDateFrom}
                           onChange={e => { setCoreBuybackPeriod(''); setCoreBuybackDateFrom(e.target.value); loadCoreBuybacks(e.target.value || undefined, coreBuybackDateTo || undefined) }}
                           className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
                         />
                       </div>
                       <div className="flex items-center gap-2">
                         <label className="text-sm text-slate-600">To:</label>
-                        <input type="date" value={coreBuybackDateTo}
+                        <DateInput value={coreBuybackDateTo}
                           onChange={e => { setCoreBuybackPeriod(''); setCoreBuybackDateTo(e.target.value); loadCoreBuybacks(coreBuybackDateFrom || undefined, e.target.value || undefined) }}
                           className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
                         />
@@ -1412,7 +1413,7 @@ export function SalesOrdersPage() {
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Expected Delivery Date</label>
-                  <input type="date" value={orderForm.expectedDeliveryDate} onChange={e => setOrderForm({...orderForm, expectedDeliveryDate: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+                  <DateInput value={orderForm.expectedDeliveryDate} onChange={e => setOrderForm({...orderForm, expectedDeliveryDate: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
                 </div>
 
                 <div>
@@ -1988,7 +1989,6 @@ export function SalesOrdersPage() {
                   <p className="text-xs text-slate-500">Created: {new Date(showOrderDetails.createdAt).toLocaleDateString()}</p>
                   <div className="flex space-x-2">
                     {showOrderDetails.paymentStatus !== 'FULLY_PAID' && showOrderDetails.paymentStatus !== 'OVERPAID' && (() => {
-                      const outstanding = showOrderDetails.totalAmount - showOrderDetails.totalPaid
                       const deposit = getCustomerDeposit(showOrderDetails.customerId)
                       const disabled = deposit > 0 && showOrderDetails.status !== 'PICKED_UP'
                       return (

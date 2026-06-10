@@ -107,6 +107,7 @@ export interface ProfitSummary {
   breakdown: {
     salesRevenue: number
     packingRevenue: number
+    otherIncome: number
   }
   costOfGoodsSold: number
   expenses: number
@@ -159,12 +160,14 @@ export const financeApi = {
   createAccount: (data: Partial<Account>) => api.post<Account>('/finance/accounts', data),
 
   // Journal
-  getJournalEntries: (params?: { dateFrom?: string; dateTo?: string; sourceModule?: string; accountId?: string }) => {
+  getJournalEntries: (params?: { dateFrom?: string; dateTo?: string; sourceModule?: string; accountId?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams()
     if (params?.dateFrom) query.append('dateFrom', params.dateFrom)
     if (params?.dateTo) query.append('dateTo', params.dateTo)
     if (params?.sourceModule) query.append('sourceModule', params.sourceModule)
     if (params?.accountId) query.append('accountId', params.accountId)
+    if (params?.limit) query.append('limit', String(params.limit))
+    if (params?.offset) query.append('offset', String(params.offset))
     const queryStr = query.toString()
     return api.get<JournalEntry[]>(`/finance/journal${queryStr ? '?' + queryStr : ''}`)
   },

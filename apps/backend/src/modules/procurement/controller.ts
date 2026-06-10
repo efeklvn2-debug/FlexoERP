@@ -126,7 +126,7 @@ export const procurementController = {
   async addPayment(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const { amount, date, paymentMethod, reference, notes } = req.body
-      const payment = await procurementService.addPayment(req.params.id, amount, new Date(date), paymentMethod, reference, notes)
+      const payment = await procurementService.addPayment(req.params.id, amount, date, paymentMethod, reference, notes)
       res.status(201).json({ data: payment })
     } catch (error) { next(error) }
   }

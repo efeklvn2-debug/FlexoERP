@@ -209,8 +209,9 @@ export const financeRepository = {
   async getRevenueByPeriod(dateFrom: Date, dateTo: Date) {
     const salesAccount = await prisma.account.findUnique({ where: { code: '4000' } })
     const packingAccount = await prisma.account.findUnique({ where: { code: '4100' } })
+    const otherIncomeAccount = await prisma.account.findUnique({ where: { code: '4200' } })
 
-    const result: Record<string, number> = { sales: 0, packing: 0 }
+    const result: Record<string, number> = { sales: 0, packing: 0, otherIncome: 0 }
 
     if (salesAccount) {
       const salesTotal = await prisma.journalLine.aggregate({
@@ -232,6 +233,19 @@ export const financeRepository = {
         _sum: { credit: true }
       })
       result.packing = packingTotal._sum.credit ? Number(packingTotal._sum.credit) : 0
+    }
+
+    if (otherIncomeAccount) {
+      const otherTotal = await prisma.journalLine.aggregate({
+        where: {
+          accountId: otherIncomeAccount.id,
+          journalEntry: { date: { gte: dateFrom, lte: dateTo } }
+        },
+        _sum: { credit: true, debit: true }
+      })
+      const credits = otherTotal._sum.credit ? Number(otherTotal._sum.credit) : 0
+      const debits = otherTotal._sum.debit ? Number(otherTotal._sum.debit) : 0
+      result.otherIncome = credits - debits
     }
 
     return result
@@ -260,18 +274,35 @@ export const financeRepository = {
 
   async getCogsByPeriod(dateFrom: Date, dateTo: Date) {
     const cogsAccount = await prisma.account.findUnique({ where: { code: '5000' } })
-    
-    if (!cogsAccount) return 0
+    const productionCostsAccount = await prisma.account.findUnique({ where: { code: '5200' } })
 
-    const result = await prisma.journalLine.aggregate({
-      where: {
-        accountId: cogsAccount.id,
-        journalEntry: { date: { gte: dateFrom, lte: dateTo } }
-      },
-      _sum: { debit: true }
-    })
+    let total = 0
 
-    return result._sum.debit ? Number(result._sum.debit) : 0
+    if (cogsAccount) {
+      const result = await prisma.journalLine.aggregate({
+        where: {
+          accountId: cogsAccount.id,
+          journalEntry: { date: { gte: dateFrom, lte: dateTo } }
+        },
+        _sum: { debit: true }
+      })
+      total += result._sum.debit ? Number(result._sum.debit) : 0
+    }
+
+    if (productionCostsAccount) {
+      const result = await prisma.journalLine.aggregate({
+        where: {
+          accountId: productionCostsAccount.id,
+          journalEntry: { date: { gte: dateFrom, lte: dateTo } }
+        },
+        _sum: { debit: true, credit: true }
+      })
+      const credits = result._sum.credit ? Number(result._sum.credit) : 0
+      const debits = result._sum.debit ? Number(result._sum.debit) : 0
+      total += debits - credits
+    }
+
+    return Math.max(0, total)
   },
 
   async getCashFlow(dateFrom: Date, dateTo: Date) {

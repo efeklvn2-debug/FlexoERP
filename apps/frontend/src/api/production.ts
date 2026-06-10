@@ -18,6 +18,7 @@ export interface ProductionJob {
   printedRolls?: PrintedRoll[]
   parentRollIds?: string[]
   parentRolls?: { id: string; rollNumber: string; weight: number; remainingWeight: number }[]
+  printedRollMapping?: Record<string, Record<string, number>>
 }
 
 export interface PrintedRoll {
@@ -47,6 +48,12 @@ export interface PrintedRoll {
   }
 }
 
+export interface ParentRollContribution {
+  rollNumber: string
+  totalWeight: number
+  contributedWeight: number
+}
+
 export interface PrintedRollDisplay {
   id: string
   rollNumber: string
@@ -57,6 +64,7 @@ export interface PrintedRollDisplay {
   status: string
   isCombination?: boolean
   parentRolls?: string[]
+  parentRollContributions?: ParentRollContribution[]
   pickedUpAt?: string
   createdAt: string
 }
@@ -105,6 +113,10 @@ export const productionApi = {
     if (filters?.status) params.append('status', filters.status)
     const query = params.toString() ? `?${params.toString()}` : ''
     return api.get<PrintedRollDisplay[]>(`/production/printed-rolls${query}`)
+  },
+
+  getPrintedRollsByParentRoll: async (parentRollId: string) => {
+    return api.get<any[]>(`/production/parent-roll/${parentRollId}/printed-rolls`)
   },
 
   getRollTypes: async () => {

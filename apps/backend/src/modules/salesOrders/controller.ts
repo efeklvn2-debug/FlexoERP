@@ -302,7 +302,7 @@ export const invoiceController = {
     try {
       const { id } = req.params
       const { amount, date, reference, notes, paymentMethod } = req.body
-      const payment = await invoiceService.addPayment(id, amount, new Date(date), reference, notes, paymentMethod)
+      const payment = await invoiceService.addPayment(id, amount, date, reference, notes, paymentMethod)
       res.status(201).json({ data: payment })
     } catch (error: any) {
       logger.error(error, 'Error recording payment')

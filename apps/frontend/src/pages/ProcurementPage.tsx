@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { procurementApi, PurchaseOrder, SupplierInvoice, SupplierInvoiceStatus } from '../api/procurement'
 import { Layout } from '../components/Layout'
+import { DateInput } from '../components/DateInput'
 import { inventoryApi, MaterialWithStock } from '../api/inventory'
 import { suppliersApi, Supplier } from '../api/suppliers'
 
@@ -661,7 +662,7 @@ export function ProcurementPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Expected Date</label>
-                  <input type="date" value={poForm.expectedDate} onChange={e => setPoForm({...poForm, expectedDate: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+                  <DateInput value={poForm.expectedDate} onChange={e => setPoForm({...poForm, expectedDate: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
                 </div>
               </div>
 
@@ -1017,7 +1018,7 @@ export function ProcurementPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Expected Date</label>
-                  <input type="date" value={editPOForm.expectedDate} onChange={e => setEditPOForm({...editPOForm, expectedDate: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+                  <DateInput value={editPOForm.expectedDate} onChange={e => setEditPOForm({...editPOForm, expectedDate: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
                 </div>
               </div>
 
@@ -1233,8 +1234,7 @@ export function ProcurementPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Date <span className="text-red-500">*</span></label>
-                  <input
-                    type="date"
+                  <DateInput
                     value={invForm.date}
                     onChange={e => setInvForm({ ...invForm, date: e.target.value })}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
@@ -1288,8 +1288,7 @@ export function ProcurementPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Date <span className="text-red-500">*</span></label>
-                  <input
-                    type="date"
+                  <DateInput
                     value={payForm.date}
                     onChange={e => setPayForm({ ...payForm, date: e.target.value })}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"

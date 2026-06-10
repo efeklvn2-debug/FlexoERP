@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { prisma } from '../../database'
 import { AppError } from '../../middleware/errorHandler'
+import { dateFromInput } from '../../utils/dates'
 
 export const priceListSchema = z.object({
   materialId: z.string().min(1, 'Material is required'),
@@ -53,7 +54,7 @@ export const pricingService = {
         materialId,
         pricePerKg: pricePerKg ?? null,
         pricePerPack: pricePerPack ?? null,
-        effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date()
+        effectiveFrom: dateFromInput(effectiveFrom)
       },
       include: { material: true }
     })

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { productionApi, ProductionJob, ParentRoll, CreateJobInput } from '../api/production'
 import { salesApi } from '../api/sales'
 import { Layout } from '../components/Layout'
+import { DateInput } from '../components/DateInput'
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING: 'bg-yellow-100 text-yellow-800',
@@ -319,6 +320,7 @@ export function ProductionPage() {
             <h1 className="text-2xl font-bold text-slate-900">Production</h1>
             <p className="text-slate-500 mt-1">Manage production jobs</p>
           </div>
+          <button onClick={() => { resetForm(); setShowJobModal(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">New Job</button>
         </div>
 
         {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
@@ -372,8 +374,7 @@ export function ProductionPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">From Date</label>
-              <input
-                type="date"
+              <DateInput
                 value={filterDateFrom}
                 onChange={e => setFilterDateFrom(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
@@ -381,8 +382,7 @@ export function ProductionPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">To Date</label>
-              <input
-                type="date"
+              <DateInput
                 value={filterDateTo}
                 onChange={e => setFilterDateTo(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
@@ -472,6 +472,196 @@ export function ProductionPage() {
           </div>
         )}
 
+        {/* New/Edit Job Modal */}
+        {showJobModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+              <h2 className="text-xl font-bold mb-4">{editingJobId ? 'Edit Production Job' : 'New Production Job'}</h2>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Customer Name</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={form.customerName}
+                      onChange={e => { setForm({ ...form, customerName: e.target.value }); setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}
+                      onFocus={() => setShowCustomerDropdown(true)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                      placeholder="Search customer..."
+                    />
+                    {showCustomerDropdown && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                        {customers.filter(c => !customerSearch || c.name.toLowerCase().includes(customerSearch.toLowerCase())).map(cust => (
+                          <button
+                            key={cust.id}
+                            type="button"
+                            onClick={() => { setForm({ ...form, customerName: cust.name }); setShowCustomerDropdown(false); setCustomerSearch(''); }}
+                            className="w-full text-left px-4 py-2 hover:bg-slate-50"
+                          >
+                            {cust.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Plain Rolls Category *</label>
+                    <select
+                      value={form.category}
+                      onChange={e => handleCategoryChange(e.target.value as typeof CATEGORIES[number])}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    >
+                      <option value="">Select category</option>
+                      {CATEGORIES.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Machine *</label>
+                    <select
+                      value={form.machine}
+                      onChange={e => setForm({ ...form, machine: e.target.value as typeof MACHINES[number] })}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    >
+                      <option value="">Select machine</option>
+                      {MACHINES.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {form.category && (
+                    <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Parent Rolls *</label>
+                    <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1">
+                      {loading ? (
+                        <p className="text-sm text-slate-500 py-2">Loading...</p>
+                      ) : availableRolls.length === 0 ? (
+                        <p className="text-sm text-slate-500 py-2">No rolls for this category</p>
+                      ) : (
+                        availableRolls.filter(r => r && r.id).map((roll, idx) => (
+                          <label key={roll.id || `roll-${idx}`} className="flex items-center p-2 hover:bg-slate-50 rounded cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={roll.id ? form.rollIds.includes(roll.id) : false}
+                              onChange={() => roll.id && toggleRollSelection(roll.id)}
+                              className="mr-3"
+                            />
+                            <span className="text-sm flex-1">
+                              {roll.rollNumber || 'Unknown'} - {Number(roll.weight || 0).toFixed(2)}kg ({roll.material?.subCategory || 'N/A'})
+                            </span>
+                            <span className="text-xs text-slate-500 mr-2">
+                              Remain: {Number(roll.remainingWeight || 0).toFixed(2)}kg
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded ${roll.status === 'AVAILABLE' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                              {roll.status || 'UNKNOWN'}
+                            </span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    {selectedRolls.length > 0 && (
+                      <p className="text-sm text-slate-600 mt-1">Selected: {selectedRolls.length} rolls, {totalParentWeight.toFixed(2)}kg total</p>
+                    )}
+                  </div>
+                )}
+
+                {form.rollIds.length > 0 && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Printed Roll Weights (space-separated, kg) - max 35 *
+                      </label>
+                      <input
+                        type="text"
+                        value={form.printedRollWeights}
+                        onChange={e => { setForm({ ...form, printedRollWeights: e.target.value }); setCalculatedWaste(null); }}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                        placeholder="e.g. 14.5 16 18.2 15.8 19.1"
+                      />
+                      <div className="flex justify-between items-center mt-1">
+                        {printedWeights.length > 0 && (
+                          <p className="text-sm text-slate-600">
+                            {printedWeights.length} rolls, {totalPrintedWeight.toFixed(2)}kg total
+                          </p>
+                        )}
+                        {selectedRolls.length > 0 && (
+                          <p className={`text-sm font-medium ${
+                            totalParentWeight - totalPrintedWeight < 0 
+                              ? 'text-red-600' 
+                              : totalParentWeight - totalPrintedWeight < 10 
+                                ? 'text-yellow-600' 
+                                : 'text-green-600'
+                          }`}>
+                            {totalParentWeight - totalPrintedWeight >= 0 
+                              ? `Remaining: ${(totalParentWeight - totalPrintedWeight).toFixed(2)}kg`
+                              : `Exceeded by ${(totalPrintedWeight - totalParentWeight).toFixed(2)}kg`
+                            }
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Waste Weight (kg)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={form.wasteWeight || ''}
+                          onChange={e => setForm({ ...form, wasteWeight: parseFloat(e.target.value) || 0 })}
+                          className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                        />
+                        {calculatedWaste !== null && (
+                          <p className="text-xs text-slate-500 mt-1">Auto-calculated: {calculatedWaste.toFixed(2)}kg</p>
+                        )}
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={calculateWaste}
+                          className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
+                        >
+                          Calculate Waste
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                  <textarea
+                    value={form.notes}
+                    onChange={e => setForm({ ...form, notes: e.target.value })}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    rows={2}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button type="button" onClick={() => { setShowJobModal(false); resetForm(); }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button
+                  type="button"
+                  onClick={handleCreateJob}
+                  disabled={!form.machine || form.rollIds.length === 0 || !form.printedRollWeights.trim()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {editingJobId ? 'Update Job' : 'Create Job'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* View Job Modal */}
         {showViewModal && selectedJob && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -531,20 +721,40 @@ export function ProductionPage() {
                         <tr>
                           <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Roll #</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Original Weight</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Consumed</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Remaining</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
-                        {selectedJob.parentRolls?.map((pr) => (
-                          <tr key={pr.id}>
-                            <td className="px-4 py-2 text-sm text-slate-900">{pr.rollNumber}</td>
-                            <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.weight).toFixed(2)} kg</td>
-                            <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.remainingWeight).toFixed(2)} kg</td>
-                          </tr>
-                        ))}
+                        {(() => {
+                          const mapping = (selectedJob as any).printedRollMapping as Record<string, any> || {}
+                          const contributedMap: Record<string, number> = {}
+                          if (selectedJob.printedRolls) {
+                            for (const p of selectedJob.printedRolls) {
+                              const e = mapping[p.id]
+                              if (typeof e === 'object' && e !== null) {
+                                for (const [pid, cw] of Object.entries(e)) {
+                                  contributedMap[pid] = (contributedMap[pid] || 0) + Number(cw)
+                                }
+                              }
+                            }
+                          }
+                          return (selectedJob.parentRolls || []).map((pr) => {
+                            const consumed = contributedMap[pr.id] ?? (Number(pr.weight) - Number(pr.remainingWeight))
+                            return (
+                              <tr key={pr.id}>
+                                <td className="px-4 py-2 text-sm text-slate-900">{pr.rollNumber}</td>
+                                <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.weight).toFixed(2)} kg</td>
+                                <td className="px-4 py-2 text-sm text-slate-900">{Number(consumed).toFixed(2)} kg</td>
+                                <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.remainingWeight).toFixed(2)} kg</td>
+                              </tr>
+                            )
+                          })
+                        })()}
                         {!selectedJob.parentRolls && selectedJob.parentRollIds?.map((id) => (
                           <tr key={id}>
                             <td className="px-4 py-2 text-sm text-slate-900">{id}</td>
+                            <td className="px-4 py-2 text-sm text-slate-500">-</td>
                             <td className="px-4 py-2 text-sm text-slate-500">-</td>
                             <td className="px-4 py-2 text-sm text-slate-500">-</td>
                           </tr>
@@ -565,27 +775,44 @@ export function ProductionPage() {
                         <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Roll #</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Weight</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Material</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Parent Roll(s)</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {selectedJob.printedRolls?.map((pr, idx) => (
-                        <tr key={pr.id}>
-                          <td className="px-4 py-2 text-sm text-slate-900">{pr.roll?.rollNumber || `Roll ${idx + 1}`}</td>
-                          <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.weightUsed).toFixed(2)} kg</td>
-                          <td className="px-4 py-2 text-sm text-slate-900">{pr.roll?.material?.subCategory || '-'}</td>
-                          <td className="px-4 py-2">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              pr.status === 'IN_STOCK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                            }`}>
-                              {pr.status || 'IN_STOCK'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {selectedJob.printedRolls?.map((pr, idx) => {
+                        const mapping = (selectedJob as any).printedRollMapping as Record<string, any> || {}
+                        const entry = mapping[pr.id]
+                        let parentInfo: string[] = []
+                        if (typeof entry === 'object' && entry !== null) {
+                          const parentRollsMap = new Map((selectedJob.parentRolls || []).map(r => [r.id, r]))
+                          for (const [parentId, cw] of Object.entries(entry)) {
+                            const pr2 = parentRollsMap.get(parentId)
+                            const rn = pr2?.rollNumber || parentId
+                            parentInfo.push(`${rn}: ${Number(cw).toFixed(2)}kg`)
+                          }
+                        }
+                        return (
+                          <tr key={pr.id}>
+                            <td className="px-4 py-2 text-sm text-slate-900">{pr.roll?.rollNumber || `Roll ${idx + 1}`}</td>
+                            <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.weightUsed).toFixed(2)} kg</td>
+                            <td className="px-4 py-2 text-sm text-slate-900">{pr.roll?.material?.subCategory || '-'}</td>
+                            <td className="px-4 py-2 text-sm text-slate-600">
+                              {parentInfo.length > 0 ? parentInfo.join(', ') : (pr.isCombination ? 'Multiple' : '-')}
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                pr.status === 'IN_STOCK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                              }`}>
+                                {pr.status || 'IN_STOCK'}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
                       {(!selectedJob.printedRolls || selectedJob.printedRolls.length === 0) && (
                         <tr>
-                          <td colSpan={4} className="px-4 py-4 text-sm text-slate-500 text-center">No printed rolls</td>
+                          <td colSpan={5} className="px-4 py-4 text-sm text-slate-500 text-center">No printed rolls</td>
                         </tr>
                       )}
                     </tbody>

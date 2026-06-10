@@ -4,6 +4,7 @@ import { inventoryApi, MaterialWithStock, MaterialCategory, MovementType } from 
 import { procurementApi, Roll } from '../api/procurement'
 import { productionApi, PrintedRollDisplay } from '../api/production'
 import { Layout } from '../components/Layout'
+import { DateInput } from '../components/DateInput'
 
 type TabType = 'plain-rolls' | 'ink-solvents' | 'cores' | 'packing-bags' | 'printed-rolls' | 'initial-stock'
 
@@ -38,6 +39,9 @@ export function InventoryPage() {
   const [adjustType, setAdjustType] = useState<'ADD' | 'REMOVE'>('ADD')
   const [adjustReason, setAdjustReason] = useState('')
   const [adjusting, setAdjusting] = useState(false)
+  const [selectedParentRoll, setSelectedParentRoll] = useState<Roll | null>(null)
+  const [printedFromRoll, setPrintedFromRoll] = useState<any[] | null>(null)
+  const [loadingPrintedFromRoll, setLoadingPrintedFromRoll] = useState(false)
 
   const ADJUSTMENT_REASONS = [
     'Opening Balance',
@@ -101,7 +105,7 @@ export function InventoryPage() {
     setLoading(false)
   }
 
-  const plainRolls = rolls.filter(r => r.status !== 'CONSUMED')
+  const plainRolls = rolls
   const filteredPlainRolls = useMemo(() => {
     let result = [...plainRolls]
     if (plainRollsFilter.search) {
@@ -208,6 +212,19 @@ export function InventoryPage() {
                 sortOrder={plainRollsSortOrder}
                 setSortOrder={setPlainRollsSortOrder}
                 total={plainRolls.length}
+                onRollClick={async (roll) => {
+                  setSelectedParentRoll(roll)
+                  setPrintedFromRoll(null)
+                  setLoadingPrintedFromRoll(true)
+                  try {
+                    const res = await productionApi.getPrintedRollsByParentRoll(roll.id)
+                    if (res.data) setPrintedFromRoll((res.data as any).data || [])
+                    else setPrintedFromRoll([])
+                  } catch {
+                    setPrintedFromRoll([])
+                  }
+                  setLoadingPrintedFromRoll(false)
+                }}
               />
             )}
             {activeTab === 'ink-solvents' && (
@@ -482,12 +499,87 @@ export function InventoryPage() {
             </div>
           </div>
         )}
+
+        {/* Parent Roll Details Modal */}
+        {selectedParentRoll && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold">Roll {selectedParentRoll.rollNumber}</h2>
+                <button onClick={() => { setSelectedParentRoll(null); setPrintedFromRoll(null) }} className="text-slate-400 hover:text-slate-600">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-slate-50 rounded-xl">
+                <div>
+                  <p className="text-xs text-slate-500">Material</p>
+                  <p className="font-medium">{(selectedParentRoll.material as any)?.subCategory || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Weight</p>
+                  <p className="font-medium">{Number(selectedParentRoll.weight).toFixed(2)} kg</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Remaining</p>
+                  <p className="font-medium">{Number(selectedParentRoll.remainingWeight).toFixed(2)} kg</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Status</p>
+                  <p className="font-medium">{selectedParentRoll.status}</p>
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold mb-3">Printed Rolls Produced From This Roll</h3>
+              {loadingPrintedFromRoll ? (
+                <div className="text-center py-8 text-slate-500">Loading...</div>
+              ) : printedFromRoll === null ? (
+                <div className="text-center py-8 text-slate-500">Click load to view printed rolls</div>
+              ) : printedFromRoll.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">No printed rolls found for this parent roll</div>
+              ) : (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left text-xs font-medium text-slate-500 uppercase px-3 py-2">Roll #</th>
+                      <th className="text-left text-xs font-medium text-slate-500 uppercase px-3 py-2">Weight</th>
+                      <th className="text-left text-xs font-medium text-slate-500 uppercase px-3 py-2">Customer</th>
+                      <th className="text-left text-xs font-medium text-slate-500 uppercase px-3 py-2">Date</th>
+                      <th className="text-left text-xs font-medium text-slate-500 uppercase px-3 py-2">Job</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {printedFromRoll.map((pr: any) => {
+                      const isPartial = pr.contributedWeight && pr.contributedWeight < Number(pr.weightUsed)
+                      return (
+                        <tr key={pr.id} className={'hover:bg-slate-50' + (isPartial ? ' bg-amber-50' : '')}>
+                          <td className="px-3 py-3 text-sm font-mono">
+                            {pr.rollNumber}
+                            {isPartial && <span className="ml-2 inline-block w-2 h-2 rounded-full bg-amber-500" title="Partial contribution" />}
+                          </td>
+                          <td className="px-3 py-3 text-sm">
+                            {isPartial ? (
+                              <span>{Number(pr.contributedWeight).toFixed(2)} kg <span className="text-xs text-slate-400">of {Number(pr.weightUsed).toFixed(2)} kg</span></span>
+                            ) : (
+                              <span>{Number(pr.weightUsed).toFixed(2)} kg</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-sm">{pr.customerName}</td>
+                          <td className="px-3 py-3 text-sm">{new Date(pr.createdAt).toLocaleDateString()}</td>
+                          <td className="px-3 py-3 text-sm text-slate-500">{pr.jobNumber}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   )
 }
 
-function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total }: {
+function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, onRollClick }: {
   rolls: Roll[]
   filter: { search: string; status: string; materialSubCategory: string }
   setFilter: React.Dispatch<React.SetStateAction<{ search: string; status: string; materialSubCategory: string }>>
@@ -496,6 +588,7 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
   sortOrder: 'asc' | 'desc'
   setSortOrder: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
   total: number
+  onRollClick?: (roll: Roll) => void
 }) {
   return (
     <div className="space-y-4">
@@ -511,6 +604,8 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
               <option value="">All</option>
               <option value="AVAILABLE">Available</option>
               <option value="IN_PRODUCTION">In Production</option>
+              <option value="CONSUMED">Consumed</option>
+              <option value="RETURNED">Returned</option>
             </select>
           </div>
           <div>
@@ -545,12 +640,12 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
           </thead>
           <tbody className="divide-y divide-slate-200">
             {rolls.map(r => (
-              <tr key={r.id} className="hover:bg-slate-50">
+              <tr key={r.id} className={`hover:bg-slate-50 ${onRollClick ? 'cursor-pointer' : ''}`} onClick={() => onRollClick?.(r)}>
                 <td className="px-6 py-4 text-sm font-medium text-slate-900">{r.rollNumber}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{(r.material as any)?.subCategory || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Number(r.weight).toFixed(2)}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Number(r.remainingWeight).toFixed(2)}</td>
-                <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${r.status === 'AVAILABLE' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>{r.status}</span></td>
+                <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${r.status === 'AVAILABLE' ? 'bg-green-100 text-green-800' : r.status === 'IN_PRODUCTION' ? 'bg-yellow-100 text-yellow-800' : r.status === 'CONSUMED' ? 'bg-slate-100 text-slate-600' : 'bg-red-100 text-red-800'}`}>{r.status}</span></td>
                 <td className="px-6 py-4 text-sm text-slate-500">{r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '-'}</td>
               </tr>
             ))}
@@ -636,6 +731,25 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
   setSortOrder: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
   total: number
 }) {
+  const [selectedRoll, setSelectedRoll] = useState<PrintedRollDisplay | null>(null)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
+
+  const statusColor = (status?: string) => {
+    switch (status) {
+      case 'PICKED_UP': return 'bg-amber-100 text-amber-700'
+      case 'IN_STOCK': return 'bg-green-100 text-green-700'
+      default: return 'bg-slate-100 text-slate-600'
+    }
+  }
+
+  const statusLabel = (status?: string) => {
+    switch (status) {
+      case 'PICKED_UP': return 'Picked Up'
+      case 'IN_STOCK': return 'In Stock'
+      default: return status || 'Unknown'
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
@@ -662,11 +776,11 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">From Date</label>
-            <input type="date" value={filter.dateFrom} onChange={e => setFilter({ ...filter, dateFrom: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
+            <DateInput value={filter.dateFrom} onChange={e => setFilter({ ...filter, dateFrom: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">To Date</label>
-            <input type="date" value={filter.dateTo} onChange={e => setFilter({ ...filter, dateTo: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
+            <DateInput value={filter.dateTo} onChange={e => setFilter({ ...filter, dateTo: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Type</label>
@@ -691,7 +805,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Film Wt</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Material</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Parent Roll</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Job #</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
@@ -699,7 +813,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
           </thead>
           <tbody className="divide-y divide-slate-200">
             {rolls.map(r => (
-              <tr key={r.id} className="hover:bg-slate-50">
+              <tr key={r.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setSelectedRoll(r); setShowDetailsModal(true) }}>
                 <td className="px-4 py-3 text-sm font-medium text-slate-900">{r.rollNumber || '-'}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{Number(r.weight).toFixed(2)}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{(Number(r.weight) - 0.7).toFixed(2)}</td>
@@ -711,10 +825,8 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
                     <span className="px-2 py-1 text-xs font-medium bg-slate-100 text-slate-600 rounded-full">Single</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-sm text-slate-600">
-                  {r.parentRolls && r.parentRolls.length > 0 
-                    ? r.parentRolls.join(', ') 
-                    : '-'}
+                <td className="px-4 py-3">
+                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColor(r.status)}`}>{statusLabel(r.status)}</span>
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-600">{r.customerName || '-'}</td>
                 <td className="px-4 py-3 text-sm text-slate-500">{r.jobNumber || '-'}</td>
@@ -725,6 +837,86 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
           </tbody>
         </table>
       </div>
+
+      {showDetailsModal && selectedRoll && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-4">
+              <h2 className="text-xl font-bold text-slate-900">Printed Roll Details</h2>
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColor(selectedRoll.status)}`}>{statusLabel(selectedRoll.status)}</span>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Roll Number</span>
+                  <span className="text-slate-900 font-medium">{selectedRoll.rollNumber || '-'}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Weight</span>
+                  <span className="text-slate-900 font-medium">{Number(selectedRoll.weight).toFixed(2)} kg</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Material</span>
+                  <span className="text-slate-900 font-medium">{selectedRoll.material || '-'}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Type</span>
+                  <span className="text-slate-900 font-medium">{selectedRoll.isCombination ? 'Combo' : 'Single'}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Customer</span>
+                  <span className="text-slate-900 font-medium">{selectedRoll.customerName || '-'}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Job Number</span>
+                  <span className="text-slate-900 font-medium">{selectedRoll.jobNumber || '-'}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Date Produced</span>
+                  <span className="text-slate-900 font-medium">{selectedRoll.createdAt ? new Date(selectedRoll.createdAt).toLocaleDateString() : '-'}</span>
+                </div>
+                {selectedRoll.pickedUpAt && (
+                  <div className="bg-slate-50 p-3 rounded-lg">
+                    <span className="text-slate-500 block text-xs">Picked Up At</span>
+                    <span className="text-slate-900 font-medium">{new Date(selectedRoll.pickedUpAt).toLocaleDateString()}</span>
+                  </div>
+                )}
+              </div>
+
+              {selectedRoll.parentRollContributions && selectedRoll.parentRollContributions.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900 mb-2">Parent Rolls Used</h3>
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase">Roll #</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase">Contributed</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase">Total Wt</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {selectedRoll.parentRollContributions.map((c, i) => (
+                          <tr key={i} className={c.contributedWeight < Number(selectedRoll.weight) ? 'bg-amber-50' : ''}>
+                            <td className="px-3 py-2 font-mono">{c.rollNumber}</td>
+                            <td className="px-3 py-2 text-right font-medium">{c.contributedWeight.toFixed(2)} kg</td>
+                            <td className="px-3 py-2 text-right text-slate-500">{c.totalWeight.toFixed(2)} kg</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-4 border-t border-slate-200 mt-4">
+              <button type="button" onClick={() => { setShowDetailsModal(false); setSelectedRoll(null) }} className="px-4 py-2 border border-slate-300 rounded-lg">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
