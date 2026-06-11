@@ -9,6 +9,7 @@ export interface ProductionJob {
   endDate?: string
   machine: string
   wasteWeight?: number
+  rollWaste?: Record<string, number>
   notes?: string
   materialCost?: number
   consumablesCost?: number
@@ -90,6 +91,7 @@ export interface CreateJobInput {
   rollIds: string[]
   printedRollWeights: number[]
   wasteWeight?: number
+  rollWaste?: Record<string, number>
   notes?: string
 }
 

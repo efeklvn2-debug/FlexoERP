@@ -15,6 +15,7 @@ export const productionJobSchema = z.object({
   rollIds: z.array(z.string()).min(1, 'At least one parent roll is required'),
   printedRollWeights: z.array(z.number().positive()).min(1).max(200),
   wasteWeight: z.number().optional(),
+  rollWaste: z.record(z.string(), z.number().min(0)).optional(),
   notes: z.string().optional()
 })
 
@@ -131,15 +132,16 @@ export const productionService = {
         customerName: input.customerName,
         machine: input.machine,
         wasteWeight: input.wasteWeight ?? 0,
+        rollWaste: input.rollWaste ?? {},
         notes: input.notes,
         parentRollIds: parentRolls.map(r => r.id),
         status: 'IN_PRODUCTION',
         startDate: new Date(),
         printedRolls: {
-          create: newRolls.map((newRoll, idx) => ({
+          create: newRolls.map((newRoll) => ({
             rollId: newRoll.id,
             weightUsed: newRoll.weight,
-            wasteWeight: idx === 0 ? (input.wasteWeight ?? 0) : 0,
+            wasteWeight: 0,
             status: 'IN_STOCK'
           }))
         }
@@ -224,8 +226,13 @@ export const productionService = {
       })
       parentRolls.sort((a, b) => Number(a.remainingWeight) - Number(b.remainingWeight))
 
+      const rollWasteMap: Record<string, number> = (job.rollWaste as Record<string, number>) ?? {}
+      const effectiveCapacities = parentRolls.map(r =>
+        Math.max(0, Number(r.remainingWeight) - (rollWasteMap[r.id] ?? 0))
+      )
+
       let parentRollIndex = 0
-      let remainingInCurrentRoll = Number(parentRolls[0]?.remainingWeight || 0)
+      let remainingInCurrentRoll = effectiveCapacities[0] ?? 0
 
       for (const printedRoll of job.printedRolls) {
         let weightNeeded = Number(printedRoll.weightUsed)
@@ -239,7 +246,7 @@ export const productionService = {
           weightNeeded -= remainingInCurrentRoll
           remainingInCurrentRoll = 0
           parentRollIndex++
-          remainingInCurrentRoll = Number(parentRolls[parentRollIndex]?.remainingWeight || 0)
+          remainingInCurrentRoll = effectiveCapacities[parentRollIndex] ?? 0
         }
 
         const currentRoll = parentRolls[parentRollIndex]
@@ -267,10 +274,10 @@ export const productionService = {
         } else if (i === parentRollIndex) {
           newRemainingWeight = Math.max(0, remainingInCurrentRoll)
         } else {
-          newRemainingWeight = Number(roll.remainingWeight)
+          newRemainingWeight = effectiveCapacities[i]
         }
 
-        const newStatus = newRemainingWeight < 2 ? 'CONSUMED' : 'AVAILABLE'
+        const newStatus = newRemainingWeight < 0.1 ? 'CONSUMED' : 'AVAILABLE'
         parentRollUpdates.push({ id: roll.id, newRemainingWeight, newStatus })
       }
     }
@@ -411,6 +418,10 @@ export const productionService = {
         const parentMaterial = parentRolls[0]?.material
         const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
         materialCost = totalPrintedWeight * costPerKg
+
+        const rollWasteMap: Record<string, number> = (job.rollWaste as Record<string, number>) ?? {}
+        const totalWaste = parentRollIds.reduce((sum, id) => sum + (rollWasteMap[id] ?? 0), 0)
+        const wasteCost = totalWaste * costPerKg
         
         const settings = await tx.settings.findUnique({ where: { id: 'default' } })
         
@@ -454,6 +465,19 @@ export const productionService = {
               { accountId: inventoryAccountId, debit: 0, credit: materialsAndConsumablesCost, memo: 'Materials & consumables consumed' }
             ]
           }, tx)
+          
+          if (wasteCost > 0) {
+            await financeService.postJournalEntry({
+              description: `Job ${job.jobNumber} - Waste charged to overhead`,
+              sourceModule: 'PRODUCTION',
+              sourceId: job.id,
+              reference: job.jobNumber,
+              lines: [
+                { accountId: productionCostsAccountId, debit: wasteCost, credit: 0, memo: 'Production waste' },
+                { accountId: inventoryAccountId, debit: 0, credit: wasteCost, memo: 'Waste consumed' }
+              ]
+            }, tx)
+          }
           
           if (overheadCost > 0) {
             await financeService.postJournalEntry({
@@ -510,6 +534,7 @@ export const productionService = {
     if (input.customerName !== undefined) updates.customerName = input.customerName
     if (input.machine !== undefined) updates.machine = input.machine
     if (input.wasteWeight !== undefined) updates.wasteWeight = input.wasteWeight
+    if (input.rollWaste !== undefined) updates.rollWaste = input.rollWaste
     if (input.notes !== undefined) updates.notes = input.notes
   
     if (input.printedRollWeights && input.printedRollWeights.length > 0) {
@@ -635,7 +660,7 @@ export const productionService = {
       where: {
         status: { in: ['AVAILABLE', 'IN_PRODUCTION'] },
         material: { category: 'PLAIN_ROLLS' },
-        remainingWeight: { gte: 2 },
+        remainingWeight: { gte: 0.1 },
         rollNumber: { not: { startsWith: 'PR' } },
         ...(category ? { material: { subCategory: category } } : {})
       },

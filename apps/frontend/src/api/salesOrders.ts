@@ -193,7 +193,7 @@ export const salesOrderApi = {
     category?: string
     rollIds: string[]
     printedRollWeights: number[]
-    wasteWeight?: number
+    rollWaste?: Record<string, number>
     notes?: string
   }) => api.patch<{ order: SalesOrder; productionJob: any }>(`/sales-orders/orders/${id}/start-production`, data),
   cancelOrder: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/cancel`, {}),

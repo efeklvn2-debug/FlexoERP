@@ -245,7 +245,8 @@ model ProductionJob {
    notes               String?
    parentRollIds       String[] 
    printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
-   
+   rollWaste           Json?    // { parentRollId: wasteKg } — per-roll waste at job level
+    
    // Job costing
     materialCost        Decimal? @default(0) @db.Decimal(12, 2)  // Snapshot at completion (raw parent roll material)
     consumablesCost     Decimal? @default(0) @db.Decimal(12, 2)  // Ink + IPA + Butanol at completion

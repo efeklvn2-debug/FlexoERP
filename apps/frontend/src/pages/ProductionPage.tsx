@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { productionApi, ProductionJob, ParentRoll, CreateJobInput } from '../api/production'
-import { salesApi } from '../api/sales'
+import { productionApi, ProductionJob } from '../api/production'
+
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
 
@@ -11,22 +11,15 @@ const STATUS_COLORS: Record<string, string> = {
   COMPLETED: 'bg-green-100 text-green-800',
 }
 
-const CATEGORIES = ['25microns', '27microns', '28microns', '30microns', 'Premium', 'SuPremium'] as const
 const MACHINES = ['MC1', 'MC2', 'MC3', 'MC4', 'MC5'] as const
 
 export function ProductionPage() {
   const navigate = useNavigate()
   const [jobs, setJobs] = useState<ProductionJob[]>([])
-  const [availableRolls, setAvailableRolls] = useState<ParentRoll[]>([])
-  const [customers, setCustomers] = useState<{id: string, name: string}[]>([])
-  const [customerSearch, setCustomerSearch] = useState('')
-  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [showJobModal, setShowJobModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null)
-  const [editingJobId, setEditingJobId] = useState<string | null>(null)
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<string>('')
@@ -38,151 +31,16 @@ export function ProductionPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [searchTerm, setSearchTerm] = useState<string>('')
 
-  const [form, setForm] = useState({
-    customerName: '',
-    category: '' as typeof CATEGORIES[number] | '',
-    machine: '' as typeof MACHINES[number] | '',
-    rollIds: [] as string[],
-    printedRollWeights: '',
-    wasteWeight: 0,
-    notes: ''
-  })
-
-  const [calculatedWaste, setCalculatedWaste] = useState<number | null>(null)
-
   useEffect(() => { loadData() }, [])
-
-  useEffect(() => {
-    if (showJobModal && customers.length === 0) {
-      salesApi.getCustomers().then(res => {
-        const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
-        setCustomers(data.map((c: any) => ({ id: c.id, name: c.name })))
-      })
-    }
-  }, [showJobModal])
 
   const loadData = async () => {
     setLoading(true)
     setError('')
     try {
-      const [jobsRes, customersRes] = await Promise.all([
-        productionApi.getJobs(),
-        salesApi.getCustomers()
-      ])
+      const jobsRes = await productionApi.getJobs()
       setJobs(Array.isArray(jobsRes.data) ? jobsRes.data : (jobsRes.data as any)?.data || [])
-      const custData = Array.isArray(customersRes.data) ? customersRes.data : (customersRes.data as any)?.data || []
-      setCustomers(custData.map((c: any) => ({ id: c.id, name: c.name })))
     } catch (err: any) { setError(err.message) }
     setLoading(false)
-  }
-
-  const loadAvailableRolls = async (category: string) => {
-    if (!category) {
-      setAvailableRolls([])
-      return
-    }
-    setLoading(true)
-    setError('')
-    try {
-      const res = await productionApi.getAvailableRolls(category)
-      if (res.error) {
-        setError(res.error.message || 'Failed to load rolls')
-        setAvailableRolls([])
-      } else {
-        const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
-        setAvailableRolls(data)
-      }
-    } catch (err: any) { 
-      setError(err.message || 'Failed to load rolls')
-      setAvailableRolls([])
-    }
-    setLoading(false)
-  }
-
-  const handleCategoryChange = (category: typeof CATEGORIES[number]) => {
-    setForm({ ...form, category, rollIds: [] })
-    loadAvailableRolls(category)
-  }
-
-  const toggleRollSelection = (rollId: string) => {
-    if (!rollId) return
-    const newRollIds = form.rollIds.includes(rollId)
-      ? form.rollIds.filter(id => id !== rollId)
-      : [...form.rollIds, rollId]
-    setForm({ ...form, rollIds: newRollIds })
-    setCalculatedWaste(null)
-  }
-
-  const calculateWaste = () => {
-    const selectedRolls = availableRolls.filter(r => r.id && form.rollIds.includes(r.id))
-    if (selectedRolls.length === 0 || !form.printedRollWeights.trim()) return
-
-    const weights = form.printedRollWeights.split(/[\s,]+/).map(w => parseFloat(w)).filter(w => !isNaN(w) && w > 0)
-    if (weights.length === 0) return
-
-    const totalParentWeight = selectedRolls.reduce((sum, r) => sum + Number(r.remainingWeight || r.weight || 0), 0)
-    const totalPrintedWeight = weights.reduce((sum, w) => sum + w, 0)
-
-    const calculated = totalParentWeight - totalPrintedWeight
-
-    setCalculatedWaste(calculated)
-    setForm({ ...form, wasteWeight: calculated })
-  }
-
-  const handleCreateJob = async () => {
-    if (!form.machine || !form.printedRollWeights.trim()) {
-      setError('Please fill in all required fields')
-      return
-    }
-
-    const weights = form.printedRollWeights.split(/[\s,]+/).map(w => parseFloat(w)).filter(w => !isNaN(w) && w > 0)
-    if (weights.length === 0 || weights.length > 35) {
-      setError('Enter 1-35 roll weights (space or comma-separated)')
-      return
-    }
-
-    // Check weight limit
-    const selectedRolls = availableRolls.filter(r => r.id && form.rollIds.includes(r.id))
-    const totalParentWeight = selectedRolls.reduce((sum, r) => sum + Number(r.remainingWeight || 0), 0)
-    const totalPrintedWeight = weights.reduce((sum, w) => sum + w, 0)
-    const excessWeight = totalPrintedWeight - totalParentWeight
-
-    if (excessWeight > 10) {
-      setError(`Cannot create job: Printed weight (${totalPrintedWeight.toFixed(2)}kg) exceeds available (${totalParentWeight.toFixed(2)}kg) by more than 10kg`)
-      return
-    }
-
-    if (excessWeight > 0) {
-      if (!confirm(`Warning: Printed weight (${totalPrintedWeight.toFixed(2)}kg) exceeds available (${totalParentWeight.toFixed(2)}kg) by ${excessWeight.toFixed(2)}kg. Continue anyway?`)) {
-        return
-      }
-    }
-
-    const input: CreateJobInput = {
-      customerName: form.customerName || undefined,
-      machine: form.machine,
-      category: form.category || undefined,
-      rollIds: form.rollIds,
-      printedRollWeights: weights,
-      wasteWeight: form.wasteWeight || undefined,
-      notes: form.notes || undefined
-    }
-
-    let res
-    if (editingJobId) {
-      res = await productionApi.updateJob(editingJobId, input)
-    } else {
-      res = await productionApi.createJob(input)
-    }
-    
-    if (!res.error) {
-      setShowJobModal(false)
-      resetForm()
-      setEditingJobId(null)
-      loadData()
-    } else {
-      setError(res.error.message)
-    }
   }
 
   const handleCompleteJob = async (jobId: string) => {
@@ -208,53 +66,10 @@ export function ProductionPage() {
     }
   }
 
-  const resetForm = () => {
-    setForm({
-      customerName: '',
-      category: '',
-      machine: '',
-      rollIds: [],
-      printedRollWeights: '',
-      wasteWeight: 0,
-      notes: ''
-    })
-    setCalculatedWaste(null)
-    setAvailableRolls([])
-    setEditingJobId(null)
-  }
-
   const openViewModal = (job: ProductionJob) => {
     setSelectedJob(job)
     setShowViewModal(true)
   }
-
-  const openEditModal = async (job: ProductionJob) => {
-    setEditingJobId(job.id)
-    const printedWeights = job.printedRolls?.map(pr => pr.weightUsed).join(' ') || ''
-    const category = job.printedRolls?.[0]?.roll?.material?.subCategory as typeof CATEGORIES[number] || ''
-    
-    setForm({
-      customerName: job.customerName || '',
-      category: category,
-      machine: job.machine as typeof MACHINES[number],
-      rollIds: job.parentRollIds || [],
-      printedRollWeights: printedWeights,
-      wasteWeight: Number(job.wasteWeight) || 0,
-      notes: job.notes || ''
-    })
-    
-    // Load available rolls for the category
-    if (category) {
-      loadAvailableRolls(category)
-    }
-    
-    setShowJobModal(true)
-  }
-
-  const selectedRolls = availableRolls.filter(r => r.id && form.rollIds.includes(r.id))
-  const totalParentWeight = selectedRolls.reduce((sum, r) => sum + Number(r.remainingWeight || r.weight || 0), 0)
-  const printedWeights = form.printedRollWeights.split(/[\s,]+/).map(w => parseFloat(w)).filter(w => !isNaN(w) && w > 0)
-  const totalPrintedWeight = printedWeights.reduce((sum, w) => sum + w, 0)
 
   // Filter and sort jobs
   const filteredJobs = useMemo(() => {
@@ -320,7 +135,7 @@ export function ProductionPage() {
             <h1 className="text-2xl font-bold text-slate-900">Production</h1>
             <p className="text-slate-500 mt-1">Manage production jobs</p>
           </div>
-          <button onClick={() => { resetForm(); setShowJobModal(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">New Job</button>
+          
         </div>
 
         {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
@@ -451,9 +266,6 @@ export function ProductionPage() {
                     <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[job.status] || 'bg-slate-100'}`}>{job.status}</span></td>
                     <td className="px-6 py-4 text-sm text-slate-500">{new Date(job.createdAt).toLocaleDateString()}</td>
                     <td className="px-6 py-4">
-                      {job.status !== 'COMPLETED' && (
-                        <button onClick={() => openEditModal(job)} className="text-indigo-600 hover:text-indigo-800 text-sm font-medium mr-3">Edit</button>
-                      )}
                       <button onClick={() => openViewModal(job)} className="text-blue-600 hover:text-blue-800 text-sm font-medium mr-3">View</button>
                       {job.status === 'IN_PRODUCTION' && (
                         <button onClick={() => handleCompleteJob(job.id)} className="text-green-600 hover:text-green-800 text-sm font-medium mr-3">Complete</button>
@@ -469,196 +281,6 @@ export function ProductionPage() {
             {jobs.length === 0 && (
               <div className="text-center py-8 text-slate-500">No production jobs yet</div>
             )}
-          </div>
-        )}
-
-        {/* New/Edit Job Modal */}
-        {showJobModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-              <h2 className="text-xl font-bold mb-4">{editingJobId ? 'Edit Production Job' : 'New Production Job'}</h2>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Customer Name</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={form.customerName}
-                      onChange={e => { setForm({ ...form, customerName: e.target.value }); setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}
-                      onFocus={() => setShowCustomerDropdown(true)}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                      placeholder="Search customer..."
-                    />
-                    {showCustomerDropdown && (
-                      <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                        {customers.filter(c => !customerSearch || c.name.toLowerCase().includes(customerSearch.toLowerCase())).map(cust => (
-                          <button
-                            key={cust.id}
-                            type="button"
-                            onClick={() => { setForm({ ...form, customerName: cust.name }); setShowCustomerDropdown(false); setCustomerSearch(''); }}
-                            className="w-full text-left px-4 py-2 hover:bg-slate-50"
-                          >
-                            {cust.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Plain Rolls Category *</label>
-                    <select
-                      value={form.category}
-                      onChange={e => handleCategoryChange(e.target.value as typeof CATEGORIES[number])}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                    >
-                      <option value="">Select category</option>
-                      {CATEGORIES.map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Machine *</label>
-                    <select
-                      value={form.machine}
-                      onChange={e => setForm({ ...form, machine: e.target.value as typeof MACHINES[number] })}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                    >
-                      <option value="">Select machine</option>
-                      {MACHINES.map(m => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {form.category && (
-                    <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Parent Rolls *</label>
-                    <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1">
-                      {loading ? (
-                        <p className="text-sm text-slate-500 py-2">Loading...</p>
-                      ) : availableRolls.length === 0 ? (
-                        <p className="text-sm text-slate-500 py-2">No rolls for this category</p>
-                      ) : (
-                        availableRolls.filter(r => r && r.id).map((roll, idx) => (
-                          <label key={roll.id || `roll-${idx}`} className="flex items-center p-2 hover:bg-slate-50 rounded cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={roll.id ? form.rollIds.includes(roll.id) : false}
-                              onChange={() => roll.id && toggleRollSelection(roll.id)}
-                              className="mr-3"
-                            />
-                            <span className="text-sm flex-1">
-                              {roll.rollNumber || 'Unknown'} - {Number(roll.weight || 0).toFixed(2)}kg ({roll.material?.subCategory || 'N/A'})
-                            </span>
-                            <span className="text-xs text-slate-500 mr-2">
-                              Remain: {Number(roll.remainingWeight || 0).toFixed(2)}kg
-                            </span>
-                            <span className={`text-xs px-2 py-0.5 rounded ${roll.status === 'AVAILABLE' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-                              {roll.status || 'UNKNOWN'}
-                            </span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                    {selectedRolls.length > 0 && (
-                      <p className="text-sm text-slate-600 mt-1">Selected: {selectedRolls.length} rolls, {totalParentWeight.toFixed(2)}kg total</p>
-                    )}
-                  </div>
-                )}
-
-                {form.rollIds.length > 0 && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1">
-                        Printed Roll Weights (space-separated, kg) - max 35 *
-                      </label>
-                      <input
-                        type="text"
-                        value={form.printedRollWeights}
-                        onChange={e => { setForm({ ...form, printedRollWeights: e.target.value }); setCalculatedWaste(null); }}
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                        placeholder="e.g. 14.5 16 18.2 15.8 19.1"
-                      />
-                      <div className="flex justify-between items-center mt-1">
-                        {printedWeights.length > 0 && (
-                          <p className="text-sm text-slate-600">
-                            {printedWeights.length} rolls, {totalPrintedWeight.toFixed(2)}kg total
-                          </p>
-                        )}
-                        {selectedRolls.length > 0 && (
-                          <p className={`text-sm font-medium ${
-                            totalParentWeight - totalPrintedWeight < 0 
-                              ? 'text-red-600' 
-                              : totalParentWeight - totalPrintedWeight < 10 
-                                ? 'text-yellow-600' 
-                                : 'text-green-600'
-                          }`}>
-                            {totalParentWeight - totalPrintedWeight >= 0 
-                              ? `Remaining: ${(totalParentWeight - totalPrintedWeight).toFixed(2)}kg`
-                              : `Exceeded by ${(totalPrintedWeight - totalParentWeight).toFixed(2)}kg`
-                            }
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Waste Weight (kg)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={form.wasteWeight || ''}
-                          onChange={e => setForm({ ...form, wasteWeight: parseFloat(e.target.value) || 0 })}
-                          className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                        />
-                        {calculatedWaste !== null && (
-                          <p className="text-xs text-slate-500 mt-1">Auto-calculated: {calculatedWaste.toFixed(2)}kg</p>
-                        )}
-                      </div>
-                      <div className="flex items-end">
-                        <button
-                          type="button"
-                          onClick={calculateWaste}
-                          className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
-                        >
-                          Calculate Waste
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
-                  <textarea
-                    value={form.notes}
-                    onChange={e => setForm({ ...form, notes: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                    rows={2}
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3 pt-4">
-                <button type="button" onClick={() => { setShowJobModal(false); resetForm(); }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
-                <button
-                  type="button"
-                  onClick={handleCreateJob}
-                  disabled={!form.machine || form.rollIds.length === 0 || !form.printedRollWeights.trim()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {editingJobId ? 'Update Job' : 'Create Job'}
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
@@ -688,8 +310,14 @@ export function ProductionPage() {
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg">
-                  <span className="text-slate-500 block text-xs">Waste</span>
-                  <span className="text-slate-900 font-medium">{Number(selectedJob.wasteWeight || 0).toFixed(2)} kg</span>
+                  <span className="text-slate-500 block text-xs">Total Waste</span>
+                  <span className="text-slate-900 font-medium">
+                    {(() => {
+                      const rw = (selectedJob as any).rollWaste as Record<string, number> | undefined
+                      if (rw) return Object.values(rw).reduce((s, v) => s + v, 0).toFixed(2) + ' kg'
+                      return (Number(selectedJob.wasteWeight || 0)).toFixed(2) + ' kg'
+                    })()}
+                  </span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg">
                   <span className="text-slate-500 block text-xs">Started</span>
@@ -721,6 +349,7 @@ export function ProductionPage() {
                         <tr>
                           <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Roll #</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Original Weight</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Waste</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Consumed</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Remaining</th>
                         </tr>
@@ -739,12 +368,15 @@ export function ProductionPage() {
                               }
                             }
                           }
+                          const rollWaste = (selectedJob as any).rollWaste as Record<string, number> | undefined
                           return (selectedJob.parentRolls || []).map((pr) => {
                             const consumed = contributedMap[pr.id] ?? (Number(pr.weight) - Number(pr.remainingWeight))
+                            const waste = rollWaste?.[pr.id] ?? 0
                             return (
                               <tr key={pr.id}>
                                 <td className="px-4 py-2 text-sm text-slate-900">{pr.rollNumber}</td>
                                 <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.weight).toFixed(2)} kg</td>
+                                <td className="px-4 py-2 text-sm text-slate-900">{waste > 0 ? `${Number(waste).toFixed(2)} kg` : '-'}</td>
                                 <td className="px-4 py-2 text-sm text-slate-900">{Number(consumed).toFixed(2)} kg</td>
                                 <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.remainingWeight).toFixed(2)} kg</td>
                               </tr>

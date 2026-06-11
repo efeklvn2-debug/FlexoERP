@@ -111,7 +111,7 @@ export const salesOrderService = {
     category?: string
     rollIds: string[]
     printedRollWeights: number[]
-    wasteWeight?: number
+    rollWaste?: Record<string, number>
     notes?: string
   }, userId?: string) {
     const order = await salesOrderRepository.findById(id)
@@ -134,7 +134,7 @@ export const salesOrderService = {
       machine: input.machine,
       rollIds: input.rollIds,
       printedRollWeights: input.printedRollWeights,
-      wasteWeight: input.wasteWeight,
+      rollWaste: input.rollWaste,
       notes: input.notes
     })
 

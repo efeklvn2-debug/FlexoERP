@@ -132,11 +132,9 @@ export function SalesOrdersPage() {
     category: '',
     rollIds: [] as string[],
     printedRollWeights: '',
-    wasteWeight: 0,
+    rollWaste: {} as Record<string, number>,
     notes: ''
   })
-
-  const [calculatedWaste, setCalculatedWaste] = useState<number | null>(null)
 
   const [pickupForm, setPickupForm] = useState({
     quantityToPickup: 0,
@@ -602,29 +600,6 @@ export function SalesOrdersPage() {
     setLoadingRolls(false)
   }
 
-  const calculateWaste = () => {
-    const selectedRollsData = availableRolls.filter(r => productionForm.rollIds.includes(r.id))
-    if (selectedRollsData.length === 0 || !productionForm.printedRollWeights.trim()) {
-      setCalculatedWaste(null)
-      return
-    }
-
-    const weights = productionForm.printedRollWeights.split(/[\s,]+/)
-      .map(w => parseFloat(w))
-      .filter(w => !isNaN(w) && w > 0)
-
-    if (weights.length === 0) {
-      setCalculatedWaste(null)
-      return
-    }
-
-    const totalParentWeight = selectedRollsData.reduce((sum, r) => sum + Number(r.remainingWeight || 0), 0)
-    const totalPrintedWeight = weights.reduce((sum, w) => sum + w, 0)
-    const calculated = totalParentWeight - totalPrintedWeight
-
-    setCalculatedWaste(calculated)
-  }
-
   const openProductionModal = async (order: SalesOrder) => {
     setProductionOrder(order)
     setProductionForm({
@@ -632,10 +607,9 @@ export function SalesOrdersPage() {
       category: '',
       rollIds: [],
       printedRollWeights: '',
-      wasteWeight: 0,
+      rollWaste: {},
       notes: ''
     })
-    setCalculatedWaste(null)
     await loadAvailableRolls()
     setShowProductionModal(true)
   }
@@ -694,13 +668,12 @@ export function SalesOrdersPage() {
         category: productionForm.category || undefined,
         rollIds: productionForm.rollIds,
         printedRollWeights: weights,
-        wasteWeight: productionForm.wasteWeight || undefined,
+        rollWaste: Object.keys(productionForm.rollWaste).length > 0 ? productionForm.rollWaste : undefined,
         notes: productionForm.notes || undefined
       })
       if (res.error) { setError(res.error.message); return }
       setShowProductionModal(false)
       setProductionOrder(null)
-      setCalculatedWaste(null)
       loadData()
       if (showOrderDetails?.id === productionOrder.id) {
         const updated = await salesOrderApi.getOrderById(productionOrder.id)
@@ -1650,26 +1623,50 @@ export function SalesOrdersPage() {
                     </p>
                   ) : (
                     <div className="max-h-40 overflow-y-auto border border-slate-300 rounded-lg p-2 space-y-1">
-                      {availableRolls.map(roll => (
-                        <label key={roll.id} className="flex items-center p-2 hover:bg-slate-50 rounded cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={productionForm.rollIds.includes(roll.id)}
-                            onChange={e => {
-                              if (e.target.checked) {
-                                setProductionForm({...productionForm, rollIds: [...productionForm.rollIds, roll.id]})
-                              } else {
-                                setProductionForm({...productionForm, rollIds: productionForm.rollIds.filter(id => id !== roll.id)})
-                              }
-                              calculateWaste()
-                            }}
-                            className="mr-2"
-                          />
-                          <span className="text-sm">
-                            {roll.rollNumber} - {Number(roll.remainingWeight).toFixed(1)}kg ({roll.material?.subCategory || 'N/A'})
-                          </span>
-                        </label>
-                      ))}
+                      {availableRolls.map(roll => {
+                        const isChecked = productionForm.rollIds.includes(roll.id)
+                        return (
+                        <div key={roll.id}>
+                          <label className="flex items-center p-2 hover:bg-slate-50 rounded cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setProductionForm({...productionForm, rollIds: [...productionForm.rollIds, roll.id]})
+                                } else {
+                                  const { [roll.id]: _, ...restWaste } = productionForm.rollWaste
+                                  setProductionForm({...productionForm, rollIds: productionForm.rollIds.filter(id => id !== roll.id), rollWaste: restWaste})
+                                }
+                              }}
+                              className="mr-2"
+                            />
+                            <span className="text-sm">
+                              {roll.rollNumber} - {Number(roll.remainingWeight).toFixed(1)}kg ({roll.material?.subCategory || 'N/A'})
+                            </span>
+                          </label>
+                          {isChecked && (
+                            <div className="ml-6 mb-1 flex items-center gap-2">
+                              <span className="text-xs text-slate-500">Waste:</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={productionForm.rollWaste[roll.id] ?? 0}
+                                onFocus={e => e.target.select()}
+                                onChange={e => {
+                                  setProductionForm({
+                                    ...productionForm,
+                                    rollWaste: { ...productionForm.rollWaste, [roll.id]: Math.max(0, parseFloat(e.target.value) || 0) }
+                                  })
+                                }}
+                                className="w-20 px-2 py-1 text-xs border border-slate-300 rounded"
+                              />
+                              <span className="text-xs text-slate-400">kg</span>
+                            </div>
+                          )}
+                        </div>
+                      )})}
                     </div>
                   )}
                 </div>
@@ -1681,10 +1678,7 @@ export function SalesOrdersPage() {
                   <input
                     type="text"
                     value={productionForm.printedRollWeights}
-                    onChange={e => {
-                      setProductionForm({...productionForm, printedRollWeights: e.target.value})
-                      setCalculatedWaste(null)
-                    }}
+                    onChange={e => setProductionForm({...productionForm, printedRollWeights: e.target.value})}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                     placeholder="e.g. 14.5, 16, 18.2 or 14.5 16 18.2"
                   />
@@ -1693,9 +1687,10 @@ export function SalesOrdersPage() {
                       .map(w => parseFloat(w))
                       .filter(w => !isNaN(w) && w > 0)
                     const totalPrintedWeight = weights.reduce((sum, w) => sum + w, 0)
+                    const totalWaste = Object.values(productionForm.rollWaste).reduce((sum, w) => sum + w, 0)
                     const selectedRollsData = availableRolls.filter(r => productionForm.rollIds.includes(r.id))
                     const totalParentWeight = selectedRollsData.reduce((sum, r) => sum + Number(r.remainingWeight || 0), 0)
-                    const remaining = totalParentWeight - totalPrintedWeight
+                    const remaining = totalParentWeight - totalPrintedWeight - totalWaste
                     return (
                       <div className="flex justify-between items-center mt-1">
                         {weights.length > 0 && (
@@ -1713,19 +1708,6 @@ export function SalesOrdersPage() {
                       </div>
                     )
                   })()}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Waste Weight (kg)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={productionForm.wasteWeight || calculatedWaste || ''}
-                    onChange={e => setProductionForm({...productionForm, wasteWeight: parseFloat(e.target.value) || 0})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                    placeholder="0"
-                    min="0"
-                  />
                 </div>
 
                 <div>
