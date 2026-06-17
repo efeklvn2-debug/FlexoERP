@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { salesOrderService, paymentService, invoiceService, coreBuybackService } from './service'
-import { generateInvoicePdf } from './pdf-service'
+import { generateInvoicePdf, generateReceiptPdf } from './pdf-service'
+import { receiptRepository } from './repository'
 import { logger } from '../../logger'
 
 console.log('[CONTROLLER] Loading salesOrderController...')
@@ -198,7 +199,36 @@ export const salesOrderController = {
       logger.error(error, 'Error adjusting deposit')
       res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
     }
-  }
+  },
+
+  async generateReceipt(req: Request, res: Response) {
+    try {
+      const { id } = req.params
+      const userId = (req as any).user?.id
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const receipt = await salesOrderService.generateReceipt(id, userId)
+      res.json({ data: receipt })
+    } catch (error: any) {
+      logger.error(error, 'Error generating receipt')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+    }
+  },
+
+  async downloadReceiptPdf(req: Request, res: Response) {
+    try {
+      const { id } = req.params
+      const pdfBuffer = await generateReceiptPdf(id)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', `attachment; filename="receipt-${id.slice(0, 8)}.pdf"`)
+      res.send(pdfBuffer)
+    } catch (error: any) {
+      logger.error(error, 'Error downloading receipt PDF')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+    }
+  },
 }
 
 export const paymentController = {

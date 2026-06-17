@@ -2,7 +2,7 @@ import { prisma } from '../../database'
 import { Prisma } from '@prisma/client'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
-import { salesOrderRepository, paymentRepository, invoiceRepository, coreBuybackRepository } from './repository'
+import { salesOrderRepository, paymentRepository, invoiceRepository, coreBuybackRepository, receiptRepository } from './repository'
 import { decomposeInclusive } from '../../lib/vat-utils'
 import { inventoryService } from '../inventory/service'
 import { financeService } from '../finance/service'
@@ -109,6 +109,7 @@ export const salesOrderService = {
   async startProduction(id: string, input: {
     machine: string
     category?: string
+    materialOverride?: string
     rollIds: string[]
     printedRollWeights: number[]
     rollWaste?: Record<string, number>
@@ -132,6 +133,7 @@ export const salesOrderService = {
       salesOrderId: id,
       customerName: order.customer?.name || '',
       machine: input.machine,
+      materialOverride: input.materialOverride,
       rollIds: input.rollIds,
       printedRollWeights: input.printedRollWeights,
       rollWaste: input.rollWaste,
@@ -1021,7 +1023,34 @@ export const salesOrderService = {
 
     const balance = await salesOrderRepository.getCustomerBalance(customerId)
     return balance
-  }
+  },
+
+  async generateReceipt(paymentTransactionId: string, userId: string) {
+    const existing = await receiptRepository.findByPaymentTransactionId(paymentTransactionId)
+    if (existing) {
+      return receiptRepository.findById(existing.id)
+    }
+
+    const payment = await paymentRepository.findById(paymentTransactionId)
+    if (!payment) {
+      throw new AppError(404, 'NOT_FOUND', 'Payment transaction not found')
+    }
+
+    const customerName = payment.customer?.name || payment.sellerName || 'Walk-in'
+    const receiptNumber = await receiptRepository.getNextReceiptNumber()
+
+    const receipt = await receiptRepository.create({
+      receiptNumber,
+      paymentTransactionId: payment.id,
+      customerName,
+      amount: payment.amount,
+      paymentMethod: payment.paymentMethod,
+      referenceNumber: payment.referenceNumber || undefined,
+      generatedById: userId
+    })
+
+    return receiptRepository.findById(receipt.id)
+  },
 }
 
 // Payment Service
@@ -1356,7 +1385,7 @@ export const invoiceService = {
       paymentMethod: paymentMethod || 'Cash',
       createdAt: payment.createdAt
     }
-  }
+  },
 }
 
 // Core Buyback Service

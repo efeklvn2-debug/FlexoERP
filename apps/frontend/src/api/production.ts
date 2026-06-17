@@ -20,6 +20,7 @@ export interface ProductionJob {
   parentRollIds?: string[]
   parentRolls?: { id: string; rollNumber: string; weight: number; remainingWeight: number }[]
   printedRollMapping?: Record<string, Record<string, number>>
+  materialOverride?: string
 }
 
 export interface PrintedRoll {
@@ -139,5 +140,21 @@ export const productionApi = {
 
   deleteJob: async (id: string) => {
     return api.delete<void>(`/production/${id}`)
+  },
+
+  disposeRoll: async (id: string, reason: string) => {
+    return api.post(`/production/parent-roll/${id}/dispose`, { reason })
+  },
+
+  returnRoll: async (id: string) => {
+    return api.post(`/production/parent-roll/${id}/return`, {})
+  },
+
+  receiveReplacement: async (id: string) => {
+    return api.post(`/production/parent-roll/${id}/receive-replacement`, {})
+  },
+
+  customerReturnRoll: async (id: string, data: { qty: number; reason: string; condition: string; refundMethod?: string }) => {
+    return api.post(`/production/printed-roll/${id}/customer-return`, data)
   }
 }

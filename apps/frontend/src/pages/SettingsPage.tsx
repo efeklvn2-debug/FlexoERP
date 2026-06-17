@@ -80,7 +80,10 @@ useEffect(() => {
           invoiceLogoUrl: settingsData.invoiceLogoUrl || '',
           invoicePrimaryColor: settingsData.invoicePrimaryColor || '#1e3a5f',
           invoiceAccentColor: settingsData.invoiceAccentColor || '#dc2626',
-          invoiceFooter: settingsData.invoiceFooter || 'Thank you for your business!'
+          invoiceFooter: settingsData.invoiceFooter || 'Thank you for your business!',
+          receiptCompanyName: settingsData.receiptCompanyName || settingsData.invoiceCompanyName || '',
+          receiptLogoUrl: settingsData.receiptLogoUrl || '',
+          receiptFooter: settingsData.receiptFooter || settingsData.invoiceFooter || 'Thank you for your business!'
         })
       }
     } catch (err) {
@@ -145,6 +148,15 @@ const loadSettings = async () => {
     } else {
       setSuccess('Settings saved successfully')
       setTimeout(() => setSuccess(''), 3000)
+      // Update localStorage so other pages (core buyback modal) see the new rate
+      const stored = localStorage.getItem('appSettings')
+      if (stored) {
+        try {
+          const s = JSON.parse(stored)
+          s.coreDepositValue = Number(rates.coreDepositValue)
+          localStorage.setItem('appSettings', JSON.stringify(s))
+        } catch {}
+      }
       // Reload to confirm saved values
       await loadSettings()
     }
@@ -291,7 +303,7 @@ const loadSettings = async () => {
               activeTab === 'invoice' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Invoice
+            Invoices/Receipts
           </button>
         </div>
 
@@ -469,7 +481,7 @@ const loadSettings = async () => {
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">Core Deposits</h2>
             <p className="text-sm text-slate-500 mb-6">
-              Default deposit value charged for cores when customers pick up their printed rolls.
+              Default rate used for core buybacks (₦ per core).
             </p>
 
             <form onSubmit={handleSaveRates} className="space-y-4">
@@ -485,7 +497,7 @@ const loadSettings = async () => {
                   onChange={e => setRates({ ...rates, coreDepositValue: parseFloat(e.target.value) || 0 })}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                 />
-                <p className="text-xs text-slate-500 mt-1">Default: ₦150 per core</p>
+                <p className="text-xs text-slate-500 mt-1">Default: ₦{rates.coreDepositValue} per core</p>
               </div>
 
 <div className="pt-4">
@@ -578,30 +590,14 @@ const loadSettings = async () => {
         )}
 
         {activeTab === 'invoice' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Invoice Customization</h2>
-            <p className="text-sm text-slate-500 mb-6">
-              Customize the look and feel of your invoice PDFs. These settings will appear on all generated invoices.
-            </p>
+          <div className="space-y-6">
+            {/* ---------- Invoice Settings ---------- */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Invoice Customization</h2>
+              <p className="text-sm text-slate-500 mb-6">
+                Customize the look and feel of your invoice PDFs.
+              </p>
 
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault()
-                setSaving(true)
-                setError('')
-                setSuccess('')
-                try {
-                  const res = await settingsApi.updateInvoiceSettings(invoiceSettings)
-                  if (res.error) { setError(res.error.message || 'Failed to update'); return }
-                  setSuccess('Invoice settings updated successfully')
-                } catch (err: any) {
-                  setError(err.message || 'Failed to update')
-                } finally {
-                  setSaving(false)
-                }
-              }}
-              className="space-y-6"
-            >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Company Name</label>
@@ -615,19 +611,35 @@ const loadSettings = async () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Logo URL <span className="text-slate-400 font-normal">(optional)</span>
+                    Logo <span className="text-slate-400 font-normal">(optional)</span>
                   </label>
                   <input
-                    type="text"
-                    value={invoiceSettings.invoiceLogoUrl || ''}
-                    onChange={e => setInvoiceSettings({ ...invoiceSettings, invoiceLogoUrl: e.target.value })}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                    placeholder="https://example.com/logo.png"
+                    type="file"
+                    accept="image/*"
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = () => {
+                        setInvoiceSettings({ ...invoiceSettings, invoiceLogoUrl: reader.result as string })
+                      }
+                      reader.readAsDataURL(file)
+                    }}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100"
                   />
-                  {invoiceSettings.invoiceLogoUrl && (
-                    <div className="mt-2">
-                      <img src={invoiceSettings.invoiceLogoUrl} alt="Logo preview" className="h-12 object-contain" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                  {invoiceSettings.invoiceLogoUrl ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <img src={invoiceSettings.invoiceLogoUrl} alt="Logo preview" className="h-12 object-contain" />
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceSettings({ ...invoiceSettings, invoiceLogoUrl: '' })}
+                        className="text-xs text-red-500 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
                     </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 mt-1">Upload a logo image from your computer</p>
                   )}
                 </div>
                 <div>
@@ -667,7 +679,7 @@ const loadSettings = async () => {
                   </div>
                 </div>
               </div>
-              <div>
+              <div className="mt-6">
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Footer Text <span className="text-slate-400 font-normal">(optional)</span>
                 </label>
@@ -679,16 +691,100 @@ const loadSettings = async () => {
                   placeholder="Thank you for your business!"
                 />
               </div>
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : 'Save Invoice Settings'}
-                </button>
+            </div>
+
+            {/* ---------- Receipt Settings ---------- */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Receipt Customization</h2>
+              <p className="text-sm text-slate-500 mb-6">
+                Customize the look and feel of receipt printouts and PDFs. Falls back to invoice settings if left empty.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Company Name</label>
+                  <input
+                    type="text"
+                    value={invoiceSettings.receiptCompanyName || ''}
+                    onChange={e => setInvoiceSettings({ ...invoiceSettings, receiptCompanyName: e.target.value })}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    placeholder={invoiceSettings.invoiceCompanyName || 'FLEXOPRINT NIGERIA LTD'}
+                  />
+                  <p className="text-xs text-slate-400 mt-1">Leave empty to use invoice company name</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Logo <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = () => {
+                        setInvoiceSettings({ ...invoiceSettings, receiptLogoUrl: reader.result as string })
+                      }
+                      reader.readAsDataURL(file)
+                    }}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-600 hover:file:bg-blue-100"
+                  />
+                  {invoiceSettings.receiptLogoUrl ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <img src={invoiceSettings.receiptLogoUrl} alt="Receipt logo preview" className="h-12 object-contain" />
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceSettings({ ...invoiceSettings, receiptLogoUrl: '' })}
+                        className="text-xs text-red-500 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 mt-1">Upload a logo image from your computer</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Footer Text <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={invoiceSettings.receiptFooter || ''}
+                    onChange={e => setInvoiceSettings({ ...invoiceSettings, receiptFooter: e.target.value })}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    placeholder={invoiceSettings.invoiceFooter || 'Thank you for your business!'}
+                  />
+                  <p className="text-xs text-slate-400 mt-1">Leave empty to use invoice footer</p>
+                </div>
               </div>
-            </form>
+            </div>
+
+            {/* ---------- Save Button ---------- */}
+            <div className="flex justify-end">
+              <button
+                onClick={async () => {
+                  setSaving(true)
+                  setError('')
+                  setSuccess('')
+                  try {
+                    const res = await settingsApi.updateInvoiceSettings(invoiceSettings)
+                    if (res.error) { setError(res.error.message || 'Failed to update'); return }
+                    localStorage.setItem('appSettings', JSON.stringify(invoiceSettings))
+                    setSuccess('Invoice & receipt settings updated successfully')
+                  } catch (err: any) {
+                    setError(err.message || 'Failed to update')
+                  } finally {
+                    setSaving(false)
+                  }
+                }}
+                disabled={saving}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
           </div>
         )}
 

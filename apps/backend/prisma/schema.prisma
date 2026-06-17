@@ -27,6 +27,7 @@ model User {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   refreshTokens RefreshToken[]
+  receipts     Receipt[]
 }
 
 model RefreshToken {
@@ -162,6 +163,7 @@ enum RollStatus {
   IN_PRODUCTION
   CONSUMED
   RETURNED
+  WASTED
 }
 
 enum POStatus {
@@ -224,6 +226,10 @@ model Roll {
   status         RollStatus @default(AVAILABLE)
   receivedDate   DateTime?
   notes          String?
+  replacementReceived Boolean  @default(false)
+  disposedAt     DateTime?
+  disposedById   String?
+  disposalReason String?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   productionJobs  PrintedRoll[]
@@ -245,9 +251,10 @@ model ProductionJob {
    notes               String?
    parentRollIds       String[] 
    printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
-   rollWaste           Json?    // { parentRollId: wasteKg } — per-roll waste at job level
+    rollWaste           Json?    // { parentRollId: wasteKg } — per-roll waste at job level
+    materialOverride    String?  // Material subCategory override if different from order's original material
     
-   // Job costing
+    // Job costing
     materialCost        Decimal? @default(0) @db.Decimal(12, 2)  // Snapshot at completion (raw parent roll material)
     consumablesCost     Decimal? @default(0) @db.Decimal(12, 2)  // Ink + IPA + Butanol at completion
     overheadCost        Decimal? @default(0) @db.Decimal(12, 2)  // Calculated from overhead rate
@@ -272,11 +279,16 @@ model PrintedRoll {
   roll            Roll          @relation(fields: [rollId], references: [id])
   weightUsed      Decimal       @db.Decimal(10, 2)
   wasteWeight     Decimal?      @db.Decimal(10, 2)
-  status          String        @default("IN_STOCK") // IN_STOCK, PICKED_UP
+  status          String        @default("IN_STOCK") // IN_STOCK, PICKED_UP, RETURNED
   isCombination   Boolean       @default(false)      // True if made from multiple parent rolls
   customerId      String?
   customer        Customer?     @relation(fields: [customerId], references: [id])
   pickedUpAt      DateTime?     // Timestamp when picked up
+  returnedQty     Decimal?      @db.Decimal(10, 2)   // Quantity returned by customer
+  returnReason    String?       // Defective, Wrong spec, Customer request, Other
+  returnedAt      DateTime?     // Timestamp when returned
+  refundMethod    String?       // NONE, CREDIT_NOTE, CASH_REFUND (informational only)
+  returnCondition String?       // SCRAP, RETURN_TO_SUPPLIER
   createdAt       DateTime      @default(now())
 
   @@unique([productionJobId, rollId])
@@ -304,6 +316,9 @@ model Settings {
   invoicePrimaryColor  String?  // Primary color hex for invoice (default #1e3a5f)
   invoiceAccentColor   String?  // Accent color hex for invoice (default #dc2626)
   invoiceFooter        String?  // Custom footer text on invoice PDF
+  receiptCompanyName   String?  // Customizable company name on receipt print/PDF
+  receiptLogoUrl       String?  // Logo URL/data-URI for receipt print/PDF
+  receiptFooter        String?  // Custom footer text on receipt print/PDF
   updatedAt            DateTime @updatedAt
 }
 
@@ -447,6 +462,7 @@ enum SourceModule {
   PROCUREMENT
   PRODUCTION
   EXPENSE
+  INCOME
   PAYMENT
   ADJUSTMENT
   OPENING
@@ -686,10 +702,34 @@ model PaymentTransaction {
   receivedAt            DateTime  @default(now())
   createdAt             DateTime  @default(now())
   
+  receipts              Receipt[]
+
   @@index([salesOrderId])
   @@index([customerId])
   @@index([receivedAt])
   @@index([transactionType])
+}
+
+// ============================================================================
+// RECEIPTS
+// ============================================================================
+
+model Receipt {
+  id                    String   @id @default(cuid())
+  receiptNumber         String   @unique  // REC-YYYY-NNNN
+  paymentTransactionId  String
+  paymentTransaction    PaymentTransaction @relation(fields: [paymentTransactionId], references: [id])
+  customerName          String
+  amount                Decimal  @db.Decimal(15, 2)
+  paymentMethod         String
+  referenceNumber       String?
+  generatedById         String
+  generatedBy           User     @relation(fields: [generatedById], references: [id])
+  generatedAt           DateTime @default(now())
+
+  @@index([receiptNumber])
+  @@index([paymentTransactionId])
+  @@index([generatedAt])
 }
 
 model Invoice {

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { salesOrderApi, SalesOrder, PaymentTransaction, Invoice, CustomerBalance, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, InvoiceStatus, DeliveryMethod, Customer } from '../api/salesOrders'
+import { salesOrderApi, SalesOrder, PaymentTransaction, Invoice, CustomerBalance, Receipt, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, InvoiceStatus, DeliveryMethod, Customer } from '../api/salesOrders'
 import { pricingApi } from '../api/pricing'
 import { settingsApi } from '../api/settings'
-import { productionApi, ParentRoll } from '../api/production'
+import { productionApi, ParentRoll, ProductionJob } from '../api/production'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
 
@@ -12,6 +12,12 @@ type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 type QuantityType = 'rolls' | 'kg'
 
 type Tab = 'orders' | 'payments' | 'invoices' | 'core-buyback' | 'balances' | 'packing-bags'
+
+const PROD_STATUS_COLORS: Record<string, string> = {
+  PENDING: 'bg-yellow-100 text-yellow-800',
+  IN_PRODUCTION: 'bg-blue-100 text-blue-800',
+  COMPLETED: 'bg-green-100 text-green-800',
+}
 
 const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   DRAFT: 'Draft',
@@ -63,6 +69,10 @@ export function SalesOrdersPage() {
   const [paymentDateFrom, setPaymentDateFrom] = useState('')
   const [paymentDateTo, setPaymentDateTo] = useState('')
   const [paymentPeriod, setPaymentPeriod] = useState('')
+  const [receiptDropdown, setReceiptDropdown] = useState<string | null>(null)
+  const [generatingReceipt, setGeneratingReceipt] = useState<string | null>(null)
+  const [invoiceDropdown, setInvoiceDropdown] = useState<string | null>(null)
+  const [generatingInvoice, setGeneratingInvoice] = useState<string | null>(null)
   const [coreBuybackDateFrom, setCoreBuybackDateFrom] = useState('')
   const [coreBuybackDateTo, setCoreBuybackDateTo] = useState('')
   const [coreBuybackPeriod, setCoreBuybackPeriod] = useState('')
@@ -85,6 +95,8 @@ export function SalesOrdersPage() {
   const [showProductionModal, setShowProductionModal] = useState(false)
   const [showPickupModal, setShowPickupModal] = useState(false)
   const [showInvoiceModal, setShowInvoiceModal] = useState(false)
+  const [showProductionJobModal, setShowProductionJobModal] = useState(false)
+  const [viewingProductionJob, setViewingProductionJob] = useState<ProductionJob | null>(null)
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(null)
   const [businessTin, setBusinessTin] = useState('')
   const [businessAddress, setBusinessAddress] = useState('')
@@ -119,12 +131,11 @@ export function SalesOrdersPage() {
     notes: ''
   })
 
-  const [coreBuybackForm, setCoreBuybackForm] = useState({
-    customerId: '',
-    sellerName: '',
-    coresQuantity: 0,
-    paymentMethod: 'Cash' as PaymentMethod,
-    notes: ''
+  const [coreBuybackForm, setCoreBuybackForm] = useState(() => {
+    const stored = localStorage.getItem('appSettings')
+    let defaultRate = 150
+    if (stored) { try { const s = JSON.parse(stored); if (s.coreDepositValue) defaultRate = Number(s.coreDepositValue) } catch {} }
+    return { customerId: '', sellerName: '', coresQuantity: 0, ratePerCore: defaultRate, paymentMethod: 'Cash' as PaymentMethod, notes: '' }
   })
 
   const [productionForm, setProductionForm] = useState({
@@ -208,6 +219,18 @@ export function SalesOrdersPage() {
   }
 
   useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.receipt-dropdown-area') && !target.closest('.invoice-dropdown-area')) {
+        setReceiptDropdown(null)
+        setInvoiceDropdown(null)
+      }
+    }
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [])
+
+  useEffect(() => {
     loadData()
   }, [])
 
@@ -234,6 +257,278 @@ export function SalesOrdersPage() {
       setPayments(data)
     } catch (err: any) {
       console.error('Failed to load payments:', err)
+    }
+  }
+
+  const handlePrintReceipt = async (paymentId: string) => {
+    setGeneratingReceipt(paymentId)
+    setReceiptDropdown(null)
+    try {
+      const res = await salesOrderApi.generateReceipt(paymentId)
+      const receipt = (res as any).data?.data as Receipt | undefined
+      if (!receipt) return
+
+      let settingsStr = localStorage.getItem('appSettings')
+      let settings: any = null
+      try { settings = settingsStr ? JSON.parse(settingsStr) : null } catch {}
+      if (!settings) {
+        try {
+          const settingsRes = await settingsApi.getSettings()
+          const s = (settingsRes.data as any)?.data ?? settingsRes.data
+          if (s) {
+            const flat = {
+              invoiceCompanyName: s.invoiceCompanyName || '',
+              invoiceLogoUrl: s.invoiceLogoUrl || '',
+              invoicePrimaryColor: s.invoicePrimaryColor || '#1e3a5f',
+              invoiceAccentColor: s.invoiceAccentColor || '#dc2626',
+              invoiceFooter: s.invoiceFooter || 'Thank you for your business!',
+              receiptCompanyName: s.receiptCompanyName || s.invoiceCompanyName || '',
+              receiptLogoUrl: s.receiptLogoUrl || '',
+              receiptFooter: s.receiptFooter || s.invoiceFooter || 'Thank you for your business!',
+              businessAddress: s.businessAddress || '',
+              businessTin: s.businessTin || '',
+              coreDepositValue: Number(s.coreDepositValue || 150)
+            }
+            localStorage.setItem('appSettings', JSON.stringify(flat))
+            settings = flat
+          }
+        } catch {}
+      }
+
+      const companyName = settings?.receiptCompanyName || settings?.invoiceCompanyName || 'FLEXOPRINT NIGERIA LTD'
+      const businessAddress = settings?.businessAddress || ''
+      const businessTin = settings?.businessTin || ''
+      const footerText = settings?.receiptFooter || settings?.invoiceFooter || 'Thank you for your business!'
+      const logoUrl = settings?.receiptLogoUrl || settings?.invoiceLogoUrl || ''
+
+      const dateStr = new Date(receipt.generatedAt).toLocaleDateString('en-GB', {
+        day: '2-digit', month: 'short', year: 'numeric'
+      })
+      const timeStr = new Date(receipt.generatedAt).toLocaleTimeString('en-GB', {
+        hour: '2-digit', minute: '2-digit'
+      })
+      const payMethod = receipt.paymentMethod === 'BANK_TRANSFER' ? 'Bank Transfer' : 'Cash'
+      const orderNumber = receipt.paymentTransaction?.salesOrder?.orderNumber || '—'
+      const amount = Number(receipt.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })
+      const txType = (receipt.paymentTransaction?.transactionType || '').replace(/_/g, ' ')
+
+      const win = window.open('', '_blank', 'width=400,height=600')
+      if (!win) return
+
+      win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Receipt - ${receipt.receiptNumber}</title>
+<style>
+  @page { width: 80mm; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 80mm; font-family: 'Courier New', Courier, monospace; font-size: 12px;
+    color: #000; padding: 8px 6px; line-height: 1.4;
+  }
+  .center { text-align: center; } .bold { font-weight: bold; }
+  .line { border-top: 1px dashed #000; margin: 6px 0; }
+  .logo { max-width: 50px; display: block; margin: 0 auto 4px; }
+  .company-name { font-size: 16px; font-weight: bold; text-align: center; margin-bottom: 2px; }
+  .info { font-size: 10px; text-align: center; color: #333; }
+  .receipt-title { font-size: 18px; font-weight: bold; text-align: center; margin: 2px 0; }
+  .receipt-no { font-size: 13px; text-align: center; margin-bottom: 1px; }
+  .datetime { font-size: 10px; text-align: center; margin-bottom: 4px; }
+  .row { display: flex; justify-content: space-between; font-size: 12px; margin: 1px 0; }
+  .label { color: #333; } .value { font-weight: bold; }
+  .amount { font-size: 14px; font-weight: bold; text-align: center; margin: 4px 0; }
+  .footer { text-align: center; font-size: 10px; margin-top: 8px; color: #555; }
+  .small { font-size: 9px; color: #666; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+  ${logoUrl ? `<img src="${logoUrl}" class="logo" alt="Logo">` : ''}
+  <div class="company-name">${companyName}</div>
+  ${businessAddress ? `<div class="info">${businessAddress}</div>` : ''}
+  ${businessTin ? `<div class="info">TIN: ${businessTin}</div>` : ''}
+  <div class="line"></div>
+  <div class="receipt-title">RECEIPT</div>
+  <div class="receipt-no">${receipt.receiptNumber}</div>
+  <div class="datetime">${dateStr}  ${timeStr}</div>
+  <div class="line"></div>
+  <div class="row"><span class="label">Customer:</span><span class="value">${receipt.customerName}</span></div>
+  <div class="row"><span class="label">Order:</span><span class="value">${orderNumber}</span></div>
+  <div class="line"></div>
+  <div class="row"><span class="label">Payment:</span><span class="value">${txType}</span></div>
+  <div class="row"><span class="label">Method:</span><span class="value">${payMethod}</span></div>
+  <div class="amount">₦${amount}</div>
+  ${receipt.referenceNumber ? `<div class="row"><span class="label">Ref:</span><span class="value">${receipt.referenceNumber}</span></div>` : ''}
+  <div class="line"></div>
+  <div class="footer">${footerText}</div>
+</body>
+</html>`)
+      win.document.close()
+      setTimeout(() => { win.focus(); win.print() }, 500)
+    } catch (err: any) {
+      console.error('Failed to generate receipt:', err)
+    } finally {
+      setGeneratingReceipt(null)
+    }
+  }
+
+  const handleDownloadReceipt = async (paymentId: string) => {
+    setGeneratingReceipt(paymentId)
+    setReceiptDropdown(null)
+    try {
+      const res = await salesOrderApi.generateReceipt(paymentId)
+      const receipt = (res as any).data?.data as Receipt | undefined
+      if (!receipt) return
+      await salesOrderApi.downloadReceiptPdf(receipt.id)
+    } catch (err: any) {
+      console.error('Failed to download receipt:', err)
+    } finally {
+      setGeneratingReceipt(null)
+    }
+  }
+
+  const handlePrintInvoice = async (invoice: Invoice) => {
+    setGeneratingInvoice(invoice.id)
+    setInvoiceDropdown(null)
+    try {
+      let settingsStr = localStorage.getItem('appSettings')
+      let settings: any = null
+      try { settings = settingsStr ? JSON.parse(settingsStr) : null } catch {}
+      if (!settings) {
+        try {
+          const settingsRes = await settingsApi.getSettings()
+          const s = (settingsRes.data as any)?.data ?? settingsRes.data
+          if (s) {
+            const flat = {
+              invoiceCompanyName: s.invoiceCompanyName || '',
+              invoiceLogoUrl: s.invoiceLogoUrl || '',
+              invoicePrimaryColor: s.invoicePrimaryColor || '#1e3a5f',
+              invoiceAccentColor: s.invoiceAccentColor || '#dc2626',
+              invoiceFooter: s.invoiceFooter || 'Thank you for your business!',
+              businessAddress: s.businessAddress || '',
+              businessTin: s.businessTin || '',
+              receiptCompanyName: s.receiptCompanyName || s.invoiceCompanyName || '',
+              receiptLogoUrl: s.receiptLogoUrl || '',
+              receiptFooter: s.receiptFooter || s.invoiceFooter || 'Thank you for your business!',
+              coreDepositValue: Number(s.coreDepositValue || 150)
+            }
+            localStorage.setItem('appSettings', JSON.stringify(flat))
+            settings = flat
+          }
+        } catch {}
+      }
+
+      const companyName = settings?.invoiceCompanyName || 'FLEXOPRINT NIGERIA LTD'
+      const businessAddress = settings?.businessAddress || ''
+      const businessTin = settings?.businessTin || ''
+      const footerText = settings?.invoiceFooter || 'Thank you for your business!'
+      const logoUrl = settings?.invoiceLogoUrl || ''
+
+      const customerName = invoice.customer?.name || invoice.salesOrder?.customer?.name || 'N/A'
+      const orderNumber = invoice.salesOrder?.orderNumber || invoice.salesOrderId || '—'
+      const dateStr = new Date(invoice.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      const dueDateStr = invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+      const qtyDelivered = Number(invoice.quantityDelivered || 0).toFixed(1)
+      const rollSubtotal = Number(invoice.subtotal || 0)
+      const bagQty = Number(invoice.packingBagsQuantity || 0)
+      const bagSubtotal = Number(invoice.packingBagsSubtotal || 0)
+      const vatAmount = Number(invoice.vatAmount || 0)
+      const totalAmount = Number(invoice.totalAmount || 0)
+      const depositApplied = Number(invoice.depositApplied || 0)
+      const previousPayments = Number(invoice.previousPayments || 0)
+      const balanceDue = Number(invoice.balanceDue || 0)
+
+      const formatNaira = (n: number) => '₦' + n.toLocaleString('en-US', { minimumFractionDigits: 2 })
+
+      const win = window.open('', '_blank', 'width=400,height=700')
+      if (!win) return
+
+      win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Invoice - ${invoice.invoiceNumber}</title>
+<style>
+  @page { width: 80mm; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 80mm; font-family: 'Courier New', Courier, monospace; font-size: 12px;
+    color: #000; padding: 8px 6px; line-height: 1.4;
+  }
+  .center { text-align: center; } .bold { font-weight: bold; }
+  .line { border-top: 1px dashed #000; margin: 6px 0; }
+  .logo { max-width: 50px; display: block; margin: 0 auto 4px; }
+  .company-name { font-size: 16px; font-weight: bold; text-align: center; margin-bottom: 2px; }
+  .info { font-size: 10px; text-align: center; color: #333; }
+  .title { font-size: 18px; font-weight: bold; text-align: center; margin: 2px 0; }
+  .doc-no { font-size: 13px; text-align: center; margin-bottom: 1px; }
+  .row { display: flex; justify-content: space-between; font-size: 12px; margin: 1px 0; }
+  .label { color: #333; } .value { font-weight: bold; }
+  .item-row { display: flex; justify-content: space-between; font-size: 11px; margin: 2px 0; }
+  .item-desc { flex: 1; } .item-qty { text-align: right; width: 60px; } .item-amount { text-align: right; width: 90px; }
+  .totals-row { display: flex; justify-content: space-between; font-size: 12px; margin: 2px 0; }
+  .totals-label { text-align: left; } .totals-value { font-weight: bold; text-align: right; }
+  .balance-due { font-size: 14px; font-weight: bold; text-align: center; color: #dc2626; margin: 4px 0; }
+  .amount-paid { font-size: 14px; font-weight: bold; text-align: center; color: #16a34a; margin: 4px 0; }
+  .deposit-note { font-size: 11px; font-weight: bold; text-align: center; color: #1d4ed8; margin: 4px 0; }
+  .footer { text-align: center; font-size: 10px; margin-top: 8px; color: #555; }
+  .small { font-size: 9px; color: #666; }
+  .item-header { font-size: 10px; font-weight: bold; color: #555; margin-bottom: 2px; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+  ${logoUrl ? `<img src="${logoUrl}" class="logo" alt="Logo">` : ''}
+  <div class="company-name">${companyName}</div>
+  ${businessAddress ? `<div class="info">${businessAddress}</div>` : ''}
+  ${businessTin ? `<div class="info">TIN: ${businessTin}</div>` : ''}
+  <div class="line"></div>
+  <div class="title">INVOICE</div>
+  <div class="doc-no">${invoice.invoiceNumber}</div>
+  <div class="info">${dateStr}${dueDateStr ? '  |  Due: ' + dueDateStr : ''}</div>
+  <div class="info">Status: ${invoice.status.replace(/_/g, ' ')}</div>
+  <div class="line"></div>
+  <div class="row"><span class="label">Customer:</span><span class="value">${customerName}</span></div>
+  <div class="row"><span class="label">Order:</span><span class="value">${orderNumber}</span></div>
+  <div class="line"></div>
+  <div class="item-header">Items</div>
+  <div class="item-row"><span class="item-desc">Printed Rolls</span><span class="item-qty">${qtyDelivered} kg</span><span class="item-amount">${formatNaira(rollSubtotal)}</span></div>
+  ${bagQty > 0 ? `<div class="item-row"><span class="item-desc">Packing Bags</span><span class="item-qty">${bagQty} pcs</span><span class="item-amount">${formatNaira(bagSubtotal)}</span></div>` : ''}
+  <div class="line"></div>
+  <div class="totals-row"><span class="totals-label">Subtotal (excl. VAT)</span><span class="totals-value">${formatNaira(rollSubtotal + bagSubtotal)}</span></div>
+  ${vatAmount > 0 ? `<div class="totals-row"><span class="totals-label">VAT</span><span class="totals-value">${formatNaira(vatAmount)}</span></div>` : ''}
+  <div class="totals-row"><span class="totals-label" style="font-weight:bold">Total (incl. VAT)</span><span class="totals-value" style="font-weight:bold">${formatNaira(totalAmount)}</span></div>
+  ${depositApplied > 0 ? `<div class="totals-row"><span class="totals-label" style="color:#dc2626">Deposit Applied</span><span class="totals-value" style="color:#dc2626">-${formatNaira(depositApplied)}</span></div>` : ''}
+  ${previousPayments > 0 ? `<div class="totals-row"><span class="totals-label" style="color:#dc2626">Previous Payments</span><span class="totals-value" style="color:#dc2626">-${formatNaira(previousPayments)}</span></div>` : ''}
+  ${balanceDue > 0
+    ? `<div class="balance-due">${formatNaira(balanceDue)}</div><div class="info" style="font-size:10px">Balance Due</div>`
+    : `<div class="amount-paid">${formatNaira(totalAmount - balanceDue)}</div><div class="info" style="font-size:10px">Amount Paid</div>`
+  }
+  <div class="line"></div>
+  <div class="footer">${footerText}</div>
+</body>
+</html>`)
+      win.document.close()
+      setTimeout(() => { win.focus(); win.print() }, 500)
+    } catch (err: any) {
+      console.error('Failed to print invoice:', err)
+      setError(err.message || 'Failed to print invoice')
+    } finally {
+      setGeneratingInvoice(null)
+    }
+  }
+
+  const handleDownloadInvoice = async (invoice: Invoice) => {
+    setGeneratingInvoice(invoice.id)
+    setInvoiceDropdown(null)
+    try {
+      await salesOrderApi.downloadInvoicePdf(invoice.id)
+    } catch (err: any) {
+      console.error('Failed to download invoice:', err)
+      setError(err.message || 'Failed to download invoice')
+    } finally {
+      setGeneratingInvoice(null)
     }
   }
 
@@ -513,13 +808,17 @@ export function SalesOrdersPage() {
         customerId: coreBuybackForm.customerId || undefined,
         sellerName: coreBuybackForm.sellerName || undefined,
         coresQuantity: coreBuybackForm.coresQuantity,
+        ratePerCore: coreBuybackForm.ratePerCore,
         paymentMethod: coreBuybackForm.paymentMethod,
         notes: coreBuybackForm.notes || undefined
       })
       console.log('Core buyback response:', res)
       if (res.error) { setError(res.error.message); return }
       setShowCoreBuybackModal(false)
-      setCoreBuybackForm({ customerId: '', sellerName: '', coresQuantity: 0, paymentMethod: 'Cash', notes: '' })
+      const stored = localStorage.getItem('appSettings')
+      let defaultRate = 150
+      if (stored) { try { const s = JSON.parse(stored); if (s.coreDepositValue) defaultRate = Number(s.coreDepositValue) } catch {} }
+      setCoreBuybackForm({ customerId: '', sellerName: '', coresQuantity: 0, ratePerCore: defaultRate, paymentMethod: 'Cash', notes: '' })
       loadCoreBuybacks()
       loadData()
     } catch (err: any) {
@@ -579,6 +878,19 @@ export function SalesOrdersPage() {
       }
     } catch (err: any) {
       setError(err.message || 'Failed to create invoice')
+    }
+  }
+
+  const openProductionJobView = async (jobId: string) => {
+    try {
+      const res = await productionApi.getJob(jobId)
+      const job = (res.data as any)?.data || res.data
+      if (job) {
+        setViewingProductionJob(job as ProductionJob)
+        setShowProductionJobModal(true)
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load production job')
     }
   }
 
@@ -662,10 +974,14 @@ export function SalesOrdersPage() {
       }
     }
 
+    const originalMaterial = productionOrder.specsJson?.materialType || ''
+    const materialOverride = productionForm.category && productionForm.category !== originalMaterial ? productionForm.category : undefined
+
     try {
       const res = await salesOrderApi.startProduction(productionOrder.id, {
         machine: productionForm.machine,
         category: productionForm.category || undefined,
+        materialOverride,
         rollIds: productionForm.rollIds,
         printedRollWeights: weights,
         rollWaste: Object.keys(productionForm.rollWaste).length > 0 ? productionForm.rollWaste : undefined,
@@ -752,7 +1068,7 @@ export function SalesOrdersPage() {
     setShowPaymentModal(true)
   }
 
-  const coreBuybackValue = coreBuybackForm.coresQuantity * 150
+  const coreBuybackValue = coreBuybackForm.coresQuantity * coreBuybackForm.ratePerCore
 
   const getCustomerDeposit = (customerId: string) => {
     return customerBalances.find(b => b.customerId === customerId)?.depositHeld || 0
@@ -906,14 +1222,30 @@ export function SalesOrdersPage() {
                                     Pay
                                   </button>
                                 )}
-                                {o.invoices && o.invoices.length > 0 && (
-                                  <button
-                                    onClick={() => salesOrderApi.downloadInvoicePdf(o.invoices![0].id).catch(e => setError(e.message))}
-                                    className="px-2 py-1 bg-slate-700 text-white text-xs rounded hover:bg-slate-800"
-                                  >
-                                    Print
-                                  </button>
-                                )}
+                                {o.invoices && o.invoices.length > 0 && (() => {
+                                  const inv = o.invoices![0]
+                                  return (
+                                    <div className="relative invoice-dropdown-area inline-block">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); setInvoiceDropdown(invoiceDropdown === inv.id ? null : inv.id) }}
+                                        disabled={generatingInvoice === inv.id}
+                                        className="px-2 py-1 bg-slate-700 text-white text-xs rounded hover:bg-slate-800 disabled:opacity-50"
+                                      >
+                                        {generatingInvoice === inv.id ? '...' : 'Invoice'}
+                                      </button>
+                                      {invoiceDropdown === inv.id && (
+                                        <div className="absolute left-0 mt-1 w-32 bg-white border border-slate-200 rounded-lg shadow-lg z-10">
+                                          <button onClick={() => handlePrintInvoice(inv)} className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 rounded-t-lg border-b border-slate-100">
+                                            🖨️ Print
+                                          </button>
+                                          <button onClick={() => handleDownloadInvoice(inv)} className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 rounded-b-lg">
+                                            ⬇️ Download
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })()}
                               </div>
                             </td>
                           </tr>
@@ -990,11 +1322,12 @@ export function SalesOrdersPage() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Method</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Reference</th>
+                      <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
                     {payments.length === 0 ? (
-                      <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">No payments found</td></tr>
+                      <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-500">No payments found</td></tr>
                     ) : (
                       payments.map(p => (
                         <tr key={p.id} className="hover:bg-slate-50">
@@ -1015,6 +1348,31 @@ export function SalesOrdersPage() {
                           <td className="px-6 py-4 text-sm text-slate-600">{p.paymentMethod}</td>
                           <td className="px-6 py-4 text-sm font-medium text-green-600 text-right">₦{Number(p.amount).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm text-slate-500">{p.referenceNumber || '-'}</td>
+                          <td className="px-6 py-4 text-center relative receipt-dropdown-area">
+                            <button
+                              onClick={() => setReceiptDropdown(receiptDropdown === p.id ? null : p.id)}
+                              disabled={generatingReceipt === p.id}
+                              className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 border border-indigo-300 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              {generatingReceipt === p.id ? '...' : 'Receipt'}
+                            </button>
+                            {receiptDropdown === p.id && (
+                              <div className="absolute right-0 mt-1 w-36 bg-white border border-slate-200 rounded-lg shadow-lg z-10">
+                                <button
+                                  onClick={() => handlePrintReceipt(p.id)}
+                                  className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg border-b border-slate-100"
+                                >
+                                  🖨️ Print
+                                </button>
+                                <button
+                                  onClick={() => handleDownloadReceipt(p.id)}
+                                  className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg"
+                                >
+                                  ⬇️ Download
+                                </button>
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       ))
                     )}
@@ -1086,7 +1444,13 @@ export function SalesOrdersPage() {
                 <div className="p-4 border-b border-slate-200 space-y-3">
                   <div className="flex justify-between items-center">
                     <h2 className="font-semibold">Core Buybacks</h2>
-                    <button onClick={() => setShowCoreBuybackModal(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                    <button onClick={() => {
+                      const stored = localStorage.getItem('appSettings')
+                      let defaultRate = 150
+                      if (stored) { try { const s = JSON.parse(stored); if (s.coreDepositValue) defaultRate = Number(s.coreDepositValue) } catch {} }
+                      setCoreBuybackForm(prev => ({ ...prev, ratePerCore: defaultRate }))
+                      setShowCoreBuybackModal(true)
+                    }} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
                       + New Buyback
                     </button>
                   </div>
@@ -1518,9 +1882,13 @@ export function SalesOrdersPage() {
                 </div>
 
                 <div className="p-3 bg-purple-50 rounded-lg">
-                  <span className="text-sm font-medium text-purple-800">Rate: ₦150/core</span>
+                  <label className="block text-sm font-medium text-purple-800 mb-1">Rate (₦ per core)</label>
+                  <input type="number" min="1" value={coreBuybackForm.ratePerCore || ''}
+                    onChange={e => setCoreBuybackForm({...coreBuybackForm, ratePerCore: parseInt(e.target.value) || 0})}
+                    className="w-full px-3 py-1.5 border border-purple-300 rounded-lg text-sm font-medium text-purple-800 bg-white"
+                  />
                   {coreBuybackValue > 0 && (
-                    <span className="block text-lg font-bold text-purple-700 mt-1">Total: ₦{coreBuybackValue.toLocaleString()}</span>
+                    <span className="block text-lg font-bold text-purple-700 mt-2">Total: ₦{coreBuybackValue.toLocaleString()}</span>
                   )}
                 </div>
 
@@ -1592,7 +1960,7 @@ export function SalesOrdersPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Plain Rolls Category</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Material</label>
                   <select 
                     value={productionForm.category} 
                     onChange={e => {
@@ -1609,6 +1977,19 @@ export function SalesOrdersPage() {
                     <option value="Premium">Premium</option>
                     <option value="SuPremium">Super Premium</option>
                   </select>
+                  {(() => {
+                    const orig = productionOrder.specsJson?.materialType || ''
+                    const selected = productionForm.category
+                    if (selected && orig && selected !== orig) {
+                      return (
+                        <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg">
+                          <svg className="w-4 h-4 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+                          <span className="text-sm text-amber-800">Material changed: <strong>{orig}</strong> → <strong>{selected}</strong></span>
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
                 </div>
 
                 <div>
@@ -1962,7 +2343,19 @@ export function SalesOrdersPage() {
                     <h3 className="text-sm font-medium text-slate-700 mb-2">Printed Rolls (Production)</h3>
                     <div className="p-3 bg-indigo-50 rounded-lg">
                       <p className="text-sm"><span className="text-slate-500">Total Produced:</span> <span className="font-medium">{Number(showOrderDetails.quantityProduced).toFixed(1)} kg</span></p>
-                      {showOrderDetails.productionJobId && <p className="text-xs text-slate-500 mt-1">Job ID: {showOrderDetails.productionJobId.slice(-8)}</p>}
+                      {showOrderDetails.productionJobId && (
+                        <p className="text-xs mt-1">
+                          {showOrderDetails.productionJob?.jobNumber ? (
+                            <button onClick={() => openProductionJobView(showOrderDetails.productionJobId!)} className="text-indigo-600 hover:text-indigo-800 font-medium underline">
+                              {showOrderDetails.productionJob.jobNumber}
+                            </button>
+                          ) : (
+                            <button onClick={() => openProductionJobView(showOrderDetails.productionJobId!)} className="text-indigo-600 hover:text-indigo-800 underline">
+                              View Production Job
+                            </button>
+                          )}
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1998,14 +2391,30 @@ export function SalesOrdersPage() {
                         {a.label}
                       </button>
                     ))}
-                    {showOrderDetails.invoices && showOrderDetails.invoices.length > 0 && (
-                      <button
-                        onClick={() => salesOrderApi.downloadInvoicePdf(showOrderDetails.invoices[0].id).catch(e => setError(e.message))}
-                        className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700"
-                      >
-                        Print Invoice
-                      </button>
-                    )}
+                    {showOrderDetails.invoices && showOrderDetails.invoices.length > 0 && (() => {
+                      const inv = showOrderDetails.invoices[0]
+                      return (
+                        <div className="relative invoice-dropdown-area inline-block">
+                          <button
+                            onClick={() => { setInvoiceDropdown(invoiceDropdown === inv.id ? null : inv.id) }}
+                            disabled={generatingInvoice === inv.id}
+                            className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
+                          >
+                            {generatingInvoice === inv.id ? '...' : 'Invoice'}
+                          </button>
+                          {invoiceDropdown === inv.id && (
+                            <div className="absolute left-0 mt-1 w-36 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                              <button onClick={() => handlePrintInvoice(inv)} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg border-b border-slate-100">
+                                🖨️ Print
+                              </button>
+                              <button onClick={() => handleDownloadInvoice(inv)} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg">
+                                ⬇️ Download
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
                     <button
                       onClick={() => setShowOrderDetails(null)}
                       className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -2018,6 +2427,194 @@ export function SalesOrdersPage() {
             </div>
           </div>
         )}
+        {/* Production Job View Modal */}
+        {showProductionJobModal && viewingProductionJob && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Job: {viewingProductionJob.jobNumber}</h2>
+                  <p className="text-sm text-slate-500">Customer: {viewingProductionJob.customerName || '-'}</p>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${PROD_STATUS_COLORS[viewingProductionJob.status] || 'bg-slate-100'}`}>
+                  {viewingProductionJob.status}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4 text-sm mb-6">
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Machine</span>
+                  <span className="text-slate-900 font-medium">{viewingProductionJob.machine}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Total Printed</span>
+                  <span className="text-slate-900 font-medium">
+                    {viewingProductionJob.printedRolls?.reduce((sum, pr) => sum + Number(pr.weightUsed), 0).toFixed(2) || '0'} kg
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Total Waste</span>
+                  <span className="text-slate-900 font-medium">
+                    {(() => {
+                      const rw = viewingProductionJob.rollWaste as Record<string, number> | undefined
+                      if (rw) return Object.values(rw).reduce((s, v) => s + v, 0).toFixed(2) + ' kg'
+                      return (Number(viewingProductionJob.wasteWeight || 0)).toFixed(2) + ' kg'
+                    })()}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Started</span>
+                  <span className="text-slate-900 font-medium">
+                    {viewingProductionJob.startDate ? new Date(viewingProductionJob.startDate).toLocaleDateString() : '-'}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Completed</span>
+                  <span className="text-slate-900 font-medium">
+                    {viewingProductionJob.endDate ? new Date(viewingProductionJob.endDate).toLocaleDateString() : '-'}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Created</span>
+                  <span className="text-slate-900 font-medium">
+                    {new Date(viewingProductionJob.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+              {viewingProductionJob.materialOverride && (
+                <div className="mb-6 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800">
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>
+                  <span>Material override: <strong>{viewingProductionJob.materialOverride}</strong></span>
+                </div>
+              )}
+
+              {/* Parent Rolls */}
+              {(viewingProductionJob.parentRolls || (viewingProductionJob.parentRollIds && viewingProductionJob.parentRollIds.length > 0)) && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-3">Parent Rolls Used</h3>
+                  <div className="border border-slate-200 rounded-lg">
+                    <table className="min-w-full divide-y divide-slate-200">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Roll #</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Original Weight</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Waste</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Consumed</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Remaining</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {(() => {
+                          const mapping = viewingProductionJob.printedRollMapping as Record<string, any> || {}
+                          const contributedMap: Record<string, number> = {}
+                          if (viewingProductionJob.printedRolls) {
+                            for (const p of viewingProductionJob.printedRolls) {
+                              const e = mapping[p.id]
+                              if (typeof e === 'object' && e !== null) {
+                                for (const [pid, cw] of Object.entries(e)) {
+                                  contributedMap[pid] = (contributedMap[pid] || 0) + Number(cw)
+                                }
+                              }
+                            }
+                          }
+                          const rollWaste = viewingProductionJob.rollWaste as Record<string, number> | undefined
+                          return (viewingProductionJob.parentRolls || []).map((pr) => {
+                            const consumed = contributedMap[pr.id] ?? (Number(pr.weight) - Number(pr.remainingWeight))
+                            const waste = rollWaste?.[pr.id] ?? 0
+                            return (
+                              <tr key={pr.id}>
+                                <td className="px-4 py-2 text-sm text-slate-900">{pr.rollNumber}</td>
+                                <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.weight).toFixed(2)} kg</td>
+                                <td className="px-4 py-2 text-sm text-slate-900">{waste > 0 ? `${Number(waste).toFixed(2)} kg` : '-'}</td>
+                                <td className="px-4 py-2 text-sm text-slate-900">{Number(consumed).toFixed(2)} kg</td>
+                                <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.remainingWeight).toFixed(2)} kg</td>
+                              </tr>
+                            )
+                          })
+                        })()}
+                        {!viewingProductionJob.parentRolls && viewingProductionJob.parentRollIds?.map((id) => (
+                          <tr key={id}>
+                            <td className="px-4 py-2 text-sm text-slate-900">{id}</td>
+                            <td className="px-4 py-2 text-sm text-slate-500">-</td>
+                            <td className="px-4 py-2 text-sm text-slate-500">-</td>
+                            <td className="px-4 py-2 text-sm text-slate-500">-</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Printed Rolls */}
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-slate-900 mb-3">Printed Rolls ({viewingProductionJob.printedRolls?.length || 0})</h3>
+                <div className="border border-slate-200 rounded-lg">
+                  <table className="min-w-full divide-y divide-slate-200">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Roll #</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Weight</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Material</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Parent Roll(s)</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-slate-500">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {viewingProductionJob.printedRolls?.map((pr, idx) => {
+                        const mapping = viewingProductionJob.printedRollMapping as Record<string, any> || {}
+                        const entry = mapping[pr.id]
+                        let parentInfo: string[] = []
+                        if (typeof entry === 'object' && entry !== null) {
+                          const parentRollsMap = new Map((viewingProductionJob.parentRolls || []).map(r => [r.id, r]))
+                          for (const [parentId, cw] of Object.entries(entry)) {
+                            const pr2 = parentRollsMap.get(parentId)
+                            const rn = pr2?.rollNumber || parentId
+                            parentInfo.push(`${rn}: ${Number(cw).toFixed(2)}kg`)
+                          }
+                        }
+                        return (
+                          <tr key={pr.id}>
+                            <td className="px-4 py-2 text-sm text-slate-900">{pr.roll?.rollNumber || `Roll ${idx + 1}`}</td>
+                            <td className="px-4 py-2 text-sm text-slate-900">{Number(pr.weightUsed).toFixed(2)} kg</td>
+                            <td className="px-4 py-2 text-sm text-slate-900">{pr.roll?.material?.subCategory || '-'}</td>
+                            <td className="px-4 py-2 text-sm text-slate-600">
+                              {parentInfo.length > 0 ? parentInfo.join(', ') : (pr.isCombination ? 'Multiple' : '-')}
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                pr.status === 'IN_STOCK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                              }`}>
+                                {pr.status || 'IN_STOCK'}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {(!viewingProductionJob.printedRolls || viewingProductionJob.printedRolls.length === 0) && (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-4 text-sm text-slate-500 text-center">No printed rolls</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {viewingProductionJob.notes && (
+                <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <span className="text-yellow-800 text-xs font-medium">Notes:</span>
+                  <p className="text-yellow-900 mt-1 text-sm">{viewingProductionJob.notes}</p>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-4 border-t border-slate-200">
+                <button type="button" onClick={() => { setShowProductionJobModal(false); setViewingProductionJob(null) }} className="px-4 py-2 border border-slate-300 rounded-lg">Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
           {showDepositConfirm && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
               <div className="bg-white rounded-2xl p-6 w-full max-w-md">
@@ -2178,9 +2775,25 @@ export function SalesOrdersPage() {
                 </div>
 
                 <div className="flex justify-end gap-3">
-                  <button onClick={() => salesOrderApi.downloadInvoicePdf(currentInvoice.id).catch(e => setError(e.message))} className="px-6 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700">
-                    Print Invoice
-                  </button>
+                  <div className="relative invoice-dropdown-area inline-block">
+                    <button
+                      onClick={() => { setInvoiceDropdown(invoiceDropdown === currentInvoice.id ? null : currentInvoice.id) }}
+                      disabled={generatingInvoice === currentInvoice.id}
+                      className="px-6 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      {generatingInvoice === currentInvoice.id ? '...' : 'Invoice'}
+                    </button>
+                    {invoiceDropdown === currentInvoice.id && (
+                      <div className="absolute right-0 mt-1 w-36 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                        <button onClick={() => handlePrintInvoice(currentInvoice)} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg border-b border-slate-100">
+                          🖨️ Print
+                        </button>
+                        <button onClick={() => handleDownloadInvoice(currentInvoice)} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg">
+                          ⬇️ Download
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <button onClick={() => setShowInvoiceModal(false)} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                     Done
                   </button>

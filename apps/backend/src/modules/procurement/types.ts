@@ -1,4 +1,4 @@
-export type RollStatus = 'AVAILABLE' | 'IN_PRODUCTION' | 'CONSUMED' | 'RETURNED'
+export type RollStatus = 'AVAILABLE' | 'IN_PRODUCTION' | 'CONSUMED' | 'RETURNED' | 'WASTED'
 export type POStatus = 'PENDING' | 'RECEIVED' | 'PARTIALLY_RECEIVED' | 'CANCELLED'
 
 export interface POLineItem {

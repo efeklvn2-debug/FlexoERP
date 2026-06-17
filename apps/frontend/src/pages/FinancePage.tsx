@@ -20,7 +20,7 @@ function formatDate(dateStr: string): string {
   })
 }
 
-type TabType = 'dashboard' | 'accounts' | 'journal' | 'balances' | 'vat' | 'profit' | 'deferred-cogs' | 'expenses'
+type TabType = 'dashboard' | 'accounts' | 'journal' | 'balances' | 'vat' | 'profit' | 'deferred-cogs' | 'expenses' | 'income'
 
 type ExpensePeriod = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-month' | 'last-month' | 'last-3-months' | ''
 
@@ -52,6 +52,22 @@ export function FinancePage() {
   const [expenseDateTo, setExpenseDateTo] = useState('')
   const [savingExpense, setSavingExpense] = useState(false)
   const [expenseForm, setExpenseForm] = useState({
+    accountId: '',
+    amount: 0,
+    description: '',
+    paymentMethod: 'Cash' as 'Cash' | 'Bank Transfer',
+    date: new Date().toISOString().split('T')[0],
+    referenceNumber: '',
+    notes: ''
+  })
+
+  const [incomes, setIncomes] = useState<JournalEntry[]>([])
+  const [showIncomeModal, setShowIncomeModal] = useState(false)
+  const [incomePeriod, setIncomePeriod] = useState<ExpensePeriod>('this-month')
+  const [incomeDateFrom, setIncomeDateFrom] = useState('')
+  const [incomeDateTo, setIncomeDateTo] = useState('')
+  const [savingIncome, setSavingIncome] = useState(false)
+  const [incomeForm, setIncomeForm] = useState({
     accountId: '',
     amount: 0,
     description: '',
@@ -175,6 +191,69 @@ export function FinancePage() {
     else setError(res.error?.message || 'Failed to load expenses')
   }
 
+  const loadIncomes = async (dateFrom?: string, dateTo?: string) => {
+    const res = await financeApi.getJournalEntries({
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      sourceModule: 'INCOME'
+    })
+    if (res.data) setIncomes((res.data as any).data || [])
+    else setError(res.error?.message || 'Failed to load incomes')
+  }
+
+  const applyIncomePeriod = (period: ExpensePeriod) => {
+    setIncomePeriod(period)
+    const now = new Date()
+    let from: Date, to: Date
+    switch (period) {
+      case 'today':
+        from = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        to = new Date(from)
+        to.setDate(to.getDate() + 1)
+        break
+      case 'yesterday':
+        from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+        to = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        break
+      case 'this-week':
+        from = new Date(now)
+        from.setDate(now.getDate() - now.getDay())
+        from.setHours(0, 0, 0, 0)
+        to = new Date()
+        break
+      case 'last-week':
+        from = new Date(now)
+        from.setDate(now.getDate() - now.getDay() - 7)
+        to = new Date(from)
+        to.setDate(to.getDate() + 7)
+        break
+      case 'this-month':
+        from = new Date(now.getFullYear(), now.getMonth(), 1)
+        to = new Date()
+        break
+      case 'last-month':
+        from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
+        break
+      case 'last-3-months':
+        from = new Date(now.getFullYear(), now.getMonth() - 3, 1)
+        to = new Date()
+        break
+      default:
+        return
+    }
+    setIncomeDateFrom(from.toISOString().split('T')[0])
+    setIncomeDateTo(to.toISOString().split('T')[0])
+    loadIncomes(from.toISOString().split('T')[0], to.toISOString().split('T')[0])
+  }
+
+  const clearIncomeFilters = () => {
+    setIncomePeriod('')
+    setIncomeDateFrom('')
+    setIncomeDateTo('')
+    loadIncomes()
+  }
+
   const handleRecordExpense = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!expenseForm.accountId || expenseForm.amount <= 0 || !expenseForm.description) {
@@ -235,6 +314,66 @@ export function FinancePage() {
     setSavingExpense(false)
   }
 
+  const handleRecordIncome = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!incomeForm.accountId || incomeForm.amount <= 0 || !incomeForm.description) {
+      setError('Account, amount, and description are required')
+      return
+    }
+    setSavingIncome(true)
+    setError(null)
+
+    try {
+      const allAccountsRes = await financeApi.getAccounts()
+      const allAccounts = (allAccountsRes.data as any)?.data || []
+      const cashAccountCode = incomeForm.paymentMethod === 'Bank Transfer' ? '1100' : '1000'
+      const cashAccount = allAccounts.find((a: Account) => a.code === cashAccountCode)
+
+      if (!cashAccount) {
+        setError(`Account ${cashAccountCode} (Cash/Bank) not found`)
+        setSavingIncome(false)
+        return
+      }
+
+      const ref = incomeForm.referenceNumber || (() => {
+        const now = new Date()
+        const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+        const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
+        return `INC-${ymd}-${suffix}`
+      })()
+
+      const res = await financeApi.postJournalEntry({
+        description: incomeForm.description,
+        sourceModule: 'INCOME',
+        reference: ref,
+        date: incomeForm.date,
+        lines: [
+          { accountId: cashAccount.id, debit: incomeForm.amount, credit: 0, memo: `Received via ${incomeForm.paymentMethod}` },
+          { accountId: incomeForm.accountId, debit: 0, credit: incomeForm.amount, memo: incomeForm.notes || incomeForm.description }
+        ]
+      })
+
+      if (res.data) {
+        setShowIncomeModal(false)
+        setIncomeForm({
+          accountId: '',
+          amount: 0,
+          description: '',
+          paymentMethod: 'Cash',
+          date: new Date().toISOString().split('T')[0],
+          referenceNumber: '',
+          notes: ''
+        })
+        loadIncomes(incomeDateFrom || undefined, incomeDateTo || undefined)
+      } else {
+        setError(res.error?.message || 'Failed to record income')
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to record income')
+    }
+    setSavingIncome(false)
+  }
+
   const handleReverse = async (entryId: string, entryNumber: string) => {
     if (!window.confirm(`Reverse ${entryNumber}? This will create a new entry that nullifies the original.`)) return
     setReversing(entryId)
@@ -256,6 +395,12 @@ export function FinancePage() {
       expenses: async () => {
         await Promise.all([
           loadExpenses(expenseDateFrom || undefined, expenseDateTo || undefined),
+          loadAccounts()
+        ])
+      },
+      income: async () => {
+        await Promise.all([
+          loadIncomes(incomeDateFrom || undefined, incomeDateTo || undefined),
           loadAccounts()
         ])
       },
@@ -282,6 +427,7 @@ export function FinancePage() {
   const tabs: { id: TabType; label: string }[] = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'expenses', label: 'Expenses' },
+    { id: 'income', label: 'Income' },
     { id: 'accounts', label: 'Chart of Accounts' },
     { id: 'journal', label: 'Journal' },
     { id: 'balances', label: 'Balances' },
@@ -508,6 +654,97 @@ export function FinancePage() {
               </div>
             )}
 
+            {/* Income Tab */}
+            {activeTab === 'income' && (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+                <div className="p-4 border-b border-slate-200 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h2 className="font-semibold">Income</h2>
+                    <button onClick={() => setShowIncomeModal(true)} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                      + Record Income
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    <div className="flex gap-2 flex-wrap">
+                      {[
+                        { key: 'today', label: 'Today' },
+                        { key: 'yesterday', label: 'Yesterday' },
+                        { key: 'this-week', label: 'This Week' },
+                        { key: 'last-week', label: 'Last Week' },
+                        { key: 'this-month', label: 'This Month' },
+                        { key: 'last-month', label: 'Last Month' },
+                        { key: 'last-3-months', label: 'Last 3 Months' },
+                      ].map(p => (
+                        <button key={p.key}
+                          onClick={() => applyIncomePeriod(p.key as ExpensePeriod)}
+                          className={`px-3 py-1.5 text-sm rounded-lg border ${
+                            incomePeriod === p.key
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-4 items-center flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-slate-600">From:</label>
+                        <DateInput value={incomeDateFrom}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setIncomePeriod(''); setIncomeDateFrom(e.target.value); loadIncomes(e.target.value || undefined, incomeDateTo || undefined) }}
+                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-slate-600">To:</label>
+                        <DateInput value={incomeDateTo}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setIncomePeriod(''); setIncomeDateTo(e.target.value); loadIncomes(incomeDateFrom || undefined, e.target.value || undefined) }}
+                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      {(incomePeriod || incomeDateFrom || incomeDateTo) && (
+                        <button onClick={clearIncomeFilters}
+                          className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Description</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Account</th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {incomes.length === 0 ? (
+                      <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">No income entries found</td></tr>
+                    ) : (
+                      incomes.map(entry => {
+                        const incomeLine = entry.lines?.find(l => Number(l.credit) > 0)
+                        const accountInfo = incomeLine ? `${incomeLine.account.code} ${incomeLine.account.name}` : '-'
+                        const amount = incomeLine ? Number(incomeLine.credit) : 0
+                        return (
+                          <tr key={entry.id} className="hover:bg-slate-50">
+                            <td className="px-6 py-4 text-sm text-slate-600">{formatDate(entry.date)}</td>
+                            <td className="px-6 py-4 text-sm text-slate-900">{entry.description}</td>
+                            <td className="px-6 py-4 text-sm text-slate-600">{accountInfo}</td>
+                            <td className="px-6 py-4 text-sm font-medium text-green-600 text-right">{formatCurrency(amount)}</td>
+                            <td className="px-6 py-4 text-sm text-slate-500">{entry.reference || '-'}</td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {/* Accounts Tab */}
             {activeTab === 'accounts' && accounts && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -599,6 +836,7 @@ export function FinancePage() {
                         <option value="PROCUREMENT">Procurement</option>
                         <option value="PRODUCTION">Production</option>
                         <option value="EXPENSE">Expense</option>
+                        <option value="INCOME">Income</option>
                         <option value="PAYMENT">Payment</option>
                         <option value="ADJUSTMENT">Adjustment</option>
                         <option value="OPENING">Opening</option>
@@ -932,6 +1170,66 @@ export function FinancePage() {
                 <button type="button" onClick={() => setShowExpenseModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
                 <button type="submit" disabled={savingExpense} className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
                   {savingExpense ? 'Saving...' : 'Record Expense'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Income Modal */}
+      {showIncomeModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">Record Income</h2>
+            <form onSubmit={handleRecordIncome} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Income Account <span className="text-red-500">*</span></label>
+                <select value={incomeForm.accountId} onChange={e => setIncomeForm({...incomeForm, accountId: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required>
+                  <option value="">Select income account</option>
+                  {accounts.filter(a => a.type === 'REVENUE' && a.code !== '4000' && a.code !== '4100').map(a => (
+                    <option key={a.id} value={a.id}>{a.code} - {a.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Amount (₦) <span className="text-red-500">*</span></label>
+                <input type="number" min="1" step="0.01" value={incomeForm.amount || ''} onChange={e => setIncomeForm({...incomeForm, amount: parseFloat(e.target.value) || 0})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description <span className="text-red-500">*</span></label>
+                <input type="text" value={incomeForm.description} onChange={e => setIncomeForm({...incomeForm, description: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required placeholder="e.g. Sale of scrap materials" />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Received Via</label>
+                <select value={incomeForm.paymentMethod} onChange={e => setIncomeForm({...incomeForm, paymentMethod: e.target.value as 'Cash' | 'Bank Transfer'})} className="w-full px-4 py-2 border border-slate-300 rounded-lg">
+                  <option value="Cash">Cash</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                <DateInput value={incomeForm.date} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIncomeForm({...incomeForm, date: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Reference Number</label>
+                <input type="text" value={incomeForm.referenceNumber} onChange={e => setIncomeForm({...incomeForm, referenceNumber: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" placeholder="Optional - receipt/invoice number" />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                <textarea value={incomeForm.notes} onChange={e => setIncomeForm({...incomeForm, notes: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" rows={2} />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button type="button" onClick={() => setShowIncomeModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button type="submit" disabled={savingIncome} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+                  {savingIncome ? 'Saving...' : 'Record Income'}
                 </button>
               </div>
             </form>

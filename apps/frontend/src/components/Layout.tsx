@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 interface NavItem {
@@ -64,6 +64,17 @@ export function Layout({ children }: LayoutProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    const handler = (e: WheelEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'number') {
+        e.preventDefault()
+      }
+    }
+    document.addEventListener('wheel', handler, { passive: false })
+    return () => document.removeEventListener('wheel', handler, { passive: false })
+  }, [])
 
   const userStr = localStorage.getItem('user')
   const user = userStr ? JSON.parse(userStr) : { username: 'User', role: 'Unknown' }

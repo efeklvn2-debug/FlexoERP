@@ -48,3 +48,7 @@ salesOrderRouter.post('/customers/:customerId/deposit', authorize(Role.ADMIN, Ro
 
 // Packing Bag Sales
 salesOrderRouter.post('/packing-bags/sell', coreBuybackController.sellPackingBags)
+
+// Receipts
+salesOrderRouter.post('/payments/:id/generate-receipt', salesOrderController.generateReceipt)
+salesOrderRouter.get('/receipts/:id/pdf', salesOrderController.downloadReceiptPdf)

@@ -30,6 +30,9 @@ export interface Settings {
   invoicePrimaryColor?: string
   invoiceAccentColor?: string
   invoiceFooter?: string
+  receiptCompanyName?: string
+  receiptLogoUrl?: string
+  receiptFooter?: string
 }
 
 export interface VatSettings {
@@ -44,6 +47,9 @@ export interface InvoiceSettings {
   invoicePrimaryColor?: string
   invoiceAccentColor?: string
   invoiceFooter?: string
+  receiptCompanyName?: string
+  receiptLogoUrl?: string
+  receiptFooter?: string
 }
 
 export interface OverheadRateHistoryEntry {
@@ -83,7 +89,10 @@ export const settingsService = {
       invoiceLogoUrl: settings.invoiceLogoUrl || undefined,
       invoicePrimaryColor: settings.invoicePrimaryColor || undefined,
       invoiceAccentColor: settings.invoiceAccentColor || undefined,
-      invoiceFooter: settings.invoiceFooter || undefined
+      invoiceFooter: settings.invoiceFooter || undefined,
+      receiptCompanyName: settings.receiptCompanyName || undefined,
+      receiptLogoUrl: settings.receiptLogoUrl || undefined,
+      receiptFooter: settings.receiptFooter || undefined
     }
   },
 
@@ -195,7 +204,10 @@ export const settingsService = {
       invoiceLogoUrl: (settings as any).invoiceLogoUrl || undefined,
       invoicePrimaryColor: (settings as any).invoicePrimaryColor || undefined,
       invoiceAccentColor: (settings as any).invoiceAccentColor || undefined,
-      invoiceFooter: (settings as any).invoiceFooter || undefined
+      invoiceFooter: (settings as any).invoiceFooter || undefined,
+      receiptCompanyName: (settings as any).receiptCompanyName || undefined,
+      receiptLogoUrl: (settings as any).receiptLogoUrl || undefined,
+      receiptFooter: (settings as any).receiptFooter || undefined
     }
   },
 
@@ -207,7 +219,10 @@ export const settingsService = {
         invoiceLogoUrl: input.invoiceLogoUrl,
         invoicePrimaryColor: input.invoicePrimaryColor,
         invoiceAccentColor: input.invoiceAccentColor,
-        invoiceFooter: input.invoiceFooter
+        invoiceFooter: input.invoiceFooter,
+        receiptCompanyName: input.receiptCompanyName,
+        receiptLogoUrl: input.receiptLogoUrl,
+        receiptFooter: input.receiptFooter
       },
       create: {
         id: 'default',
@@ -215,7 +230,10 @@ export const settingsService = {
         invoiceLogoUrl: input.invoiceLogoUrl,
         invoicePrimaryColor: input.invoicePrimaryColor,
         invoiceAccentColor: input.invoiceAccentColor,
-        invoiceFooter: input.invoiceFooter
+        invoiceFooter: input.invoiceFooter,
+        receiptCompanyName: input.receiptCompanyName,
+        receiptLogoUrl: input.receiptLogoUrl,
+        receiptFooter: input.receiptFooter
       }
     })
     return this.getInvoiceSettings()

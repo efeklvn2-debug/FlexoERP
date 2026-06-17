@@ -24,7 +24,8 @@ export const salesOrderRepository = {
       include: {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
-        invoices: { orderBy: { createdAt: 'desc' } }
+        invoices: { orderBy: { createdAt: 'desc' } },
+        productionJob: { select: { id: true, jobNumber: true } }
       }
     })
   },
@@ -35,7 +36,8 @@ export const salesOrderRepository = {
       include: {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
-        invoices: { orderBy: { createdAt: 'desc' } }
+        invoices: { orderBy: { createdAt: 'desc' } },
+        productionJob: { select: { id: true, jobNumber: true } }
       }
     })
   },
@@ -64,7 +66,8 @@ export const salesOrderRepository = {
       include: {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
-        invoices: { orderBy: { createdAt: 'desc' } }
+        invoices: { orderBy: { createdAt: 'desc' } },
+        productionJob: { select: { id: true, jobNumber: true } }
       },
       orderBy: { createdAt: 'desc' },
       take: options?.limit || 50,
@@ -408,7 +411,8 @@ export const salesOrderRepository = {
       const orders = await prisma.salesOrder.findMany({
         where: {
           customerId: customer.id,
-          status: { in: ['PENDING', 'APPROVED', 'MRP_PENDING', 'IN_PRODUCTION', 'READY', 'PICKED_UP'] }
+          isDeleted: false,
+          status: { not: 'CANCELLED' }
         }
       })
 
@@ -494,6 +498,13 @@ export const paymentRepository = {
       orderBy: { receivedAt: 'desc' },
       take: options?.limit || 50,
       skip: options?.offset || 0
+    })
+  },
+
+  async findById(id: string) {
+    return prisma.paymentTransaction.findUnique({
+      where: { id },
+      include: { customer: true, salesOrder: true }
     })
   },
 
@@ -663,6 +674,69 @@ export const coreBuybackRepository = {
       where,
       include: { customer: true },
       orderBy: { date: 'desc' }
+    })
+  }
+}
+
+export const receiptRepository = {
+  async getNextReceiptNumber() {
+    const year = new Date().getFullYear()
+    const prefix = `REC-${year}-`
+
+    const lastReceipt = await prisma.receipt.findFirst({
+      where: { receiptNumber: { startsWith: prefix } },
+      orderBy: { receiptNumber: 'desc' }
+    })
+
+    if (!lastReceipt) {
+      return `${prefix}0001`
+    }
+
+    const lastNum = parseInt(lastReceipt.receiptNumber.replace(prefix, ''))
+    return `${prefix}${String(lastNum + 1).padStart(4, '0')}`
+  },
+
+  async create(data: {
+    receiptNumber: string
+    paymentTransactionId: string
+    customerName: string
+    amount: Prisma.Decimal | number
+    paymentMethod: string
+    referenceNumber?: string
+    generatedById: string
+  }) {
+    return prisma.receipt.create({
+      data: {
+        receiptNumber: data.receiptNumber,
+        paymentTransactionId: data.paymentTransactionId,
+        customerName: data.customerName,
+        amount: new Prisma.Decimal(String(data.amount)),
+        paymentMethod: String(data.paymentMethod),
+        referenceNumber: data.referenceNumber,
+        generatedById: data.generatedById
+      }
+    })
+  },
+
+  async findById(id: string) {
+    return prisma.receipt.findUnique({
+      where: { id },
+      include: {
+        paymentTransaction: {
+          include: {
+            customer: true,
+            salesOrder: true
+          }
+        },
+        generatedBy: { select: { id: true, username: true } }
+      }
+    })
+  },
+
+  async findByPaymentTransactionId(paymentTransactionId: string) {
+    return prisma.receipt.findFirst({
+      where: { paymentTransactionId },
+      orderBy: { generatedAt: 'desc' }
     })
   }
 }

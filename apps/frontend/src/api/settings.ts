@@ -43,6 +43,9 @@ export interface InvoiceSettings {
   invoicePrimaryColor?: string
   invoiceAccentColor?: string
   invoiceFooter?: string
+  receiptCompanyName?: string
+  receiptLogoUrl?: string
+  receiptFooter?: string
 }
 
 export const settingsApi = {

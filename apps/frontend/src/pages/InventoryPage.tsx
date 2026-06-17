@@ -42,6 +42,10 @@ export function InventoryPage() {
   const [selectedParentRoll, setSelectedParentRoll] = useState<Roll | null>(null)
   const [printedFromRoll, setPrintedFromRoll] = useState<any[] | null>(null)
   const [loadingPrintedFromRoll, setLoadingPrintedFromRoll] = useState(false)
+  const [disposeRoll, setDisposeRoll] = useState<Roll | null>(null)
+  const [returnRoll, setReturnRoll] = useState<Roll | null>(null)
+  const [disposalReason, setDisposalReason] = useState('Manufacturing defect')
+  const [disposing, setDisposing] = useState(false)
 
   const ADJUSTMENT_REASONS = [
     'Opening Balance',
@@ -71,6 +75,7 @@ export function InventoryPage() {
     search: '',
     customer: '',
     material: '',
+    status: '',
     dateFrom: '',
     dateTo: '',
     combination: ''
@@ -93,7 +98,7 @@ export function InventoryPage() {
         const res = await inventoryApi.getMaterials()
         setMaterials(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
       } else if (activeTab === 'printed-rolls') {
-        const res = await productionApi.getPrintedRolls({ status: 'IN_STOCK' })
+        const res = await productionApi.getPrintedRolls()
         setPrintedRolls(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
       } else if (activeTab === 'initial-stock') {
         const res = await inventoryApi.getInitialStockMovements()
@@ -170,6 +175,9 @@ export function InventoryPage() {
       result = result.filter(r => r.isCombination === true)
     } else if (printedRollFilter.combination === 'single') {
       result = result.filter(r => !r.isCombination)
+    }
+    if (printedRollFilter.status) {
+      result = result.filter(r => r.status === printedRollFilter.status)
     }
     result.sort((a, b) => {
       let comparison = 0
@@ -258,6 +266,7 @@ export function InventoryPage() {
                 sortOrder={printedRollSortOrder}
                 setSortOrder={setPrintedRollSortOrder}
                 total={printedRolls.length}
+                onRefresh={loadData}
               />
             )}
             {activeTab === 'initial-stock' && (
@@ -528,6 +537,33 @@ export function InventoryPage() {
                   <p className="font-medium">{selectedParentRoll.status}</p>
                 </div>
               </div>
+              {selectedParentRoll.status === 'AVAILABLE' && (
+                <div className="flex gap-3 mb-6">
+                  <button onClick={() => { setDisposeRoll(selectedParentRoll); setDisposalReason('Manufacturing defect') }} className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">
+                    Mark as Waste
+                  </button>
+                  <button onClick={() => { setReturnRoll(selectedParentRoll) }} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                    Return to Supplier
+                  </button>
+                </div>
+              )}
+              {selectedParentRoll.status === 'RETURNED' && !selectedParentRoll.replacementReceived && (
+                <div className="flex gap-3 mb-6">
+                  <button onClick={async () => {
+                    if (!confirm('Receive replacement for this returned roll?')) return
+                    try {
+                      await productionApi.receiveReplacement(selectedParentRoll.id)
+                      setSelectedParentRoll(null)
+                      setPrintedFromRoll(null)
+                      loadData()
+                    } catch (e: any) {
+                      alert(e?.response?.data?.error || 'Failed to receive replacement')
+                    }
+                  }} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700">
+                    Receive Replacement
+                  </button>
+                </div>
+              )}
               <h3 className="text-lg font-semibold mb-3">Printed Rolls Produced From This Roll</h3>
               {loadingPrintedFromRoll ? (
                 <div className="text-center py-8 text-slate-500">Loading...</div>
@@ -547,10 +583,21 @@ export function InventoryPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {printedFromRoll.map((pr: any) => {
+                    {printedFromRoll.map((pr: any, idx: number) => {
+                      if (pr.isWaste) {
+                        return (
+                          <tr key={`waste-${idx}`} className="bg-amber-50">
+                            <td className="px-3 py-3 text-sm font-mono text-amber-700">Waste</td>
+                            <td className="px-3 py-3 text-sm text-amber-700 font-medium">{Number(pr.wasteWeight).toFixed(2)} kg</td>
+                            <td className="px-3 py-3 text-sm text-amber-700">{pr.customerName}</td>
+                            <td className="px-3 py-3 text-sm text-amber-700">{new Date(pr.createdAt).toLocaleDateString()}</td>
+                            <td className="px-3 py-3 text-sm text-amber-700">{pr.jobNumber}</td>
+                          </tr>
+                        )
+                      }
                       const isPartial = pr.contributedWeight && pr.contributedWeight < Number(pr.weightUsed)
                       return (
-                        <tr key={pr.id} className={'hover:bg-slate-50' + (isPartial ? ' bg-amber-50' : '')}>
+                        <tr key={pr.id || idx} className={'hover:bg-slate-50' + (isPartial ? ' bg-amber-50' : '')}>
                           <td className="px-3 py-3 text-sm font-mono">
                             {pr.rollNumber}
                             {isPartial && <span className="ml-2 inline-block w-2 h-2 rounded-full bg-amber-500" title="Partial contribution" />}
@@ -571,6 +618,83 @@ export function InventoryPage() {
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Dispose Confirmation Modal */}
+        {disposeRoll && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+              <h3 className="text-lg font-bold mb-2">Mark Roll as Waste</h3>
+              <p className="text-sm text-slate-600 mb-4">
+                This will dispose roll <strong>{disposeRoll.rollNumber}</strong> ({Number(disposeRoll.remainingWeight).toFixed(2)} kg remaining) and post a journal entry.
+              </p>
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-slate-500 mb-1">Reason</label>
+                <select value={disposalReason} onChange={e => setDisposalReason(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
+                  <option value="Manufacturing defect">Manufacturing defect</option>
+                  <option value="Damaged during handling">Damaged during handling</option>
+                  <option value="Contamination">Contamination</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button onClick={() => setDisposeRoll(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-sm">Cancel</button>
+                <button
+                  onClick={async () => {
+                    setDisposing(true)
+                    try {
+                      await productionApi.disposeRoll(disposeRoll.id, disposalReason)
+                      setDisposeRoll(null)
+                      setSelectedParentRoll(null)
+                      setPrintedFromRoll(null)
+                      loadData()
+                    } catch (e: any) {
+                      alert(e?.response?.data?.error || 'Failed to dispose roll')
+                    }
+                    setDisposing(false)
+                  }}
+                  disabled={disposing}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
+                >
+                  {disposing ? 'Processing...' : 'Confirm Dispose'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Return Confirmation Modal */}
+        {returnRoll && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+              <h3 className="text-lg font-bold mb-2">Return Roll to Supplier</h3>
+              <p className="text-sm text-slate-600 mb-4">
+                This will return roll <strong>{returnRoll.rollNumber}</strong> ({Number(returnRoll.remainingWeight).toFixed(2)} kg remaining) to the supplier and post a journal entry.
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button onClick={() => setReturnRoll(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-sm">Cancel</button>
+                <button
+                  onClick={async () => {
+                    setDisposing(true)
+                    try {
+                      await productionApi.returnRoll(returnRoll.id)
+                      setReturnRoll(null)
+                      setSelectedParentRoll(null)
+                      setPrintedFromRoll(null)
+                      loadData()
+                    } catch (e: any) {
+                      alert(e?.response?.data?.error || 'Failed to return roll')
+                    }
+                    setDisposing(false)
+                  }}
+                  disabled={disposing}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {disposing ? 'Processing...' : 'Confirm Return'}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -606,6 +730,7 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
               <option value="IN_PRODUCTION">In Production</option>
               <option value="CONSUMED">Consumed</option>
               <option value="RETURNED">Returned</option>
+              <option value="WASTED">Wasted</option>
             </select>
           </div>
           <div>
@@ -645,7 +770,7 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
                 <td className="px-6 py-4 text-sm text-slate-600">{(r.material as any)?.subCategory || '-'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Number(r.weight).toFixed(2)}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{Number(r.remainingWeight).toFixed(2)}</td>
-                <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${r.status === 'AVAILABLE' ? 'bg-green-100 text-green-800' : r.status === 'IN_PRODUCTION' ? 'bg-yellow-100 text-yellow-800' : r.status === 'CONSUMED' ? 'bg-slate-100 text-slate-600' : 'bg-red-100 text-red-800'}`}>{r.status}</span></td>
+                <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${r.status === 'AVAILABLE' ? 'bg-green-100 text-green-800' : r.status === 'IN_PRODUCTION' ? 'bg-yellow-100 text-yellow-800' : r.status === 'CONSUMED' ? 'bg-slate-100 text-slate-600' : r.status === 'RETURNED' ? 'bg-blue-100 text-blue-800' : r.status === 'WASTED' ? 'bg-red-100 text-red-800' : 'bg-slate-100 text-slate-600'}`}>{r.status}</span></td>
                 <td className="px-6 py-4 text-sm text-slate-500">{r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '-'}</td>
               </tr>
             ))}
@@ -721,23 +846,47 @@ function MaterialsTab({ materials, filter, setFilter, sort, setSort, sortOrder, 
   )
 }
 
-function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total }: {
+function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, onRefresh }: {
   rolls: PrintedRollDisplay[]
-  filter: { search: string; customer: string; material: string; dateFrom: string; dateTo: string; combination: string }
-  setFilter: React.Dispatch<React.SetStateAction<{ search: string; customer: string; material: string; dateFrom: string; dateTo: string; combination: string }>>
+  filter: { search: string; customer: string; material: string; status: string; dateFrom: string; dateTo: string; combination: string }
+  setFilter: React.Dispatch<React.SetStateAction<{ search: string; customer: string; material: string; status: string; dateFrom: string; dateTo: string; combination: string }>>
   sort: string
   setSort: React.Dispatch<React.SetStateAction<any>>
   sortOrder: 'asc' | 'desc'
   setSortOrder: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
   total: number
+  onRefresh?: () => Promise<void>
 }) {
   const [selectedRoll, setSelectedRoll] = useState<PrintedRollDisplay | null>(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [showReturnModal, setShowReturnModal] = useState(false)
+  const [returnForm, setReturnForm] = useState({ qty: 0, reason: '', condition: 'SCRAP', refundMethod: 'CREDIT_NOTE' })
+  const [returnLoading, setReturnLoading] = useState(false)
+  const [returnError, setReturnError] = useState('')
+
+  const handleCustomerReturn = async () => {
+    if (!selectedRoll) return
+    if (!returnForm.qty || returnForm.qty <= 0) { setReturnError('Qty must be positive'); return }
+    if (!returnForm.reason) { setReturnError('Reason is required'); return }
+    setReturnLoading(true)
+    setReturnError('')
+    try {
+      await productionApi.customerReturnRoll(selectedRoll.id, returnForm)
+      setShowReturnModal(false)
+      setShowDetailsModal(false)
+      setSelectedRoll(null)
+      onRefresh?.()
+    } catch (err: any) {
+      setReturnError(err.response?.data?.error || err.message || 'Failed to process return')
+    }
+    setReturnLoading(false)
+  }
 
   const statusColor = (status?: string) => {
     switch (status) {
       case 'PICKED_UP': return 'bg-amber-100 text-amber-700'
       case 'IN_STOCK': return 'bg-green-100 text-green-700'
+      case 'RETURNED': return 'bg-red-100 text-red-700'
       default: return 'bg-slate-100 text-slate-600'
     }
   }
@@ -746,6 +895,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
     switch (status) {
       case 'PICKED_UP': return 'Picked Up'
       case 'IN_STOCK': return 'In Stock'
+      case 'RETURNED': return 'Returned'
       default: return status || 'Unknown'
     }
   }
@@ -783,16 +933,17 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             <DateInput value={filter.dateTo} onChange={e => setFilter({ ...filter, dateTo: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Type</label>
-            <select value={filter.combination} onChange={e => setFilter({ ...filter, combination: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
+            <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
+            <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
               <option value="">All</option>
-              <option value="combo">Combo Only</option>
-              <option value="single">Single Only</option>
+              <option value="IN_STOCK">In Stock</option>
+              <option value="PICKED_UP">Picked Up</option>
+              <option value="RETURNED">Returned</option>
             </select>
           </div>
         </div>
         <div className="flex items-center gap-4 mt-4 pt-4 border-t border-slate-200">
-          <button onClick={() => setFilter({ search: '', customer: '', material: '', dateFrom: '', dateTo: '', combination: '' })} className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900">Clear Filters</button>
+          <button onClick={() => setFilter({ search: '', customer: '', material: '', status: '', dateFrom: '', dateTo: '', combination: '' })} className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900">Clear Filters</button>
           <span className="text-xs text-slate-500 ml-auto">{rolls.length} of {total} rolls</span>
         </div>
       </div>
@@ -911,8 +1062,65 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
               )}
             </div>
 
-            <div className="flex justify-end pt-4 border-t border-slate-200 mt-4">
+            <div className="flex justify-between pt-4 border-t border-slate-200 mt-4">
+              <div>
+                {selectedRoll.status === 'PICKED_UP' && (
+                  <button type="button" onClick={() => { setReturnForm({ qty: Number(selectedRoll.weight), reason: '', condition: 'SCRAP', refundMethod: 'CREDIT_NOTE' }); setShowReturnModal(true) }} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                    Customer Return
+                  </button>
+                )}
+              </div>
               <button type="button" onClick={() => { setShowDetailsModal(false); setSelectedRoll(null) }} className="px-4 py-2 border border-slate-300 rounded-lg">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReturnModal && selectedRoll && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Customer Return</h2>
+            <p className="text-sm text-slate-600 mb-4">Roll: {selectedRoll.rollNumber} ({Number(selectedRoll.weight).toFixed(2)} kg)</p>
+
+            {returnError && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm mb-4">{returnError}</div>}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Return Qty (kg)</label>
+                <input type="number" step="0.01" value={returnForm.qty} onChange={e => setReturnForm({ ...returnForm, qty: Math.min(Number(selectedRoll.weight), Math.max(0, Number(e.target.value))) })} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Reason</label>
+                <select value={returnForm.reason} onChange={e => setReturnForm({ ...returnForm, reason: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded-lg">
+                  <option value="">Select reason...</option>
+                  <option value="Defective">Defective</option>
+                  <option value="Wrong spec">Wrong Spec</option>
+                  <option value="Customer request">Customer Request</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Condition / Disposition</label>
+                <select value={returnForm.condition} onChange={e => setReturnForm({ ...returnForm, condition: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded-lg">
+                  <option value="SCRAP">Scrap (Dr 5300 / Cr 1300)</option>
+                  <option value="RETURN_TO_SUPPLIER">Return to Supplier (Dr 2000 / Cr 1300)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Refund Method (info only)</label>
+                <select value={returnForm.refundMethod} onChange={e => setReturnForm({ ...returnForm, refundMethod: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded-lg">
+                  <option value="CREDIT_NOTE">Credit Note</option>
+                  <option value="CASH_REFUND">Cash Refund</option>
+                  <option value="NONE">No Refund</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-200">
+              <button type="button" onClick={() => { setShowReturnModal(false); setReturnError('') }} className="px-4 py-2 border border-slate-300 rounded-lg" disabled={returnLoading}>Cancel</button>
+              <button type="button" onClick={handleCustomerReturn} disabled={returnLoading} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
+                {returnLoading ? 'Processing...' : 'Submit Return'}
+              </button>
             </div>
           </div>
         </div>

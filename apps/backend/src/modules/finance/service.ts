@@ -393,12 +393,6 @@ export const financeService = {
   },
 
   async seedDefaultAccounts() {
-    const existingAccounts = await financeRepository.findAllAccounts(true)
-    if (existingAccounts.length > 0) {
-      logger.info('Chart of accounts already exists, skipping seed')
-      return { message: 'Accounts already seeded', count: existingAccounts.length }
-    }
-
     const accounts = [
       { code: '1000', name: 'Cash', type: 'ASSET', description: 'Cash on hand' },
       { code: '1100', name: 'Bank', type: 'ASSET', description: 'Bank accounts' },
@@ -425,6 +419,7 @@ export const financeService = {
       { code: '5000', name: 'Cost of Goods Sold', type: 'COGS', description: 'Material cost of goods sold' },
       { code: '5100', name: 'Material Costs', type: 'COGS', description: 'Plain roll material costs' },
       { code: '5200', name: 'Production Costs', type: 'COGS', description: 'Direct production costs' },
+      { code: '5300', name: 'Scrap/Waste Expense', type: 'COGS', description: 'Scrapped and wasted materials' },
 
       { code: '6000', name: 'Fuel & Transport', type: 'EXPENSE', description: 'Fuel and transportation expenses' },
       { code: '6100', name: 'Maintenance', type: 'EXPENSE', description: 'Equipment maintenance' },
@@ -435,12 +430,18 @@ export const financeService = {
       { code: '6600', name: 'Miscellaneous', type: 'EXPENSE', description: 'Other expenses' }
     ]
 
+    let created = 0
     for (const acc of accounts) {
-      await prisma.account.create({ data: acc as any })
+      await prisma.account.upsert({
+        where: { code: acc.code },
+        create: acc as any,
+        update: {}
+      })
+      created++
     }
 
-    logger.info({ count: accounts.length }, 'Chart of accounts seeded')
-    return { message: 'Chart of accounts seeded', count: accounts.length }
+    logger.info({ count: created }, 'Chart of accounts seeded')
+    return { message: 'Chart of accounts seeded', count: created }
   },
 
   async getDeferredCogsSummary() {

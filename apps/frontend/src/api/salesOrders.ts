@@ -53,6 +53,7 @@ export interface SalesOrder {
   paymentStatus: MTOPaymentStatus
   status: MTOOrderStatus
   productionJobId?: string
+  productionJob?: { id: string; jobNumber: string }
   createdAt: string
   updatedAt: string
   approvedAt?: string
@@ -114,6 +115,19 @@ export interface PaymentReceived {
   reference?: string
   notes?: string
   paymentMethod?: string
+}
+
+export interface Receipt {
+  id: string
+  receiptNumber: string
+  paymentTransactionId: string
+  customerName: string
+  amount: number
+  paymentMethod: string
+  referenceNumber?: string
+  generatedById: string
+  generatedAt: string
+  paymentTransaction: PaymentTransaction
 }
 
 export interface CoreBuyback {
@@ -191,6 +205,7 @@ export const salesOrderApi = {
   startProduction: (id: string, data: {
     machine: string
     category?: string
+    materialOverride?: string
     rollIds: string[]
     printedRollWeights: number[]
     rollWaste?: Record<string, number>
@@ -242,6 +257,7 @@ export const salesOrderApi = {
     customerId?: string
     sellerName?: string
     coresQuantity: number
+    ratePerCore?: number
     paymentMethod: PaymentMethod
     notes?: string
   }) => api.post<CoreBuyback>('/sales-orders/core-buyback', data),
@@ -312,6 +328,27 @@ export const salesOrderApi = {
     totalAmount: number
     depositApplied: number
   }>('/sales-orders/packing-bags/sell', data),
+
+  // Receipts
+  generateReceipt: (paymentTransactionId: string) =>
+    api.post<Receipt>(`/sales-orders/payments/${paymentTransactionId}/generate-receipt`, {}),
+
+  downloadReceiptPdf: async (id: string) => {
+    const token = localStorage.getItem('accessToken')
+    const response = await fetch(`/api/sales-orders/receipts/${id}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    if (!response.ok) throw new Error('Failed to download receipt PDF')
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `receipt-${id.slice(0, 8)}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  },
 
   downloadInvoicePdf: async (id: string) => {
     const token = localStorage.getItem('accessToken')
