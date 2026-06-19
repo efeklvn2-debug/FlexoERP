@@ -5,7 +5,7 @@ import { createChildLogger } from '../../logger'
 
 const logger = createChildLogger('procurement:repository')
 
-const convertPO = (po: any): PurchaseOrder => ({
+export const convertPO = (po: any): PurchaseOrder => ({
   ...po,
   totalAmount: po.totalAmount ? Number(po.totalAmount) : undefined,
   rolls: po.rolls?.map((r: any) => convertRoll(r)),

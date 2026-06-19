@@ -26,7 +26,8 @@ export const addLineItemSchema = z.object({
 export const updatePOSchema = z.object({
   supplier: z.string().min(1, 'Supplier is required').optional(),
   expectedDate: z.string().optional(),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  items: z.array(poLineItemSchema).optional()
 })
 
 export const receivePOSchema = z.object({

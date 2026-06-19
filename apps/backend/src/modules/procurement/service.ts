@@ -1,4 +1,4 @@
-import { procurementRepository } from './repository'
+import { procurementRepository, convertPO } from './repository'
 import { PurchaseOrderInput, RollInput, ReceivePOInput, AddLineItemInput, UpdatePOInput } from './validation'
 import { PurchaseOrder, Roll, SupplierInvoice, PaymentMade, SupplierInvoiceStatus } from './types'
 import { AppError } from '../../middleware/errorHandler'
@@ -65,7 +65,40 @@ export const procurementService = {
     if (existing.status !== 'PENDING') {
       throw new AppError(400, 'INVALID_OPERATION', 'Can only edit pending purchase orders')
     }
-    
+
+    if (input.items) {
+      const totalAmount = input.items.reduce((sum, item) => {
+        return sum + (Number(item.totalWeight) * Number(item.unitPrice))
+      }, 0)
+
+      return prisma.$transaction(async (tx) => {
+        await tx.pOLineItem.deleteMany({ where: { purchaseOrderId: id } })
+        for (const item of input.items!) {
+          await tx.pOLineItem.create({
+            data: {
+              purchaseOrderId: id,
+              materialId: item.materialId,
+              quantity: item.quantity,
+              totalWeight: item.totalWeight,
+              unitPrice: item.unitPrice,
+              rollWeights: item.rollWeights || []
+            }
+          })
+        }
+        const updated = await tx.purchaseOrder.update({
+          where: { id },
+          data: {
+            supplier: input.supplier,
+            expectedDate: input.expectedDate ? dateFromInput(input.expectedDate) : undefined,
+            notes: input.notes,
+            totalAmount
+          },
+          include: { rolls: { include: { material: true } }, items: { include: { material: true } } }
+        })
+        return convertPO(updated)
+      })
+    }
+
     logger.info({ poId: id, updates: input }, 'Updating purchase order')
     return procurementRepository.updatePO(id, {
       supplier: input.supplier,

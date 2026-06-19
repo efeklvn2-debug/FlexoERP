@@ -107,7 +107,7 @@ export const procurementApi = {
     items: CreatePOLineItem[];
   }) => api.post<PurchaseOrder>('/procurement/purchase-orders', data),
   
-  updatePO: async (id: string, data: { supplier?: string; expectedDate?: string; notes?: string }) => 
+  updatePO: async (id: string, data: { supplier?: string; expectedDate?: string; notes?: string; items?: CreatePOLineItem[] }) => 
     api.patch<PurchaseOrder>(`/procurement/purchase-orders/${id}`, data),
   
   addLineItem: async (poId: string, data: { materialId: string; quantity: number; totalWeight: number; unitPrice: number; rollWeights?: number[] }) =>

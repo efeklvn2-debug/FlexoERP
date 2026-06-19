@@ -55,6 +55,7 @@ export function ProcurementPage() {
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
   const [editPOForm, setEditPOForm] = useState({ supplier: '', expectedDate: '', notes: '' })
   const [editLineItems, setEditLineItems] = useState<POLineItemForm[]>([])
+  const [editingLineItemIndex, setEditingLineItemIndex] = useState<number | null>(null)
   const [editCurrentItem, setEditCurrentItem] = useState({
     category: '' as ItemCategory | '',
     subCategory: '',
@@ -370,8 +371,24 @@ export function ProcurementPage() {
         rollWeights: (item.rollWeights as number[] || []).length > 0 ? item.rollWeights as number[] : []
       }
     }) || [])
+    setEditingLineItemIndex(null)
     setEditCurrentItem({ category: '', subCategory: '', materialId: '', quantity: 1, totalWeight: 0, unitPrice: 0, rollWeights: '' })
     setShowEditPOModal(true)
+  }
+
+  const startEditLineItem = (idx: number) => {
+    const item = editLineItems[idx]
+    const mat = materials.find(m => m.id === item.materialId)
+    setEditingLineItemIndex(idx)
+    setEditCurrentItem({
+      category: item.category,
+      subCategory: mat?.subCategory || '',
+      materialId: item.materialId,
+      quantity: item.quantity,
+      totalWeight: item.totalWeight,
+      unitPrice: item.unitPrice,
+      rollWeights: item.rollWeights.length > 0 ? item.rollWeights.join(', ') : ''
+    })
   }
 
   const handleEditAddItem = () => {
@@ -380,64 +397,73 @@ export function ProcurementPage() {
       return
     }
 
-    if (editCurrentItem.category === 'PLAIN_ROLLS') {
-      const weights = editCurrentItem.rollWeights.split(/[\s,]+/).map(w => parseFloat(w.trim())).filter(w => !isNaN(w) && w > 0)
-      if (weights.length === 0 || weights.length > 35) {
-        setError('Enter 1-35 roll weights (space or comma-separated, kg)')
-        return
+    const buildItem = (): POLineItemForm | null => {
+      if (editCurrentItem.category === 'PLAIN_ROLLS') {
+        const weights = editCurrentItem.rollWeights.split(/[\s,]+/).map(w => parseFloat(w.trim())).filter(w => !isNaN(w) && w > 0)
+        if (weights.length === 0 || weights.length > 35) {
+          setError('Enter 1-35 roll weights (space or comma-separated, kg)')
+          return null
+        }
+        const material = materials.find(m => m.id === editCurrentItem.materialId)
+        return {
+          materialId: editCurrentItem.materialId,
+          materialName: material?.name || editCurrentItem.materialId,
+          category: 'PLAIN_ROLLS',
+          quantity: weights.length,
+          totalWeight: weights.reduce((sum, w) => sum + w, 0),
+          unitPrice: editCurrentItem.unitPrice,
+          rollWeights: weights
+        }
+      } else if (editCurrentItem.category === 'INK_SOLVENTS') {
+        const material = materials.find(m => m.id === editCurrentItem.materialId)
+        const drumSize = material?.drumSize || 1
+        return {
+          materialId: editCurrentItem.materialId,
+          materialName: material?.name || editCurrentItem.materialId,
+          category: 'INK_SOLVENTS',
+          quantity: editCurrentItem.quantity,
+          totalWeight: editCurrentItem.quantity * drumSize,
+          unitPrice: editCurrentItem.unitPrice,
+          rollWeights: []
+        }
+      } else if (editCurrentItem.category === 'PACKAGING') {
+        const material = materials.find(m => m.id === editCurrentItem.materialId)
+        return {
+          materialId: editCurrentItem.materialId,
+          materialName: material?.name || editCurrentItem.materialId,
+          category: 'PACKAGING',
+          quantity: editCurrentItem.quantity,
+          totalWeight: editCurrentItem.quantity,
+          unitPrice: editCurrentItem.unitPrice,
+          rollWeights: []
+        }
       }
+      return null
+    }
+
+    const item = buildItem()
+    if (!item) return
+
+    if (editingLineItemIndex !== null) {
+      const updated = [...editLineItems]
+      updated[editingLineItemIndex] = item
+      setEditLineItems(updated)
+      setEditingLineItemIndex(null)
+    } else {
       if (editLineItems.length >= 60) {
         setError('Maximum 60 line items allowed')
         return
       }
-      const totalWeight = weights.reduce((sum, w) => sum + w, 0)
-      const material = materials.find(m => m.id === editCurrentItem.materialId)
-      setEditLineItems([...editLineItems, {
-        materialId: editCurrentItem.materialId,
-        materialName: material?.name || editCurrentItem.materialId,
-        category: 'PLAIN_ROLLS',
-        quantity: weights.length,
-        totalWeight,
-        unitPrice: editCurrentItem.unitPrice,
-        rollWeights: weights
-      }])
-    } else if (editCurrentItem.category === 'INK_SOLVENTS') {
-      if (editLineItems.length >= 60) {
-        setError('Maximum 60 line items allowed')
-        return
-      }
-      const material = materials.find(m => m.id === editCurrentItem.materialId)
-      const drumSize = material?.drumSize || 1
-      const totalWeight = editCurrentItem.quantity * drumSize
-      setEditLineItems([...editLineItems, {
-        materialId: editCurrentItem.materialId,
-        materialName: material?.name || editCurrentItem.materialId,
-        category: 'INK_SOLVENTS',
-        quantity: editCurrentItem.quantity,
-        totalWeight,
-        unitPrice: editCurrentItem.unitPrice,
-        rollWeights: []
-      }])
-    } else if (editCurrentItem.category === 'PACKAGING') {
-      if (editLineItems.length >= 60) {
-        setError('Maximum 60 line items allowed')
-        return
-      }
-      const material = materials.find(m => m.id === editCurrentItem.materialId)
-      const totalWeight = editCurrentItem.quantity
-      setEditLineItems([...editLineItems, {
-        materialId: editCurrentItem.materialId,
-        materialName: material?.name || editCurrentItem.materialId,
-        category: 'PACKAGING',
-        quantity: editCurrentItem.quantity,
-        totalWeight,
-        unitPrice: editCurrentItem.unitPrice,
-        rollWeights: []
-      }])
+      setEditLineItems([...editLineItems, item])
     }
 
     setEditCurrentItem({ category: '', subCategory: '', materialId: '', quantity: 1, totalWeight: 0, unitPrice: 0, rollWeights: '' })
     setError('')
+  }
+
+  const cancelEditLineItem = () => {
+    setEditingLineItemIndex(null)
+    setEditCurrentItem({ category: '', subCategory: '', materialId: '', quantity: 1, totalWeight: 0, unitPrice: 0, rollWeights: '' })
   }
 
   const handleEditCategoryChange = (category: ItemCategory) => {
@@ -463,24 +489,19 @@ export function ProcurementPage() {
   const handleSaveEditPO = async () => {
     if (!selectedPO) return
 
-    const res = await procurementApi.updatePO(selectedPO.id, editPOForm)
-    if (res.error) {
-      setError(res.error.message)
-      return
-    }
-
-    for (const item of selectedPO.items || []) {
-      await procurementApi.removeLineItem(selectedPO.id, item.id)
-    }
-
-    for (const item of editLineItems) {
-      await procurementApi.addLineItem(selectedPO.id, {
+    const res = await procurementApi.updatePO(selectedPO.id, {
+      ...editPOForm,
+      items: editLineItems.map(item => ({
         materialId: item.materialId,
         quantity: item.quantity,
         totalWeight: item.totalWeight,
         unitPrice: item.unitPrice,
         rollWeights: item.rollWeights
-      })
+      }))
+    })
+    if (res.error) {
+      setError(res.error.message)
+      return
     }
 
     setShowEditPOModal(false)
@@ -1023,7 +1044,12 @@ export function ProcurementPage() {
               </div>
 
               <div className="border-t border-slate-200 pt-4 mb-4">
-                <h3 className="font-medium text-slate-900 mb-3">Add Line Item</h3>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-medium text-slate-900">{editingLineItemIndex !== null ? 'Edit Line Item' : 'Add Line Item'}</h3>
+                  {editingLineItemIndex !== null && (
+                    <button type="button" onClick={cancelEditLineItem} className="text-sm text-slate-500 hover:text-slate-700 underline">Cancel edit</button>
+                  )}
+                </div>
                 <div className="bg-slate-50 rounded-lg p-4 space-y-3">
                   <div className="grid grid-cols-3 gap-3">
                     <div>
@@ -1130,7 +1156,7 @@ export function ProcurementPage() {
                       }
                       className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      + Add to PO
+                      {editingLineItemIndex !== null ? 'Update Item' : '+ Add to PO'}
                     </button>
                   </div>
                 </div>
@@ -1162,7 +1188,8 @@ export function ProcurementPage() {
                           <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.totalWeight.toFixed(2)}</td>
                           <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.unitPrice.toFixed(2)}</td>
                           <td className="px-3 py-2 text-sm text-slate-900 text-right font-medium">${(item.totalWeight * item.unitPrice).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right">
+                          <td className="px-3 py-2 text-right whitespace-nowrap space-x-2">
+                            <button type="button" onClick={() => startEditLineItem(idx)} className="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
                             <button type="button" onClick={() => removeEditLineItem(idx)} className="text-red-600 hover:text-red-800 text-sm">Remove</button>
                           </td>
                         </tr>
@@ -1173,7 +1200,7 @@ export function ProcurementPage() {
               </div>
 
               <div className="flex justify-end space-x-3 pt-4">
-                <button type="button" onClick={() => { setShowEditPOModal(false); setSelectedPO(null); setEditLineItems([]) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button type="button" onClick={() => { setShowEditPOModal(false); setSelectedPO(null); setEditLineItems([]); setEditingLineItemIndex(null) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
                 <button type="button" onClick={handleSaveEditPO} disabled={editLineItems.length === 0} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Save Changes</button>
               </div>
             </div>
