@@ -58,6 +58,7 @@ interface MaterialType {
   category: 'PLAIN_ROLLS' | 'INK_SOLVENTS' | 'PACKAGING'
   pricePerKg: number | null
   pricePerPack: number | null
+  packSize?: number
   subCategory?: string
 }
 
@@ -82,6 +83,7 @@ export function SalesOrdersPage() {
   const [customerBalances, setCustomerBalances] = useState<CustomerBalance[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [materials, setMaterials] = useState<MaterialType[]>([])
+  const [allMaterials, setAllMaterials] = useState<MaterialType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -192,9 +194,10 @@ export function SalesOrdersPage() {
       
       setCustomers(Array.isArray(customersRes.data) ? customersRes.data : (customersRes.data as any)?.data || [])
       
-      const allMaterials: MaterialType[] = Array.isArray(materialsRes.data) ? materialsRes.data : (materialsRes.data as any)?.data || []
-      console.log('All materials:', allMaterials.map(m => ({ name: m.name, category: m.category })))
-      const filteredMaterials = allMaterials.filter((m: MaterialType) => 
+      const allMat: MaterialType[] = Array.isArray(materialsRes.data) ? materialsRes.data : (materialsRes.data as any)?.data || []
+      console.log('All materials:', allMat.map(m => ({ name: m.name, category: m.category })))
+      setAllMaterials(allMat)
+      const filteredMaterials = allMat.filter((m: MaterialType) => 
         m.category !== 'INK_SOLVENTS' && 
         m.category !== 'PACKAGING'
       )
@@ -249,6 +252,14 @@ export function SalesOrdersPage() {
       setPackingBagDeposit(0)
     }
   }, [packingBagForm.customerId])
+
+  useEffect(() => {
+    const pbag = allMaterials.find(m => m.code === 'PBAG')
+    if (pbag && pbag.pricePerPack && pbag.packSize) {
+      const bundlePrice = pbag.pricePerPack * pbag.packSize
+      setPackingBagForm(prev => ({ ...prev, unitPrice: bundlePrice }))
+    }
+  }, [allMaterials])
 
   const loadPayments = async (dateFrom?: string, dateTo?: string) => {
     try {
@@ -932,8 +943,8 @@ export function SalesOrdersPage() {
     const alreadyDelivered = Number(order.quantityDelivered || 0)
     const remainingQty = producedQty - alreadyDelivered
     
-    const pbagMaterial = materials.find((m: any) => m.code === 'PBAG')
-    const defaultPrice = pbagMaterial?.pricePerPack || 0
+    const pbagMaterial = allMaterials.find((m: any) => m.code === 'PBAG')
+    const defaultPrice = (pbagMaterial?.pricePerPack || 0) * (pbagMaterial?.packSize || 1)
     
     setPickupForm({
       quantityToPickup: remainingQty,
@@ -1009,7 +1020,8 @@ export function SalesOrdersPage() {
       const res = await salesOrderApi.recordPickup(
         productionOrder.id, 
         pickupForm.quantityToPickup,
-        pickupForm.packingBags > 0 ? pickupForm.packingBags : undefined
+        pickupForm.packingBags > 0 ? pickupForm.packingBags : undefined,
+        pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 ? pickupForm.packingBagPrice : undefined
       )
       if (res.error) { setShowPickupModal(false); setProductionOrder(null); setError(res.error.message); return }
       setShowPickupModal(false)
@@ -1583,21 +1595,26 @@ export function SalesOrdersPage() {
                     
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Quantity (bundles)</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={packingBagForm.quantity || ''}
-                          onChange={e => setPackingBagForm({...packingBagForm, quantity: parseInt(e.target.value) || 0})}
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Quantity (bundles)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={packingBagForm.quantity || ''}
+                            onChange={e => setPackingBagForm({...packingBagForm, quantity: parseFloat(e.target.value) || 0})}
                           className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                           required
                         />
+                        {allMaterials.find(m => m.code === 'PBAG')?.packSize && packingBagForm.quantity > 0 && (
+                          <p className="text-xs text-slate-500 mt-1">{packingBagForm.quantity} bundle{packingBagForm.quantity !== 1 ? 's' : ''} = {packingBagForm.quantity * allMaterials.find(m => m.code === 'PBAG')!.packSize!} pack{allMaterials.find(m => m.code === 'PBAG')!.packSize! > 1 ? 's' : ''}</p>
+                        )}
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Unit Price (₦)</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Price per Bundle (₦)</label>
                         <input
                           type="number"
-                          min="1"
+                          min="0"
+                          step="any"
                           value={packingBagForm.unitPrice || ''}
                           onChange={e => setPackingBagForm({...packingBagForm, unitPrice: parseFloat(e.target.value) || 0})}
                           className="w-full px-4 py-2 border border-slate-300 rounded-lg"
@@ -1611,6 +1628,11 @@ export function SalesOrdersPage() {
                         <p className="text-sm text-teal-800">
                           <strong>Total:</strong> ₦{(packingBagForm.quantity * packingBagForm.unitPrice).toLocaleString()}
                         </p>
+                        {allMaterials.find(m => m.code === 'PBAG')?.packSize && allMaterials.find(m => m.code === 'PBAG')?.pricePerPack && (
+                          <p className="text-xs text-teal-600 mt-1">
+                            {packingBagForm.quantity * allMaterials.find(m => m.code === 'PBAG')!.packSize!} pack{packingBagForm.quantity * allMaterials.find(m => m.code === 'PBAG')!.packSize! !== 1 ? 's' : ''} @ ₦{allMaterials.find(m => m.code === 'PBAG')!.pricePerPack!.toLocaleString()}/pack
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -2190,15 +2212,19 @@ export function SalesOrdersPage() {
                   <h4 className="text-sm font-medium text-slate-700 mb-3">Packing Bags (Optional)</h4>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Quantity (bundles)</label>
-                      <input
-                        type="number"
-                        value={pickupForm.packingBags || ''}
-                        onChange={e => setPickupForm({...pickupForm, packingBags: parseInt(e.target.value) || 0})}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        min="0"
+                          <label className="block text-xs font-medium text-slate-500 mb-1">Quantity (bundles)</label>
+                          <input
+                            type="number"
+                            value={pickupForm.packingBags || ''}
+                            onChange={e => setPickupForm({...pickupForm, packingBags: parseFloat(e.target.value) || 0})}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                            min="0"
+                            step="any"
                         placeholder="0"
                       />
+                      {allMaterials.find(m => m.code === 'PBAG')?.packSize && pickupForm.packingBags > 0 && (
+                        <p className="text-xs text-slate-400 mt-1">{pickupForm.packingBags} bundle{pickupForm.packingBags !== 1 ? 's' : ''} = {pickupForm.packingBags * allMaterials.find(m => m.code === 'PBAG')!.packSize!} pack{allMaterials.find(m => m.code === 'PBAG')!.packSize! > 1 ? 's' : ''}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-500 mb-1">Price per Bundle (₦)</label>

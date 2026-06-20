@@ -719,8 +719,16 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Search</label>
-            <input type="text" placeholder="Roll number..." value={filter.search} onChange={e => setFilter({ ...filter, search: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
+            <label className="block text-xs font-medium text-slate-500 mb-1">Material</label>
+            <select value={filter.materialSubCategory} onChange={e => setFilter({ ...filter, materialSubCategory: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
+              <option value="">All</option>
+              <option value="25microns">25 Microns</option>
+              <option value="27microns">27 Microns</option>
+              <option value="28microns">28 Microns</option>
+              <option value="30microns">30 Microns</option>
+              <option value="Premium">Premium</option>
+              <option value="SuPremium">SuPremium</option>
+            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
@@ -734,20 +742,12 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Material</label>
-            <select value={filter.materialSubCategory} onChange={e => setFilter({ ...filter, materialSubCategory: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
-              <option value="">All</option>
-              <option value="25microns">25 Microns</option>
-              <option value="27microns">27 Microns</option>
-              <option value="28microns">28 Microns</option>
-              <option value="30microns">30 Microns</option>
-              <option value="Premium">Premium</option>
-              <option value="SuPremium">SuPremium</option>
-            </select>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Search</label>
+            <input type="text" placeholder="Roll number..." value={filter.search} onChange={e => setFilter({ ...filter, search: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
           </div>
-          <div className="flex items-end">
-            <button onClick={() => setFilter({ search: '', status: '', materialSubCategory: '' })} className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900">Clear</button>
-            <span className="text-xs text-slate-500 ml-auto">{rolls.length} of {total} rolls</span>
+          <div className="flex items-end gap-2">
+            <button onClick={() => setFilter({ search: '', status: '', materialSubCategory: '' })} className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">Clear</button>
+            <span className="text-xs text-slate-500">{rolls.length} of {total} rolls</span>
           </div>
         </div>
       </div>

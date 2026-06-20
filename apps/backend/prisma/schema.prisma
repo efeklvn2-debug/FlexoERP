@@ -524,7 +524,7 @@ model Transaction {
   amount      Decimal? @db.Decimal(10, 2) // For PAYMENT, CORE_DEPOSIT
   notes       String?
   printedRollIds String[] @default([]) // For PICKUP - links to printed rolls
-  packingBags Int?     @default(0) // For PICKUP
+  packingBags Decimal?  @default(0) @db.Decimal(15, 2) // For PICKUP
   amountPaid  Decimal? @db.Decimal(10, 2) // For PICKUP - amount paid at pickup
   createdAt   DateTime @default(now())
 
@@ -649,7 +649,7 @@ model SalesOrder {
   paymentStatus         MTOPaymentStatus @default(PENDING_PAYMENT)
   
   // Packing Bags Tracking
-  packingBagsQuantity  Int              @default(0)
+  packingBagsQuantity  Decimal          @default(0) @db.Decimal(15, 2)
   packingBagsAmount    Decimal          @default(0) @db.Decimal(15, 2)
   
   // Status (State Machine)
@@ -756,7 +756,7 @@ model Invoice {
   coresReturned         Int              @default(0)
   
   // Packing Bags Line Items
-  packingBagsQuantity  Int              @default(0)
+  packingBagsQuantity  Decimal          @default(0) @db.Decimal(15, 2)
   packingBagsUnitPrice Decimal         @db.Decimal(15, 2)
   packingBagsSubtotal  Decimal         @db.Decimal(15, 2)
   packingBagsPaid      Decimal         @default(0) @db.Decimal(15, 2)

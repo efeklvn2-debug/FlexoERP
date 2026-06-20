@@ -225,7 +225,9 @@ export const salesOrderStatusTransitionService = {
           where: { materialId: packingBagMaterial.id },
           orderBy: { effectiveFrom: 'desc' }
         })
-        packingBagsUnitPrice = priceList?.pricePerPack ? Number(priceList.pricePerPack) : 0
+        const pricePerPack = priceList?.pricePerPack ? Number(priceList.pricePerPack) : 0
+        const packSize = packingBagMaterial.packSize || 1
+        packingBagsUnitPrice = pricePerPack * packSize
       }
       const packingBagsSubtotal = packingBagsQuantity * packingBagsUnitPrice
       
@@ -407,7 +409,7 @@ export const salesOrderStatusTransitionService = {
     const subtotal = quantityDelivered * unitPrice
     
     // Calculate packing bags subtotal
-    const packingBagsQuantity = invoice.packingBagsQuantity || 0
+    const packingBagsQuantity = Number(invoice.packingBagsQuantity) || 0
     const packingBagsUnitPrice = Number(invoice.packingBagsUnitPrice)
     const packingBagsSubtotal = packingBagsQuantity * packingBagsUnitPrice
     

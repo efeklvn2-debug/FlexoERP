@@ -569,7 +569,7 @@ export function ProcurementPage() {
                     <td className="px-6 py-4 text-sm font-medium text-blue-600 hover:text-blue-800">{po.poNumber}</td>
                     <td className="px-6 py-4 text-sm text-slate-600">{po.supplier}</td>
                     <td className="px-6 py-4 text-sm text-slate-600">{po.items?.length || 0}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600">{po.totalAmount ? `$${Number(po.totalAmount).toLocaleString()}` : '-'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600">{po.totalAmount ? `₦${Number(po.totalAmount).toLocaleString()}` : '-'}</td>
                     <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[po.status] || 'bg-slate-100'}`}>{po.status}</span></td>
                     <td className="px-6 py-4 text-sm text-slate-500">{po.expectedDate ? new Date(po.expectedDate).toLocaleDateString() : '-'}</td>
                     <td className="px-6 py-4" onClick={e => e.stopPropagation()}>
@@ -762,10 +762,10 @@ export function ProcurementPage() {
                     <div className="grid grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">
-                          {currentItem.category === 'PACKAGING' ? 'Unit Price ($/bundle)' : 
-                           currentItem.category === 'INK_SOLVENTS' ? 
-                             (materials.find(m => m.id === currentItem.materialId)?.unitOfMeasure === 'liter' ? 'Unit Price ($/liter)' : 'Unit Price ($/kg)') :
-                             'Unit Price ($/kg)'}
+                          {currentItem.category === 'PACKAGING' ? 'Unit Price (₦/bundle)' : 
+                            currentItem.category === 'INK_SOLVENTS' ? 
+                              (materials.find(m => m.id === currentItem.materialId)?.unitOfMeasure === 'liter' ? 'Unit Price (₦/liter)' : 'Unit Price (₦/kg)') :
+                              'Unit Price (₦/kg)'}
                         </label>
                         <input 
                           type="number" 
@@ -838,7 +838,7 @@ export function ProcurementPage() {
                           <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.quantity}</td>
                           <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.totalWeight.toFixed(2)}</td>
                           <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.unitPrice.toFixed(2)}</td>
-                          <td className="px-3 py-2 text-sm text-slate-900 text-right font-medium">${(item.totalWeight * item.unitPrice).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-sm text-slate-900 text-right font-medium">₦{(item.totalWeight * item.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                           <td className="px-3 py-2 text-right">
                             <button type="button" onClick={() => removeLineItem(idx)} className="text-red-600 hover:text-red-800 text-sm">Remove</button>
                           </td>
@@ -849,7 +849,7 @@ export function ProcurementPage() {
                       <tr>
                         <td colSpan={5} className="px-3 py-2 text-sm font-medium text-slate-900 text-right">Grand Total:</td>
                         <td className="px-3 py-2 text-sm font-bold text-slate-900 text-right">
-                          ${poLineItems.reduce((sum, item) => sum + (item.totalWeight * item.unitPrice), 0).toFixed(2)}
+                          ₦{poLineItems.reduce((sum, item) => sum + (item.totalWeight * item.unitPrice), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td></td>
                       </tr>
@@ -921,7 +921,7 @@ export function ProcurementPage() {
                 </div>
                 <div>
                   <span className="text-slate-500">Total Amount:</span>
-                  <span className="ml-2 text-slate-900 font-medium">${selectedPO.totalAmount ? Number(selectedPO.totalAmount).toLocaleString() : '-'}</span>
+                  <span className="ml-2 text-slate-900 font-medium">₦{selectedPO.totalAmount ? Number(selectedPO.totalAmount).toLocaleString() : '-'}</span>
                 </div>
                 {selectedPO.receivedDate && (
                   <div>
@@ -943,7 +943,7 @@ export function ProcurementPage() {
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Material</th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Weight (kg)</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">$/kg</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">₦/kg</th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Total</th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Received</th>
                   </tr>
@@ -954,7 +954,7 @@ export function ProcurementPage() {
                       <td className="px-3 py-2 text-sm text-slate-900">{item.material?.name || item.materialId}</td>
                       <td className="px-3 py-2 text-sm text-slate-600 text-right">{Number(item.totalWeight).toFixed(2)}</td>
                       <td className="px-3 py-2 text-sm text-slate-600 text-right">{Number(item.unitPrice).toFixed(2)}</td>
-                      <td className="px-3 py-2 text-sm text-slate-900 text-right font-medium">${(Number(item.totalWeight) * Number(item.unitPrice)).toFixed(2)}</td>
+                      <td className="px-3 py-2 text-sm text-slate-900 text-right font-medium">₦{(Number(item.totalWeight) * Number(item.unitPrice)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.receivedQty} rolls</td>
                     </tr>
                   ))}
@@ -1111,10 +1111,10 @@ export function ProcurementPage() {
                     <div className="grid grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">
-                          {editCurrentItem.category === 'PACKAGING' ? 'Unit Price ($/bundle)' : 
-                           editCurrentItem.category === 'INK_SOLVENTS' ? 
-                             (materials.find(m => m.id === editCurrentItem.materialId)?.unitOfMeasure === 'liter' ? 'Unit Price ($/liter)' : 'Unit Price ($/kg)') :
-                             'Unit Price ($/kg)'}
+                          {editCurrentItem.category === 'PACKAGING' ? 'Unit Price (₦/bundle)' : 
+                            editCurrentItem.category === 'INK_SOLVENTS' ? 
+                              (materials.find(m => m.id === editCurrentItem.materialId)?.unitOfMeasure === 'liter' ? 'Unit Price (₦/liter)' : 'Unit Price (₦/kg)') :
+                              'Unit Price (₦/kg)'}
                         </label>
                         <input 
                           type="number" 
@@ -1187,7 +1187,7 @@ export function ProcurementPage() {
                           <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.quantity}</td>
                           <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.totalWeight.toFixed(2)}</td>
                           <td className="px-3 py-2 text-sm text-slate-600 text-right">{item.unitPrice.toFixed(2)}</td>
-                          <td className="px-3 py-2 text-sm text-slate-900 text-right font-medium">${(item.totalWeight * item.unitPrice).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-sm text-slate-900 text-right font-medium">₦{(item.totalWeight * item.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                           <td className="px-3 py-2 text-right whitespace-nowrap space-x-2">
                             <button type="button" onClick={() => startEditLineItem(idx)} className="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
                             <button type="button" onClick={() => removeEditLineItem(idx)} className="text-red-600 hover:text-red-800 text-sm">Remove</button>

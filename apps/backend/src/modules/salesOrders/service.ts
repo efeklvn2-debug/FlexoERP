@@ -259,7 +259,7 @@ export const salesOrderService = {
     return updated
   },
 
-  async recordPickup(id: string, userId?: string, quantityPickedUp?: number, packingBags?: number) {
+  async recordPickup(id: string, userId?: string, quantityPickedUp?: number, packingBags?: number, packingBagPrice?: number) {
     const order = await salesOrderRepository.findById(id)
     
     if (!order) {
@@ -375,13 +375,17 @@ export const salesOrderService = {
         ? await tx.material.findFirst({ where: { code: 'PBAG' } })
         : null
       
-      let bagPricePerUnit = 0
+      let bagCostPerUnit = 0
       if (packingBagMaterial) {
-        bagPricePerUnit = packingBagMaterial.costPrice ? Number(packingBagMaterial.costPrice) : 0
+        bagCostPerUnit = packingBagMaterial.costPrice ? Number(packingBagMaterial.costPrice) : 0
       }
       
-      const bagTotalAmount = packingBags && packingBags > 0 
-        ? packingBags * bagPricePerUnit 
+      const bagCostAmount = packingBags && packingBags > 0 
+        ? packingBags * bagCostPerUnit 
+        : 0
+      const bagSellingPrice = (packingBagPrice && packingBagPrice > 0) ? packingBagPrice : bagCostPerUnit
+      const bagRevenueAmount = packingBags && packingBags > 0 
+        ? packingBags * bagSellingPrice 
         : 0
       
       const updated = await tx.salesOrder.update({
@@ -393,11 +397,11 @@ export const salesOrderService = {
           packingBagsQuantity: packingBags && packingBags > 0 
             ? { increment: packingBags }
             : undefined,
-          packingBagsAmount: bagTotalAmount > 0 
-            ? { increment: bagTotalAmount }
+          packingBagsAmount: bagCostAmount > 0 
+            ? { increment: bagCostAmount }
             : undefined,
-          totalAmount: bagTotalAmount > 0 
-            ? { increment: bagTotalAmount }
+          totalAmount: bagRevenueAmount > 0 
+            ? { increment: bagRevenueAmount }
             : undefined
         }
       })
@@ -422,8 +426,8 @@ export const salesOrderService = {
               sourceId: order.id,
               reference: order.orderNumber,
               lines: [
-                { accountId: cogsId, debit: bagTotalAmount, credit: 0, memo: 'COGS - Packing Bags' },
-                { accountId: packingBagInventoryId, debit: 0, credit: bagTotalAmount, memo: 'Packing Bag Inventory' }
+                { accountId: cogsId, debit: bagCostAmount, credit: 0, memo: 'COGS - Packing Bags' },
+                { accountId: packingBagInventoryId, debit: 0, credit: bagCostAmount, memo: 'Packing Bag Inventory' }
               ]
             }, tx)
           } catch (financeErr) {
@@ -442,7 +446,7 @@ export const salesOrderService = {
         const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
 
         const deliveryValue = quantity * Number(order.unitPrice)
-        const bagValue = bagTotalAmount
+        const bagValue = bagRevenueAmount
         const totalRevenue = deliveryValue + bagValue
 
         const { exclusive: deliveryExclusive, vat: deliveryVat } = decomposeInclusive(deliveryValue, vatRate)
@@ -527,7 +531,9 @@ export const salesOrderService = {
         where: { materialId: packingBagsMaterial.id },
         orderBy: { effectiveFrom: 'desc' }
       })
-      packingBagsUnitPrice = priceList?.pricePerPack ? Number(priceList.pricePerPack) : 0
+      const pricePerPack = priceList?.pricePerPack ? Number(priceList.pricePerPack) : 0
+      const packSize = packingBagsMaterial.packSize || 1
+      packingBagsUnitPrice = pricePerPack * packSize
     }
     const packingBagsInclusive = packingBagsQuantity * packingBagsUnitPrice
     
@@ -579,10 +585,11 @@ export const salesOrderService = {
             previousPayments: new Prisma.Decimal(String(previousPayments)),
             balanceDue: new Prisma.Decimal(String(balanceDue)),
             coresReturned: input.coresReturned || 0,
-            packingBagsQuantity,
+            packingBagsQuantity: new Prisma.Decimal(String(packingBagsQuantity)),
             packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPrice)),
             packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotalExcl)),
             packingBagsPaid: new Prisma.Decimal('0'),
+            amountPaid: new Prisma.Decimal(String(depositApplied + previousPayments)),
             status: invoiceStatus as any,
             issuedAt: new Date(),
             ...(invoiceStatus === 'PAID' ? { paidAt: new Date() } : {})
@@ -794,7 +801,7 @@ export const salesOrderService = {
             previousPayments: new Prisma.Decimal('0'),
             balanceDue: new Prisma.Decimal('0'),
             coresReturned: 0,
-            packingBagsQuantity: input.quantity,
+            packingBagsQuantity: new Prisma.Decimal(String(input.quantity)),
             packingBagsUnitPrice: new Prisma.Decimal(String(input.unitPrice)),
             packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotal)),
             packingBagsPaid: new Prisma.Decimal(String(cashPaymentAmount)),

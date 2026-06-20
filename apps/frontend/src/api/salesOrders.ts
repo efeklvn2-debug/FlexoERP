@@ -213,7 +213,7 @@ export const salesOrderApi = {
   }) => api.patch<{ order: SalesOrder; productionJob: any }>(`/sales-orders/orders/${id}/start-production`, data),
   cancelOrder: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/cancel`, {}),
   markReady: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/ready`, {}),
-  recordPickup: (id: string, quantityPickedUp?: number, packingBags?: number) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { quantityPickedUp, packingBags }),
+  recordPickup: (id: string, quantityPickedUp?: number, packingBags?: number, packingBagPrice?: number) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { quantityPickedUp, packingBags, packingBagPrice }),
 
   // Payments
   recordPayment: (data: {

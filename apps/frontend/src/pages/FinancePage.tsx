@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
-import { financeApi, Account, JournalEntry, AccountBalance, FinanceDashboard, VatSummary, ProfitSummary, DeferredCogsSummary } from '../api/finance'
+import { financeApi, Account, JournalEntry, AccountBalance, FinanceDashboard, VatSummary, ProfitSummary, DeferredCogsSummary, GeneralLedger } from '../api/finance'
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-NG', {
@@ -38,6 +38,9 @@ export function FinancePage() {
   const [error, setError] = useState<string | null>(null)
   const [reversing, setReversing] = useState<string | null>(null)
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null)
+  const [ledgerModal, setLedgerModal] = useState<{ accountId: string; code: string; name: string } | null>(null)
+  const [ledgerData, setLedgerData] = useState<GeneralLedger | null>(null)
+  const [loadingLedger, setLoadingLedger] = useState(false)
 
   const initDateFrom = () => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0] }
   const initDateTo = () => new Date().toISOString().split('T')[0]
@@ -108,6 +111,19 @@ export function FinancePage() {
     const res = await financeApi.getAllBalances()
     if (res.data) setBalances((res.data as any).data || [])
     else setError(res.error?.message || 'Failed to load balances')
+  }
+
+  const handleViewLedger = async (accountId: string, code: string, name: string) => {
+    setLedgerModal({ accountId, code, name })
+    setLedgerData(null)
+    setLoadingLedger(true)
+    const res = await financeApi.getGeneralLedger(accountId)
+    if ((res.data as any)?.data) {
+      const data = (res.data as any).data
+      data.transactions = [...data.transactions].reverse()
+      setLedgerData(data)
+    } else setError(res.error?.message || 'Failed to load ledger')
+    setLoadingLedger(false)
   }
 
   const loadVat = async () => {
@@ -935,7 +951,7 @@ export function FinancePage() {
                         </tr>
                       ) : balances.map(balance => (
                         <tr key={balance.accountId} className="hover:bg-slate-50">
-                          <td className="px-6 py-4 text-sm font-mono font-medium text-slate-900">{balance.accountCode}</td>
+                          <td className="px-6 py-4 text-sm font-mono font-medium text-slate-900 cursor-pointer hover:text-blue-600" onClick={() => handleViewLedger(balance.accountId, balance.accountCode, balance.accountName)}>{balance.accountCode}</td>
                           <td className="px-6 py-4 text-sm text-slate-900">{balance.accountName}</td>
                           <td className="px-6 py-4">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${accountTypeColors[balance.accountType] || 'bg-gray-100 text-gray-800'}`}>
@@ -1306,6 +1322,76 @@ export function FinancePage() {
           </div>
         </div>
       )}
+
+      {/* Ledger Modal */}
+      {ledgerModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setLedgerModal(null)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">{ledgerModal.code} - {ledgerModal.name}</h2>
+                <p className="text-sm text-slate-500">General Ledger</p>
+              </div>
+              <button onClick={() => setLedgerModal(null)} className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+            </div>
+
+            {loadingLedger ? (
+              <div className="text-center py-12 text-slate-500">Loading...</div>
+            ) : ledgerData ? (
+              <>
+                <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <span className="text-slate-500">Opening Balance</span>
+                    <p className="text-lg font-bold text-slate-900">{formatCurrency(ledgerData.openingBalance)}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <span className="text-slate-500">Closing Balance</span>
+                    <p className={`text-lg font-bold ${ledgerData.closingBalance >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {formatCurrency(ledgerData.closingBalance)}
+                    </p>
+                  </div>
+                </div>
+
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Entry #</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Description</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Reference</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Debit</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Credit</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-slate-500 uppercase">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {ledgerData.transactions.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-500">No transactions found</td>
+                      </tr>
+                    ) : ledgerData.transactions.map((tx, i) => (
+                      <tr key={i} className="hover:bg-slate-50">
+                        <td className="px-4 py-2 text-sm text-slate-600">{formatDate(tx.date)}</td>
+                        <td className="px-4 py-2 text-sm font-mono text-slate-900">{tx.entryNumber}</td>
+                        <td className="px-4 py-2 text-sm text-slate-900">{tx.description}</td>
+                        <td className="px-4 py-2 text-sm text-slate-500">{tx.reference || '-'}</td>
+                        <td className="px-4 py-2 text-sm text-right text-slate-900">{tx.debit > 0 ? formatCurrency(tx.debit) : '-'}</td>
+                        <td className="px-4 py-2 text-sm text-right text-slate-900">{tx.credit > 0 ? formatCurrency(tx.credit) : '-'}</td>
+                        <td className={`px-4 py-2 text-sm text-right font-medium ${tx.balance >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                          {formatCurrency(tx.balance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : (
+              <div className="text-center py-12 text-slate-500">Failed to load ledger data</div>
+            )}
+          </div>
+        </div>
+      )}
+
     </Layout>
   )
 }

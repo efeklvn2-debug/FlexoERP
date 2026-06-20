@@ -562,7 +562,7 @@ export const invoiceRepository = {
     previousPayments: Prisma.Decimal | number
     balanceDue: Prisma.Decimal | number
     coresReturned?: number
-    packingBagsQuantity?: number
+    packingBagsQuantity?: Prisma.Decimal | number
     packingBagsUnitPrice?: number
     packingBagsSubtotal?: number
     packingBagsPaid?: number
@@ -581,7 +581,7 @@ export const invoiceRepository = {
         previousPayments: new Prisma.Decimal(String(data.previousPayments)),
         balanceDue: new Prisma.Decimal(String(data.balanceDue)),
         coresReturned: data.coresReturned || 0,
-        packingBagsQuantity: data.packingBagsQuantity || 0,
+        packingBagsQuantity: data.packingBagsQuantity ? new Prisma.Decimal(String(data.packingBagsQuantity)) : undefined,
         packingBagsUnitPrice: new Prisma.Decimal(String(data.packingBagsUnitPrice || 0)),
         packingBagsSubtotal: new Prisma.Decimal(String(data.packingBagsSubtotal || 0)),
         packingBagsPaid: new Prisma.Decimal(String(data.packingBagsPaid || 0)),

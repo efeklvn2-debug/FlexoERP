@@ -102,8 +102,8 @@ export const salesOrderController = {
   async recordPickup(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const { quantityPickedUp, packingBags } = req.body
-      const order = await salesOrderService.recordPickup(id, (req as any).user?.id, quantityPickedUp, packingBags)
+      const { quantityPickedUp, packingBags, packingBagPrice } = req.body
+      const order = await salesOrderService.recordPickup(id, (req as any).user?.id, quantityPickedUp, packingBags, packingBagPrice)
       res.json({ data: order })
     } catch (error: any) {
       logger.error(error, 'Error recording pickup')
