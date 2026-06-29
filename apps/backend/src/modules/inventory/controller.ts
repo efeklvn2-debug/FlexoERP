@@ -6,6 +6,15 @@ import { AuthenticatedRequest } from '../../middleware/auth'
 import { AppError } from '../../middleware/errorHandler'
 
 export const inventoryController = {
+  async getSubCategories(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await inventoryService.getSubCategories()
+      res.json({ data: result })
+    } catch (error) {
+      next(error)
+    }
+  },
+
   async getAllMaterials(req: Request, res: Response, next: NextFunction) {
     try {
       const includeInactive = req.query.includeInactive === 'true'

@@ -105,6 +105,10 @@ export const inventoryApi = {
     return api.get<StockMovement[]>(`/inventory/initial-stock-movements?limit=${limit}`)
   },
 
+  getSubCategories: async () => {
+    return api.get<Record<string, string[]>>('/inventory/materials/sub-categories')
+  },
+
   adjustStock: async (materialId: string, newQuantity: number, reason: string) => {
     return api.patch<Material>(`/inventory/materials/${materialId}/adjust-stock`, { newQuantity, reason })
   }

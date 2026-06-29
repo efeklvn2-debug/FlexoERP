@@ -3,7 +3,6 @@ import { api } from './client'
 export interface ConsumptionRates {
   coreWeight: number
   inkConsumptionRate: number
-  inkCostPerLiter: number
   ipaConsumptionRate: number
   butanolConsumptionRate: number
   coreDepositValue: number
@@ -83,5 +82,26 @@ export const settingsApi = {
 
   updateInvoiceSettings: async (data: InvoiceSettings) => {
     return api.patch<InvoiceSettings>('/settings/invoice', data)
+  },
+
+  // Ink Colors
+  getInkColors: async (includeInactive = false) => {
+    return api.get<any[]>(`/settings/ink-colors?includeInactive=${includeInactive}`)
+  },
+
+  createInkColor: async (data: { name: string; mapping: string }) => {
+    return api.post<any>('/settings/ink-colors', data)
+  },
+
+  updateInkColor: async (id: string, data: { name?: string; mapping?: string }) => {
+    return api.put<any>(`/settings/ink-colors/${id}`, data)
+  },
+
+  archiveInkColor: async (id: string) => {
+    return api.patch<any>(`/settings/ink-colors/${id}/archive`, {})
+  },
+
+  restoreInkColor: async (id: string) => {
+    return api.patch<any>(`/settings/ink-colors/${id}/restore`, {})
   }
 }

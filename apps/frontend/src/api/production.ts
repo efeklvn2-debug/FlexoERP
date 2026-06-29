@@ -68,6 +68,7 @@ export interface PrintedRollDisplay {
   parentRolls?: string[]
   parentRollContributions?: ParentRollContribution[]
   pickedUpAt?: string
+  archivedAt?: string
   createdAt: string
 }
 
@@ -111,9 +112,10 @@ export const productionApi = {
     return api.get<ParentRoll[]>(`/production/rolls${query}`)
   },
 
-  getPrintedRolls: async (filters?: { status?: string }) => {
+  getPrintedRolls: async (status?: string, includeArchived?: boolean) => {
     const params = new URLSearchParams()
-    if (filters?.status) params.append('status', filters.status)
+    if (status) params.append('status', status)
+    if (includeArchived) params.append('includeArchived', 'true')
     const query = params.toString() ? `?${params.toString()}` : ''
     return api.get<PrintedRollDisplay[]>(`/production/printed-rolls${query}`)
   },
@@ -156,5 +158,9 @@ export const productionApi = {
 
   customerReturnRoll: async (id: string, data: { qty: number; reason: string; condition: string; refundMethod?: string }) => {
     return api.post(`/production/printed-roll/${id}/customer-return`, data)
+  },
+
+  archiveOldPrintedRolls: async () => {
+    return api.post<{ archived: number }>('/production/printed-rolls/archive', {})
   }
 }

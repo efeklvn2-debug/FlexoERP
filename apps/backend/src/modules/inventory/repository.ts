@@ -69,6 +69,7 @@ export const inventoryRepository = {
     code: string
     name: string
     category: MaterialCategory
+    subCategory?: string
     unitOfMeasure?: string
     minStock?: number
     costPrice?: number
@@ -78,6 +79,7 @@ export const inventoryRepository = {
         code: data.code,
         name: data.name,
         category: data.category,
+        subCategory: data.subCategory,
         unitOfMeasure: data.unitOfMeasure,
         minStock: data.minStock,
         costPrice: data.costPrice

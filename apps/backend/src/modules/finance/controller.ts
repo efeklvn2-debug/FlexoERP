@@ -206,5 +206,23 @@ export const financeController = {
       logger.error(error, 'Error reversing journal entry')
       res.status(error.statusCode || 500).json({ error: error.message || 'Failed to reverse journal entry' })
     }
+  },
+
+  async postOpeningBalances(req: Request, res: Response) {
+    try {
+      const { date, lines } = req.body
+      const userId = (req as any).user?.id
+
+      if (!lines || !Array.isArray(lines) || lines.length === 0) {
+        res.status(400).json({ error: 'Lines array is required' })
+        return
+      }
+
+      const result = await financeService.postOpeningBalances({ date, lines }, userId)
+      res.status(201).json({ data: result })
+    } catch (error: any) {
+      logger.error(error, 'Error posting opening balances')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to post opening balances' })
+    }
   }
 }

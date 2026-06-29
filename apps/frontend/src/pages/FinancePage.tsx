@@ -20,7 +20,7 @@ function formatDate(dateStr: string): string {
   })
 }
 
-type TabType = 'dashboard' | 'accounts' | 'journal' | 'balances' | 'vat' | 'profit' | 'deferred-cogs' | 'expenses' | 'income'
+type TabType = 'dashboard' | 'accounts' | 'journal' | 'balances' | 'vat' | 'profit' | 'deferred-cogs' | 'expenses' | 'income' | 'opening-balances'
 
 type ExpensePeriod = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-month' | 'last-month' | 'last-3-months' | ''
 
@@ -41,6 +41,11 @@ export function FinancePage() {
   const [ledgerModal, setLedgerModal] = useState<{ accountId: string; code: string; name: string } | null>(null)
   const [ledgerData, setLedgerData] = useState<GeneralLedger | null>(null)
   const [loadingLedger, setLoadingLedger] = useState(false)
+  const [openingBalances, setOpeningBalances] = useState<{ accountId: string; code: string; name: string; type: string; amount: number; direction: 'debit' | 'credit' }[]>([])
+  const [postingOpening, setPostingOpening] = useState(false)
+  const [openingDate, setOpeningDate] = useState(new Date().toISOString().split('T')[0])
+  const [seedMessage, setSeedMessage] = useState<string | null>(null)
+  const [seeding, setSeeding] = useState(false)
 
   const initDateFrom = () => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0] }
   const initDateTo = () => new Date().toISOString().split('T')[0]
@@ -50,7 +55,7 @@ export function FinancePage() {
 
   const [expenses, setExpenses] = useState<JournalEntry[]>([])
   const [showExpenseModal, setShowExpenseModal] = useState(false)
-  const [expensePeriod, setExpensePeriod] = useState<ExpensePeriod>('this-month')
+  const [expensePeriod, setExpensePeriod] = useState<ExpensePeriod>('')
   const [expenseDateFrom, setExpenseDateFrom] = useState('')
   const [expenseDateTo, setExpenseDateTo] = useState('')
   const [savingExpense, setSavingExpense] = useState(false)
@@ -66,7 +71,7 @@ export function FinancePage() {
 
   const [incomes, setIncomes] = useState<JournalEntry[]>([])
   const [showIncomeModal, setShowIncomeModal] = useState(false)
-  const [incomePeriod, setIncomePeriod] = useState<ExpensePeriod>('this-month')
+  const [incomePeriod, setIncomePeriod] = useState<ExpensePeriod>('')
   const [incomeDateFrom, setIncomeDateFrom] = useState('')
   const [incomeDateTo, setIncomeDateTo] = useState('')
   const [savingIncome, setSavingIncome] = useState(false)
@@ -425,7 +430,21 @@ export function FinancePage() {
       balances: loadBalances,
       vat: loadVat,
       profit: loadProfit,
-      'deferred-cogs': loadDeferredCogs
+      'deferred-cogs': loadDeferredCogs,
+      'opening-balances': async () => {
+        const res = await financeApi.getAccounts()
+        const accs = (res.data as any)?.data || []
+        setAccounts(accs)
+        const bsAccounts = accs.filter((a: Account) => a.type === 'ASSET' || a.type === 'LIABILITY' || a.type === 'EQUITY')
+        setOpeningBalances(bsAccounts.map((a: Account) => ({
+          accountId: a.id,
+          code: a.code,
+          name: a.name,
+          type: a.type,
+          amount: 0,
+          direction: a.type === 'ASSET' ? 'debit' : 'credit'
+        })))
+      }
     }
     
     loaders[activeTab]().finally(() => setLoading(false))
@@ -445,6 +464,7 @@ export function FinancePage() {
     { id: 'expenses', label: 'Expenses' },
     { id: 'income', label: 'Income' },
     { id: 'accounts', label: 'Chart of Accounts' },
+    { id: 'opening-balances', label: 'Opening Balances' },
     { id: 'journal', label: 'Journal' },
     { id: 'balances', label: 'Balances' },
     { id: 'vat', label: 'VAT' },
@@ -629,7 +649,7 @@ export function FinancePage() {
                       </div>
                       {(expensePeriod || expenseDateFrom || expenseDateTo) && (
                         <button onClick={clearExpenseFilters}
-                          className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                          className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
                           Clear
                         </button>
                       )}
@@ -720,7 +740,7 @@ export function FinancePage() {
                       </div>
                       {(incomePeriod || incomeDateFrom || incomeDateTo) && (
                         <button onClick={clearIncomeFilters}
-                          className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                          className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
                           Clear
                         </button>
                       )}
@@ -818,6 +838,198 @@ export function FinancePage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {/* Opening Balances Tab */}
+            {activeTab === 'opening-balances' && (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 border-b border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="font-semibold">Opening Balances</h2>
+                      <p className="text-xs text-slate-500 mt-1">Set starting balances for balance sheet accounts before going live</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {seedMessage && (
+                        <span className="text-sm text-green-600 font-medium">{seedMessage}</span>
+                      )}
+                      <button
+                        onClick={async () => {
+                          setSeeding(true)
+                          setSeedMessage(null)
+                          const res = await financeApi.seedAccounts()
+                          if (res.data) {
+                            const msg = (res.data as any)?.data?.message || 'Chart of accounts seeded'
+                            setSeedMessage(msg)
+                            const accountsRes = await financeApi.getAccounts()
+                            const accs = (accountsRes.data as any)?.data || []
+                            setAccounts(accs)
+                            const bsAccounts = accs.filter((a: Account) => a.type === 'ASSET' || a.type === 'LIABILITY' || a.type === 'EQUITY')
+                            setOpeningBalances(bsAccounts.map((a: Account) => ({
+                              accountId: a.id,
+                              code: a.code,
+                              name: a.name,
+                              type: a.type,
+                              amount: 0,
+                              direction: a.type === 'ASSET' ? 'debit' : 'credit'
+                            })))
+                          }
+                          setSeeding(false)
+                        }}
+                        disabled={seeding}
+                        className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+                      >
+                        {seeding ? 'Seeding...' : 'Seed Accounts'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-slate-600">As of Date:</label>
+                      <DateInput value={openingDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOpeningDate(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm" />
+                    </div>
+                    <div className="text-xs text-slate-400 italic">
+                      Opening Balance Equity (3000) holds the difference when debits ≠ credits. This is normal for new businesses.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Code</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Account</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
+                        <th className="px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase">Direction</th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount (₦)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {openingBalances.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-8 text-center text-slate-500">No balance sheet accounts found. Click "Seed Accounts" to create the default chart of accounts.</td>
+                        </tr>
+                      ) : openingBalances.map((item, idx) => (
+                        <tr key={item.accountId} className="hover:bg-slate-50">
+                          <td className="px-6 py-3 text-sm font-mono font-medium text-slate-900">{item.code}</td>
+                          <td className="px-6 py-3 text-sm text-slate-900">{item.name}</td>
+                          <td className="px-6 py-3">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${accountTypeColors[item.type] || ''}`}>
+                              {item.type}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 text-sm text-center">
+                            <span className={`font-medium ${item.direction === 'debit' ? 'text-green-700' : 'text-red-700'}`}>
+                              {item.direction === 'debit' ? 'Dr' : 'Cr'}
+                            </span>
+                            {item.code === '3000' && (
+                              <span className="ml-1.5 text-xs text-slate-400 italic cursor-help" title="This account holds the difference when your starting debits ≠ credits. It's normal for new businesses.">(auto)</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-3">
+                            <input
+                              type="number"
+                              min="0"
+                              step="1000"
+                              value={item.amount || ''}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0
+                                setOpeningBalances(items =>
+                                  items.map(i =>
+                                    i.accountId === item.accountId ? { ...i, amount: val } : i
+                                  )
+                                )
+                              }}
+                              className={`w-40 px-3 py-1.5 text-sm text-right border rounded-lg ${item.code === '3000' ? 'bg-slate-50 border-slate-200 text-slate-400' : 'border-slate-300'}`}
+                              disabled={item.code === '3000'}
+                              placeholder="0"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-slate-50">
+                      {(openingBalances.length > 0) && (() => {
+                        const totalDebits = openingBalances.filter(i => i.direction === 'debit').reduce((s, i) => s + i.amount, 0)
+                        const totalCredits = openingBalances.filter(i => i.direction === 'credit').reduce((s, i) => s + i.amount, 0)
+                        const diff = totalDebits - totalCredits
+                        return (
+                          <>
+                            <tr>
+                              <td colSpan={4} className="px-6 py-3 text-sm font-bold text-slate-900 text-right">Total Debits (Dr)</td>
+                              <td className="px-6 py-3 text-sm font-bold text-green-700 text-right">{formatCurrency(totalDebits)}</td>
+                            </tr>
+                            <tr>
+                              <td colSpan={4} className="px-6 py-3 text-sm font-bold text-slate-900 text-right">Total Credits (Cr)</td>
+                              <td className="px-6 py-3 text-sm font-bold text-red-700 text-right">{formatCurrency(totalCredits)}</td>
+                            </tr>
+                            {Math.abs(diff) > 0.01 && (
+                              <tr>
+                                <td colSpan={4} className="px-6 py-3 text-sm text-right">
+                                  <span className="text-amber-700 font-medium">
+                                    Your total debits ({formatCurrency(totalDebits)}) don't match credits ({formatCurrency(totalCredits)}).
+                                    Difference: <strong>{formatCurrency(Math.abs(diff))}</strong> will post to{' '}
+                                    {diff > 0 ? 'credit' : 'debit'} of Opening Balance Equity (3000).
+                                  </span>
+                                </td>
+                                <td className="px-6 py-3 text-sm font-bold text-amber-700 text-right">{formatCurrency(Math.abs(diff))}</td>
+                              </tr>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="px-6 py-3 bg-amber-50 border-t border-amber-200">
+                  <p className="text-xs text-amber-800">
+                    <strong>How opening balances work:</strong> The amount you enter is <strong>added</strong>
+                    to existing journal entries on the account — it does not replace the current balance.
+                    For example, if Cash has &#x2212;₦2,012,108 from prior transactions and you enter
+                    ₦2,022,108, the Cash balance becomes ₦10,000.
+                    Check the <strong>Finance &gt; Balances</strong> tab after posting.
+                    The formula is: <code className="bg-amber-100 px-1 rounded">balance = openingBalance + totalDebits &#x2212; totalCredits</code>.
+                  </p>
+                </div>
+                <div className="px-6 py-4 border-t border-slate-200 flex justify-end">
+                  <button
+                    onClick={async () => {
+                      const itemsToPost = openingBalances.filter(i => i.amount > 0 && i.code !== '3000')
+                      if (itemsToPost.length === 0) {
+                        setError('Enter at least one amount to post')
+                        return
+                      }
+                      setPostingOpening(true)
+                      setError(null)
+                      try {
+                        const res = await financeApi.postOpeningBalances({
+                          date: openingDate,
+                          lines: itemsToPost.map(i => ({ accountId: i.accountId, amount: i.amount }))
+                        })
+                        if (res.data) {
+                          const result = (res.data as any)?.data
+                          const msg = result?.unbalancedAmount > 0
+                            ? `Posted ${result.accountsUpdated} balances. ₦${Number(result.unbalancedAmount).toLocaleString()} posted to Opening Balance Equity.`
+                            : `Posted ${result.accountsUpdated} balances. Books are balanced.`
+                          setSeedMessage(msg)
+                          setOpeningBalances(items => items.map(i => ({ ...i, amount: 0 })))
+                        } else {
+                          setError(res.error?.message || 'Failed to post opening balances')
+                        }
+                      } catch (err: any) {
+                        setError(err.message || 'Failed to post opening balances')
+                      }
+                      setPostingOpening(false)
+                    }}
+                    disabled={postingOpening || openingBalances.filter(i => i.amount > 0 && i.code !== '3000').length === 0}
+                    className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 font-medium"
+                  >
+                    {postingOpening ? 'Posting...' : 'Post Opening Entry'}
+                  </button>
                 </div>
               </div>
             )}
@@ -1257,35 +1469,36 @@ export function FinancePage() {
       {selectedEntry && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedEntry(null)}>
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-              <div>
+            <div className="px-6 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
+              <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-slate-900">{selectedEntry.entryNumber}</h2>
                 <p className="text-sm text-slate-500">{selectedEntry.description}</p>
               </div>
-              <button onClick={() => setSelectedEntry(null)} className="p-1 hover:bg-slate-100 rounded">
+              <button onClick={() => setSelectedEntry(null)} className="p-1 hover:bg-slate-100 rounded shrink-0">
                 <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
             <div className="px-6 py-4 space-y-3">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-sm">
                 <div><span className="text-slate-500">Date:</span> <span className="font-medium">{formatDate(selectedEntry.date)}</span></div>
                 <div><span className="text-slate-500">Source:</span> <span className="font-medium">{selectedEntry.sourceModule}</span></div>
                 {selectedEntry.reference && (
                   <div><span className="text-slate-500">Reference:</span> <span className="font-medium">{selectedEntry.reference}</span></div>
                 )}
                 {selectedEntry.sourceId && (
-                  <div><span className="text-slate-500">Source ID:</span> <span className="font-medium font-mono text-xs">{selectedEntry.sourceId}</span></div>
+                  <div><span className="text-slate-500">Source ID:</span> <span className="font-mono text-xs" title={selectedEntry.sourceId}>{selectedEntry.sourceId.slice(0, 8)}…</span></div>
                 )}
+                <div><span className="text-slate-500">Posted:</span> <span className="font-medium">{formatDate(selectedEntry.postedAt)}</span></div>
               </div>
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase">Account</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase">Debit</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase">Credit</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase">Memo</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase w-1/2">Account</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase w-1/6">Debit</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase w-1/6">Credit</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase w-1/6">Memo</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -1301,7 +1514,7 @@ export function FinancePage() {
                       <td className="px-3 py-2 text-right font-mono text-red-700">
                         {Number(line.credit) > 0 ? formatCurrency(Number(line.credit)) : ''}
                       </td>
-                      <td className="px-3 py-2 text-slate-500 text-xs">{line.memo || ''}</td>
+                      <td className="px-3 py-2 text-slate-500 text-xs truncate max-w-[120px]" title={line.memo || ''}>{line.memo || ''}</td>
                     </tr>
                   ))}
                 </tbody>

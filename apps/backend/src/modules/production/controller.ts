@@ -27,12 +27,22 @@ export const productionController = {
 
   async getPrintedRolls(req: Request, res: Response) {
     try {
-      const { status } = req.query
-      const rolls = await productionService.getPrintedRolls(status as string)
+      const { status, includeArchived } = req.query
+      const rolls = await productionService.getPrintedRolls(status as string, includeArchived === 'true')
       res.json({ data: rolls })
     } catch (error) {
       logger.error(error, 'Error fetching printed rolls')
       res.status(500).json({ error: 'Failed to fetch printed rolls' })
+    }
+  },
+
+  async archiveOldPrintedRolls(req: Request, res: Response) {
+    try {
+      const result = await productionService.archiveOldPrintedRolls((req as any).user?.id)
+      res.json(result)
+    } catch (error: any) {
+      logger.error(error, 'Error archiving printed rolls')
+      res.status(500).json({ error: error.message || 'Failed to archive printed rolls' })
     }
   },
 

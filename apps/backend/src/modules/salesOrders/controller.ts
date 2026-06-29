@@ -185,6 +185,17 @@ export const salesOrderController = {
     }
   },
 
+  async getCustomerTransactions(req: Request, res: Response) {
+    try {
+      const { customerId } = req.params
+      const transactions = await salesOrderService.getCustomerTransactions(customerId)
+      res.json({ data: transactions })
+    } catch (error: any) {
+      logger.error(error, 'Error fetching customer transactions')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+    }
+  },
+
   async adjustDeposit(req: Request, res: Response) {
     try {
       const { customerId } = req.params

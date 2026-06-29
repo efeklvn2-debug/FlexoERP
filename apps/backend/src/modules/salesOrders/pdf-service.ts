@@ -148,6 +148,23 @@ export async function generateInvoicePdf(invoiceId: string): Promise<Buffer> {
     content.push({ text: `Customer Deposit: ${formatNaira(depositHeld)}`, alignment: 'center', fontSize: 8, bold: true, color: '#1d4ed8', margin: [0, 0, 0, 2] })
   }
 
+  if (invoice.status === 'PAID') {
+    content.push({ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 260, y2: 0, lineWidth: 0.5 }], margin: [0, 4, 0, 4] })
+    content.push({
+      alignment: 'center',
+      columns: [
+        { text: '', width: '*', fontSize: 8 },
+        { text: '✓ PAID', color: '#16a34a', bold: true, fontSize: 10, alignment: 'center', width: 80 },
+        { text: '', width: '*', fontSize: 8 }
+      ],
+      margin: [0, 2, 0, 2]
+    })
+    if (invoice.paidAt) {
+      const paidDateStr = new Date(invoice.paidAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      content.push({ text: `Paid on: ${paidDateStr}`, alignment: 'center', fontSize: 7, color: '#16a34a', margin: [0, 0, 0, 2] })
+    }
+  }
+
   content.push({ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 260, y2: 0, lineWidth: 0.5 }], margin: [0, 4, 0, 4] })
   content.push({ text: footerText, alignment: 'center', fontSize: 7, margin: [0, 4, 0, 0] })
 
@@ -155,7 +172,18 @@ export async function generateInvoicePdf(invoiceId: string): Promise<Buffer> {
     pageSize: { width: 280, height: 'auto' },
     pageMargins: [10, 10, 10, 10],
     defaultStyle: { font: 'Roboto', fontSize: 8, color: '#000000' },
-    content
+    content,
+    ...(invoice.status === 'PAID' ? {
+      watermark: {
+        text: 'PAID',
+        color: '#16a34a',
+        opacity: 0.2,
+        bold: true,
+        font: 'Roboto',
+        fontSize: 60,
+        angle: -30
+      }
+    } : {})
   }
 
   const outputDoc = pdfmake.createPdf(docDefinition)

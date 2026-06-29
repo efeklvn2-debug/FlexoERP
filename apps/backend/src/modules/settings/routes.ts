@@ -13,3 +13,10 @@ settingsRouter.get('/overhead-rate-history', authenticate, loadUser, settingsCon
 settingsRouter.patch('/vat', authenticate, loadUser, settingsController.updateVatSettings)
 settingsRouter.get('/invoice', authenticate, loadUser, settingsController.getInvoiceSettings)
 settingsRouter.patch('/invoice', authenticate, loadUser, settingsController.updateInvoiceSettings)
+
+// Ink Colors
+settingsRouter.get('/ink-colors', authenticate, loadUser, settingsController.getInkColors)
+settingsRouter.post('/ink-colors', authenticate, loadUser, settingsController.createInkColor)
+settingsRouter.put('/ink-colors/:id', authenticate, loadUser, settingsController.updateInkColor)
+settingsRouter.patch('/ink-colors/:id/archive', authenticate, loadUser, settingsController.archiveInkColor)
+settingsRouter.patch('/ink-colors/:id/restore', authenticate, loadUser, settingsController.restoreInkColor)

@@ -234,7 +234,7 @@ export function ProductionPage() {
                 setSortBy('createdAt')
                 setSortOrder('desc')
               }}
-              className="px-3 py-1 text-sm text-slate-600 hover:text-slate-900"
+              className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100"
             >
               Clear Filters
             </button>

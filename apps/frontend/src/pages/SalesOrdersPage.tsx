@@ -79,6 +79,7 @@ export function SalesOrdersPage() {
   const [coreBuybackPeriod, setCoreBuybackPeriod] = useState('')
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('')
+  const [invoiceCustomerSearch, setInvoiceCustomerSearch] = useState('')
   const [coreBuybacks, setCoreBuybacks] = useState<any[]>([])
   const [customerBalances, setCustomerBalances] = useState<CustomerBalance[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -486,38 +487,74 @@ export function SalesOrdersPage() {
   .footer { text-align: center; font-size: 10px; margin-top: 8px; color: #555; }
   .small { font-size: 9px; color: #666; }
   .item-header { font-size: 10px; font-weight: bold; color: #555; margin-bottom: 2px; }
+  .stamp-wrapper { position: relative; }
+  .stamp-overlay {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  .stamp-text {
+    font-size: 48px; font-weight: 900; color: rgba(22,163,74,0.12);
+    border: 5px solid rgba(22,163,74,0.18);
+    border-radius: 12px; padding: 8px 20px;
+    transform: rotate(-30deg);
+    text-transform: uppercase; letter-spacing: 0.2em;
+    font-family: 'Courier New', Courier, monospace;
+  }
+  .stamp-badge {
+    position: absolute; top: 4px; right: 4px; z-index: 11;
+    background: #16a34a; color: #fff;
+    font-size: 10px; font-weight: bold;
+    padding: 3px 10px; border-radius: 20px;
+    display: flex; align-items: center; gap: 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    font-family: Arial, Helvetica, sans-serif;
+  }
   @media print { body { padding: 0; } }
 </style>
 </head>
 <body>
-  ${logoUrl ? `<img src="${logoUrl}" class="logo" alt="Logo">` : ''}
-  <div class="company-name">${companyName}</div>
-  ${businessAddress ? `<div class="info">${businessAddress}</div>` : ''}
-  ${businessTin ? `<div class="info">TIN: ${businessTin}</div>` : ''}
-  <div class="line"></div>
-  <div class="title">INVOICE</div>
-  <div class="doc-no">${invoice.invoiceNumber}</div>
-  <div class="info">${dateStr}${dueDateStr ? '  |  Due: ' + dueDateStr : ''}</div>
-  <div class="info">Status: ${invoice.status.replace(/_/g, ' ')}</div>
-  <div class="line"></div>
-  <div class="row"><span class="label">Customer:</span><span class="value">${customerName}</span></div>
-  <div class="row"><span class="label">Order:</span><span class="value">${orderNumber}</span></div>
-  <div class="line"></div>
-  <div class="item-header">Items</div>
-  <div class="item-row"><span class="item-desc">Printed Rolls</span><span class="item-qty">${qtyDelivered} kg</span><span class="item-amount">${formatNaira(rollSubtotal)}</span></div>
-  ${bagQty > 0 ? `<div class="item-row"><span class="item-desc">Packing Bags</span><span class="item-qty">${bagQty} pcs</span><span class="item-amount">${formatNaira(bagSubtotal)}</span></div>` : ''}
-  <div class="line"></div>
-  <div class="totals-row"><span class="totals-label">Subtotal (excl. VAT)</span><span class="totals-value">${formatNaira(rollSubtotal + bagSubtotal)}</span></div>
-  ${vatAmount > 0 ? `<div class="totals-row"><span class="totals-label">VAT</span><span class="totals-value">${formatNaira(vatAmount)}</span></div>` : ''}
-  <div class="totals-row"><span class="totals-label" style="font-weight:bold">Total (incl. VAT)</span><span class="totals-value" style="font-weight:bold">${formatNaira(totalAmount)}</span></div>
-  ${depositApplied > 0 ? `<div class="totals-row"><span class="totals-label" style="color:#dc2626">Deposit Applied</span><span class="totals-value" style="color:#dc2626">-${formatNaira(depositApplied)}</span></div>` : ''}
-  ${previousPayments > 0 ? `<div class="totals-row"><span class="totals-label" style="color:#dc2626">Previous Payments</span><span class="totals-value" style="color:#dc2626">-${formatNaira(previousPayments)}</span></div>` : ''}
-  ${balanceDue > 0
-    ? `<div class="balance-due">${formatNaira(balanceDue)}</div><div class="info" style="font-size:10px">Balance Due</div>`
-    : `<div class="amount-paid">${formatNaira(totalAmount - balanceDue)}</div><div class="info" style="font-size:10px">Amount Paid</div>`
-  }
-  <div class="line"></div>
-  <div class="footer">${footerText}</div>
+  <div class="stamp-wrapper">
+    ${invoice.status === 'PAID' ? `
+    <div class="stamp-overlay">
+      <div class="stamp-text">PAID</div>
+      <div class="stamp-badge">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+          <path d="M5 13l4 4L19 7"/>
+        </svg>
+        PAID ${invoice.paidAt ? new Date(invoice.paidAt).toLocaleDateString() : ''}
+      </div>
+    </div>
+    ` : ''}
+    ${logoUrl ? `<img src="${logoUrl}" class="logo" alt="Logo">` : ''}
+    <div class="company-name">${companyName}</div>
+    ${businessAddress ? `<div class="info">${businessAddress}</div>` : ''}
+    ${businessTin ? `<div class="info">TIN: ${businessTin}</div>` : ''}
+    <div class="line"></div>
+    <div class="title">INVOICE</div>
+    <div class="doc-no">${invoice.invoiceNumber}</div>
+    <div class="info">${dateStr}${dueDateStr ? '  |  Due: ' + dueDateStr : ''}</div>
+    <div class="info">Status: ${invoice.status.replace(/_/g, ' ')}</div>
+    <div class="line"></div>
+    <div class="row"><span class="label">Customer:</span><span class="value">${customerName}</span></div>
+    <div class="row"><span class="label">Order:</span><span class="value">${orderNumber}</span></div>
+    <div class="line"></div>
+    <div class="item-header">Items</div>
+    <div class="item-row"><span class="item-desc">Printed Rolls</span><span class="item-qty">${qtyDelivered} kg</span><span class="item-amount">${formatNaira(rollSubtotal)}</span></div>
+    ${bagQty > 0 ? `<div class="item-row"><span class="item-desc">Packing Bags</span><span class="item-qty">${bagQty} pcs</span><span class="item-amount">${formatNaira(bagSubtotal)}</span></div>` : ''}
+    <div class="line"></div>
+    <div class="totals-row"><span class="totals-label">Subtotal (excl. VAT)</span><span class="totals-value">${formatNaira(rollSubtotal + bagSubtotal)}</span></div>
+    ${vatAmount > 0 ? `<div class="totals-row"><span class="totals-label">VAT</span><span class="totals-value">${formatNaira(vatAmount)}</span></div>` : ''}
+    <div class="totals-row"><span class="totals-label" style="font-weight:bold">Total (incl. VAT)</span><span class="totals-value" style="font-weight:bold">${formatNaira(totalAmount)}</span></div>
+    ${depositApplied > 0 ? `<div class="totals-row"><span class="totals-label" style="color:#dc2626">Deposit Applied</span><span class="totals-value" style="color:#dc2626">-${formatNaira(depositApplied)}</span></div>` : ''}
+    ${previousPayments > 0 ? `<div class="totals-row"><span class="totals-label" style="color:#dc2626">Previous Payments</span><span class="totals-value" style="color:#dc2626">-${formatNaira(previousPayments)}</span></div>` : ''}
+    ${balanceDue > 0
+      ? `<div class="balance-due">${formatNaira(balanceDue)}</div><div class="info" style="font-size:10px">Balance Due</div>`
+      : `<div class="amount-paid">${formatNaira(totalAmount - balanceDue)}</div><div class="info" style="font-size:10px">Amount Paid</div>`
+    }
+    <div class="line"></div>
+    <div class="footer">${footerText}</div>
+  </div>
 </body>
 </html>`)
       win.document.close()
@@ -744,9 +781,11 @@ export function SalesOrdersPage() {
       })
       if (res.error) { setError(res.error.message); return }
       setShowPaymentModal(false)
+      setShowInvoiceModal(false)
       setPaymentForm({ salesOrderId: '', customerId: '', transactionType: 'DEPOSIT', paymentMethod: 'Cash', paymentCategory: 'ROLL', amount: 0, referenceNumber: '', notes: '' })
       loadData()
       loadPayments()
+      loadInvoices()
     } catch (err: any) {
       setError(err.message || 'Failed to record payment')
     }
@@ -1070,7 +1109,7 @@ export function SalesOrdersPage() {
     setPaymentForm({
       salesOrderId: order?.id || '',
       customerId: order?.customerId || '',
-      transactionType: 'PAYMENT',
+      transactionType: order ? 'PAYMENT' : 'DEPOSIT',
       paymentMethod: 'Cash',
       paymentCategory: 'ROLL',
       amount: order ? order.totalAmount - order.totalPaid : 0,
@@ -1158,7 +1197,7 @@ export function SalesOrdersPage() {
                       )}
                     </select>
                     {(statusFilter || customerFilter || paymentFilter) && (
-                      <button onClick={() => { setStatusFilter(''); setCustomerFilter(''); setPaymentFilter('') }} className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                      <button onClick={() => { setStatusFilter(''); setCustomerFilter(''); setPaymentFilter('') }} className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
                         Clear Filters
                       </button>
                     )}
@@ -1318,7 +1357,7 @@ export function SalesOrdersPage() {
                       </div>
                       {(paymentPeriod || paymentDateFrom || paymentDateTo) && (
                         <button onClick={clearPaymentFilters}
-                          className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                          className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
                           Clear
                         </button>
                       )}
@@ -1397,6 +1436,13 @@ export function SalesOrdersPage() {
               <div className="space-y-4">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                   <div className="flex gap-4 flex-wrap">
+                    <input
+                      type="text"
+                      placeholder="Search customer..."
+                      value={invoiceCustomerSearch}
+                      onChange={e => setInvoiceCustomerSearch(e.target.value)}
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-sm min-w-[200px]"
+                    />
                     <select
                       value={invoiceStatusFilter}
                       onChange={e => setInvoiceStatusFilter(e.target.value)}
@@ -1407,9 +1453,9 @@ export function SalesOrdersPage() {
                         <option key={key} value={key}>{label}</option>
                       ))}
                     </select>
-                    {invoiceStatusFilter && (
-                      <button onClick={() => setInvoiceStatusFilter('')} className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
-                        Clear Filter
+                    {(invoiceStatusFilter || invoiceCustomerSearch) && (
+                      <button onClick={() => { setInvoiceStatusFilter(''); setInvoiceCustomerSearch('') }} className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
+                        Clear Filters
                       </button>
                     )}
                   </div>
@@ -1424,13 +1470,22 @@ export function SalesOrdersPage() {
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Balance</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {(invoices.filter(inv => !invoiceStatusFilter || inv.status === invoiceStatusFilter)).length === 0 ? (
-                        <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-500">No invoices found</td></tr>
+                      {(invoices.filter(inv => {
+                        const statusMatch = !invoiceStatusFilter || inv.status === invoiceStatusFilter
+                        const nameMatch = !invoiceCustomerSearch || (inv.customer?.name || '').toLowerCase().includes(invoiceCustomerSearch.toLowerCase())
+                        return statusMatch && nameMatch
+                      })).length === 0 ? (
+                        <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-500">No invoices found</td></tr>
                       ) : (
-                        invoices.filter(inv => !invoiceStatusFilter || inv.status === invoiceStatusFilter).map(inv => (
+                        invoices.filter(inv => {
+                          const statusMatch = !invoiceStatusFilter || inv.status === invoiceStatusFilter
+                          const nameMatch = !invoiceCustomerSearch || (inv.customer?.name || '').toLowerCase().includes(invoiceCustomerSearch.toLowerCase())
+                          return statusMatch && nameMatch
+                        }).map(inv => (
                           <tr key={inv.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setCurrentInvoice(inv); setShowInvoiceModal(true) }}>
                             <td className="px-6 py-4 text-sm font-medium text-slate-900">{inv.invoiceNumber}</td>
                             <td className="px-6 py-4 text-sm text-slate-600">{inv.customer?.name || '-'}</td>
@@ -1442,6 +1497,29 @@ export function SalesOrdersPage() {
                             <td className="px-6 py-4 text-sm text-slate-900 text-right">₦{Number(inv.totalAmount).toLocaleString()}</td>
                             <td className="px-6 py-4 text-sm text-red-600 text-right">₦{Number(inv.balanceDue).toLocaleString()}</td>
                             <td className="px-6 py-4 text-sm text-slate-500">{new Date(inv.createdAt).toLocaleDateString()}</td>
+                            <td className="px-6 py-4 text-right relative">
+                              <button
+                                onClick={e => { e.stopPropagation(); setInvoiceDropdown(invoiceDropdown === inv.id ? null : inv.id) }}
+                                className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
+                              >
+                                Invoice ▾
+                              </button>
+                              {invoiceDropdown === inv.id && (
+                                <div className="absolute right-0 mt-1 w-36 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                                  <button onClick={e => { e.stopPropagation(); handlePrintInvoice(inv); setInvoiceDropdown(null) }} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg border-b border-slate-100">
+                                    🖨️ Print
+                                  </button>
+                                  <button onClick={e => { e.stopPropagation(); handleDownloadInvoice(inv); setInvoiceDropdown(null) }} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-100">
+                                    ⬇️ Download
+                                  </button>
+                                  {inv.status !== 'PAID' && (
+                                    <button onClick={e => { e.stopPropagation(); setCurrentInvoice(inv); setShowInvoiceModal(true); setInvoiceDropdown(null) }} className="w-full text-left px-4 py-2.5 text-sm text-green-700 hover:bg-slate-50 rounded-b-lg">
+                                      💳 Pay
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </td>
                           </tr>
                         ))
                       )}
@@ -1506,7 +1584,7 @@ export function SalesOrdersPage() {
                       </div>
                       {(coreBuybackPeriod || coreBuybackDateFrom || coreBuybackDateTo) && (
                         <button onClick={clearCoreBuybackFilters}
-                          className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
+                          className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
                           Clear
                         </button>
                       )}
@@ -1992,12 +2070,16 @@ export function SalesOrdersPage() {
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                   >
                     <option value="">All Categories</option>
-                    <option value="25microns">25 Microns</option>
-                    <option value="27microns">27 Microns</option>
-                    <option value="28microns">28 Microns</option>
-                    <option value="30microns">30 Microns</option>
-                    <option value="Premium">Premium</option>
-                    <option value="SuPremium">Super Premium</option>
+                    {(() => {
+                      const subs = [...new Set(allMaterials
+                        .filter(m => m.subCategory && (m as any).category !== 'INK_SOLVENTS' && (m as any).category !== 'PACKAGING')
+                        .map(m => m.subCategory!))]
+                      return subs.map(sc => (
+                        <option key={sc} value={sc}>
+                          {sc.endsWith('microns') ? sc.charAt(0).toUpperCase() + sc.slice(1) : sc}
+                        </option>
+                      ))
+                    })()}
                   </select>
                   {(() => {
                     const orig = productionOrder.specsJson?.materialType || ''
@@ -2712,7 +2794,22 @@ export function SalesOrdersPage() {
                 </button>
               </div>
 
-              <div className="space-y-4">
+              <div className="relative space-y-4">
+                {/* PAID stamp overlay */}
+                {currentInvoice.status === 'PAID' && (
+                  <div className="absolute inset-0 z-10 pointer-events-none select-none">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-[30deg] text-6xl font-black text-green-500/15 border-[6px] border-green-500/20 rounded-xl px-6 py-3 uppercase tracking-widest">
+                      PAID
+                    </div>
+                    <div className="absolute top-3 right-3 flex items-center gap-2 bg-green-600 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      PAID {currentInvoice.paidAt ? new Date(currentInvoice.paidAt).toLocaleDateString() : ''}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex justify-between items-center p-4 bg-slate-50 rounded-xl">
                   <div>
                     <p className="text-xs text-slate-500">Invoice #</p>
@@ -2801,6 +2898,26 @@ export function SalesOrdersPage() {
                 </div>
 
                 <div className="flex justify-end gap-3">
+                  {currentInvoice.status !== 'PAID' && (
+                    <button
+                      onClick={() => {
+                        setPaymentForm({
+                          salesOrderId: currentInvoice.salesOrderId,
+                          customerId: currentInvoice.customerId,
+                          transactionType: 'PAYMENT',
+                          paymentMethod: 'Cash',
+                          paymentCategory: 'ROLL',
+                          amount: Number(currentInvoice.balanceDue) || 0,
+                          referenceNumber: '',
+                          notes: ''
+                        })
+                        setShowPaymentModal(true)
+                      }}
+                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                    >
+                      Pay ₦{(Number(currentInvoice.balanceDue) || 0).toLocaleString()}
+                    </button>
+                  )}
                   <div className="relative invoice-dropdown-area inline-block">
                     <button
                       onClick={() => { setInvoiceDropdown(invoiceDropdown === currentInvoice.id ? null : currentInvoice.id) }}

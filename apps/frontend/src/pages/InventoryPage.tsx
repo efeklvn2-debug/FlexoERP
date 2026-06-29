@@ -25,6 +25,7 @@ export function InventoryPage() {
   const [rolls, setRolls] = useState<Roll[]>([])
   const [printedRolls, setPrintedRolls] = useState<PrintedRollDisplay[]>([])
   const [initialStockMovements, setInitialStockMovements] = useState<any[]>([])
+  const [subCategories, setSubCategories] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showInitializeModal, setShowInitializeModal] = useState(false)
@@ -82,10 +83,17 @@ export function InventoryPage() {
   })
   const [printedRollSort, setPrintedRollSort] = useState<'createdAt' | 'weight' | 'rollNumber'>('createdAt')
   const [printedRollSortOrder, setPrintedRollSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [includeArchived, setIncludeArchived] = useState(false)
 
   useEffect(() => {
     loadData()
-  }, [activeTab])
+  }, [activeTab, includeArchived])
+
+  useEffect(() => {
+    inventoryApi.getSubCategories().then(res => {
+      setSubCategories((res.data as any)?.data || {})
+    }).catch(() => {})
+  }, [])
 
   const loadData = async () => {
     setLoading(true)
@@ -98,7 +106,7 @@ export function InventoryPage() {
         const res = await inventoryApi.getMaterials()
         setMaterials(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
       } else if (activeTab === 'printed-rolls') {
-        const res = await productionApi.getPrintedRolls()
+        const res = await productionApi.getPrintedRolls(undefined, includeArchived)
         setPrintedRolls(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
       } else if (activeTab === 'initial-stock') {
         const res = await inventoryApi.getInitialStockMovements()
@@ -220,6 +228,7 @@ export function InventoryPage() {
                 sortOrder={plainRollsSortOrder}
                 setSortOrder={setPlainRollsSortOrder}
                 total={plainRolls.length}
+                subCategories={subCategories.PLAIN_ROLLS || []}
                 onRollClick={async (roll) => {
                   setSelectedParentRoll(roll)
                   setPrintedFromRoll(null)
@@ -266,13 +275,41 @@ export function InventoryPage() {
                 sortOrder={printedRollSortOrder}
                 setSortOrder={setPrintedRollSortOrder}
                 total={printedRolls.length}
+                subCategories={subCategories.PLAIN_ROLLS || []}
                 onRefresh={loadData}
+                isAdmin={isAdmin}
+                includeArchived={includeArchived}
+                onToggleArchived={() => setIncludeArchived(!includeArchived)}
               />
             )}
             {activeTab === 'initial-stock' && (
               <div className="space-y-4">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-                  <h3 className="text-lg font-semibold text-slate-900 mb-4">Initial Stock Records</h3>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold text-slate-900">Initial Stock Records</h3>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await inventoryApi.getMaterials()
+                          const materials = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
+                          setInitialStockItems(materials.map((m: any) => ({
+                            materialId: m.id,
+                            name: m.name,
+                            code: m.code,
+                            unit: m.unitOfMeasure,
+                            currentStock: Number(m.totalStock || 0),
+                            newStock: Number(m.totalStock || 0)
+                          })))
+                          setShowInitializeModal(true)
+                        } catch (err: any) {
+                          setError(err.message || 'Failed to load materials')
+                        }
+                      }}
+                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                    >
+                      Initialize Stock
+                    </button>
+                  </div>
                   {initialStockMovements.length > 0 ? (
                     <table className="min-w-full divide-y divide-slate-200">
                       <thead className="bg-slate-50">
@@ -320,7 +357,7 @@ export function InventoryPage() {
               </div>
 
               <p className="text-sm text-slate-600 mb-4">
-                Enter the current stock levels for each material. This will set the baseline stock.
+                Enter the current stock levels for each material. This will set the baseline stock and post a journal entry (Dr Raw Material Inventory / Cr Opening Balance Equity).
               </p>
 
               <div className="overflow-x-auto max-h-96 overflow-y-auto">
@@ -703,7 +740,7 @@ export function InventoryPage() {
   )
 }
 
-function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, onRollClick }: {
+function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, subCategories, onRollClick }: {
   rolls: Roll[]
   filter: { search: string; status: string; materialSubCategory: string }
   setFilter: React.Dispatch<React.SetStateAction<{ search: string; status: string; materialSubCategory: string }>>
@@ -712,6 +749,7 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
   sortOrder: 'asc' | 'desc'
   setSortOrder: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
   total: number
+  subCategories: string[]
   onRollClick?: (roll: Roll) => void
 }) {
   return (
@@ -722,12 +760,11 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
             <label className="block text-xs font-medium text-slate-500 mb-1">Material</label>
             <select value={filter.materialSubCategory} onChange={e => setFilter({ ...filter, materialSubCategory: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
               <option value="">All</option>
-              <option value="25microns">25 Microns</option>
-              <option value="27microns">27 Microns</option>
-              <option value="28microns">28 Microns</option>
-              <option value="30microns">30 Microns</option>
-              <option value="Premium">Premium</option>
-              <option value="SuPremium">SuPremium</option>
+              {subCategories.map(sc => (
+                <option key={sc} value={sc}>
+                  {sc.endsWith('microns') ? sc.charAt(0).toUpperCase() + sc.slice(1) : sc}
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -751,6 +788,30 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
           </div>
         </div>
       </div>
+      {rolls.length > 0 && (() => {
+        const totalRemaining = rolls.reduce((sum, r) => sum + Number(r.remainingWeight), 0)
+        const avgWeight = totalRemaining / rolls.length
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 px-6 py-3">
+            <div className="flex items-center gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">Rolls</span>
+                <span className="font-semibold text-slate-900">{rolls.length}</span>
+              </div>
+              <div className="w-px h-5 bg-slate-200" />
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">Remaining</span>
+                <span className="font-semibold text-slate-900">{totalRemaining.toFixed(2)} kg</span>
+              </div>
+              <div className="w-px h-5 bg-slate-200" />
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">Avg / roll</span>
+                <span className="font-semibold text-slate-900">{avgWeight.toFixed(2)} kg</span>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
@@ -804,7 +865,7 @@ function MaterialsTab({ materials, filter, setFilter, sort, setSort, sortOrder, 
             <input type="text" placeholder="Name or code..." value={filter.search} onChange={e => setFilter({ search: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
           </div>
           <div className="flex items-end">
-            <button onClick={() => setFilter({ search: '' })} className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900">Clear</button>
+            <button onClick={() => setFilter({ search: '' })} className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">Clear</button>
             <span className="text-xs text-slate-500 ml-auto">{materials.length} of {total} items</span>
           </div>
         </div>
@@ -846,7 +907,7 @@ function MaterialsTab({ materials, filter, setFilter, sort, setSort, sortOrder, 
   )
 }
 
-function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, onRefresh }: {
+function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, subCategories, onRefresh, isAdmin, includeArchived, onToggleArchived }: {
   rolls: PrintedRollDisplay[]
   filter: { search: string; customer: string; material: string; status: string; dateFrom: string; dateTo: string; combination: string }
   setFilter: React.Dispatch<React.SetStateAction<{ search: string; customer: string; material: string; status: string; dateFrom: string; dateTo: string; combination: string }>>
@@ -855,7 +916,11 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
   sortOrder: 'asc' | 'desc'
   setSortOrder: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
   total: number
+  subCategories: string[]
   onRefresh?: () => Promise<void>
+  isAdmin?: boolean
+  includeArchived?: boolean
+  onToggleArchived?: () => void
 }) {
   const [selectedRoll, setSelectedRoll] = useState<PrintedRollDisplay | null>(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
@@ -863,6 +928,10 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
   const [returnForm, setReturnForm] = useState({ qty: 0, reason: '', condition: 'SCRAP', refundMethod: 'CREDIT_NOTE' })
   const [returnLoading, setReturnLoading] = useState(false)
   const [returnError, setReturnError] = useState('')
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
+  const [archiveLoading, setArchiveLoading] = useState(false)
+  const [archiveError, setArchiveError] = useState('')
+  const [archiveResult, setArchiveResult] = useState<number | null>(null)
 
   const handleCustomerReturn = async () => {
     if (!selectedRoll) return
@@ -880,6 +949,21 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
       setReturnError(err.response?.data?.error || err.message || 'Failed to process return')
     }
     setReturnLoading(false)
+  }
+
+  const handleArchive = async () => {
+    setArchiveLoading(true)
+    setArchiveError('')
+    try {
+      const res = await productionApi.archiveOldPrintedRolls()
+      const count = (res.data as any)?.archived ?? 0
+      setArchiveResult(count)
+      setShowArchiveConfirm(false)
+      onRefresh?.()
+    } catch (err: any) {
+      setArchiveError(err.response?.data?.error || err.message || 'Failed to archive')
+    }
+    setArchiveLoading(false)
   }
 
   const statusColor = (status?: string) => {
@@ -913,15 +997,23 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             <input type="text" placeholder="Customer name..." value={filter.customer} onChange={e => setFilter({ ...filter, customer: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
           </div>
           <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
+            <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
+              <option value="">All</option>
+              <option value="IN_STOCK">In Stock</option>
+              <option value="PICKED_UP">Picked Up</option>
+              <option value="RETURNED">Returned</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Material</label>
             <select value={filter.material} onChange={e => setFilter({ ...filter, material: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
               <option value="">All</option>
-              <option value="25microns">25 Microns</option>
-              <option value="27microns">27 Microns</option>
-              <option value="28microns">28 Microns</option>
-              <option value="30microns">30 Microns</option>
-              <option value="Premium">Premium</option>
-              <option value="SuPremium">SuPremium</option>
+              {subCategories.map(sc => (
+                <option key={sc} value={sc}>
+                  {sc.endsWith('microns') ? sc.charAt(0).toUpperCase() + sc.slice(1) : sc}
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -932,19 +1024,27 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             <label className="block text-xs font-medium text-slate-500 mb-1">To Date</label>
             <DateInput value={filter.dateTo} onChange={e => setFilter({ ...filter, dateTo: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-            <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
-              <option value="">All</option>
-              <option value="IN_STOCK">In Stock</option>
-              <option value="PICKED_UP">Picked Up</option>
-              <option value="RETURNED">Returned</option>
-            </select>
-          </div>
         </div>
         <div className="flex items-center gap-4 mt-4 pt-4 border-t border-slate-200">
-          <button onClick={() => setFilter({ search: '', customer: '', material: '', status: '', dateFrom: '', dateTo: '', combination: '' })} className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900">Clear Filters</button>
-          <span className="text-xs text-slate-500 ml-auto">{rolls.length} of {total} rolls</span>
+          <button onClick={() => setFilter({ search: '', customer: '', material: '', status: '', dateFrom: '', dateTo: '', combination: '' })} className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">Clear Filters</button>
+          <div className="flex items-center gap-3 ml-auto">
+            {isAdmin && (
+              <button onClick={() => setShowArchiveConfirm(true)} className="px-3 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100">
+                Archive Old Pickups
+              </button>
+            )}
+            {archiveResult !== null && (
+              <span className="text-xs text-green-600 font-medium">{archiveResult} roll{archiveResult !== 1 ? 's' : ''} archived</span>
+            )}
+            {archiveError && (
+              <span className="text-xs text-red-600 font-medium">{archiveError}</span>
+            )}
+            <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+              <input type="checkbox" checked={includeArchived} onChange={onToggleArchived} className="rounded border-slate-300" />
+              Show archived
+            </label>
+            <span className="text-xs text-slate-500">{rolls.length} of {total} rolls</span>
+          </div>
         </div>
       </div>
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
@@ -964,7 +1064,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
           </thead>
           <tbody className="divide-y divide-slate-200">
             {rolls.map(r => (
-              <tr key={r.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setSelectedRoll(r); setShowDetailsModal(true) }}>
+              <tr key={r.id} className={`hover:bg-slate-50 cursor-pointer ${r.archivedAt ? 'opacity-50' : ''}`} onClick={() => { setSelectedRoll(r); setShowDetailsModal(true) }}>
                 <td className="px-4 py-3 text-sm font-medium text-slate-900">{r.rollNumber || '-'}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{Number(r.weight).toFixed(2)}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{(Number(r.weight) - 0.7).toFixed(2)}</td>
@@ -998,37 +1098,37 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div className="bg-slate-50 p-3 rounded-lg">
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div className="bg-slate-50 p-3 rounded-lg flex-1 min-w-[180px]">
                   <span className="text-slate-500 block text-xs">Roll Number</span>
                   <span className="text-slate-900 font-medium">{selectedRoll.rollNumber || '-'}</span>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-lg">
+                <div className="bg-slate-50 p-3 rounded-lg flex-1 min-w-[180px]">
                   <span className="text-slate-500 block text-xs">Weight</span>
                   <span className="text-slate-900 font-medium">{Number(selectedRoll.weight).toFixed(2)} kg</span>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-lg">
+                <div className="bg-slate-50 p-3 rounded-lg flex-1 min-w-[180px]">
                   <span className="text-slate-500 block text-xs">Material</span>
                   <span className="text-slate-900 font-medium">{selectedRoll.material || '-'}</span>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-lg">
+                <div className="bg-slate-50 p-3 rounded-lg flex-1 min-w-[180px]">
                   <span className="text-slate-500 block text-xs">Type</span>
                   <span className="text-slate-900 font-medium">{selectedRoll.isCombination ? 'Combo' : 'Single'}</span>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-lg">
+                <div className="bg-slate-50 p-3 rounded-lg flex-1 min-w-[180px]">
                   <span className="text-slate-500 block text-xs">Customer</span>
                   <span className="text-slate-900 font-medium">{selectedRoll.customerName || '-'}</span>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-lg">
+                <div className="bg-slate-50 p-3 rounded-lg flex-1 min-w-[180px]">
                   <span className="text-slate-500 block text-xs">Job Number</span>
                   <span className="text-slate-900 font-medium">{selectedRoll.jobNumber || '-'}</span>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-lg">
+                <div className="bg-slate-50 p-3 rounded-lg flex-1 min-w-[180px]">
                   <span className="text-slate-500 block text-xs">Date Produced</span>
                   <span className="text-slate-900 font-medium">{selectedRoll.createdAt ? new Date(selectedRoll.createdAt).toLocaleDateString() : '-'}</span>
                 </div>
                 {selectedRoll.pickedUpAt && (
-                  <div className="bg-slate-50 p-3 rounded-lg">
+                  <div className="bg-slate-50 p-3 rounded-lg flex-1 min-w-[180px]">
                     <span className="text-slate-500 block text-xs">Picked Up At</span>
                     <span className="text-slate-900 font-medium">{new Date(selectedRoll.pickedUpAt).toLocaleDateString()}</span>
                   </div>
@@ -1120,6 +1220,24 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
               <button type="button" onClick={() => { setShowReturnModal(false); setReturnError('') }} className="px-4 py-2 border border-slate-300 rounded-lg" disabled={returnLoading}>Cancel</button>
               <button type="button" onClick={handleCustomerReturn} disabled={returnLoading} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
                 {returnLoading ? 'Processing...' : 'Submit Return'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showArchiveConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold text-slate-900 mb-2">Archive Old Pickups</h2>
+            <p className="text-sm text-slate-600 mb-4">
+              This will archive printed rolls that were picked up over 90 days ago. Archived rolls will be hidden from the main inventory list unless "Show archived" is checked.
+            </p>
+            {archiveError && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm mb-4">{archiveError}</div>}
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => { setShowArchiveConfirm(false); setArchiveError('') }} className="px-4 py-2 border border-slate-300 rounded-lg" disabled={archiveLoading}>Cancel</button>
+              <button type="button" onClick={handleArchive} disabled={archiveLoading} className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
+                {archiveLoading ? 'Archiving...' : 'Proceed'}
               </button>
             </div>
           </div>

@@ -29,3 +29,4 @@ financeRouter.get('/deferred-cogs', financeController.getDeferredCogsSummary)
 financeRouter.post('/deferred-cogs/:id/recognize', financeController.recognizeDeferredCogs)
 
 financeRouter.post('/seed', financeController.seedAccounts)
+financeRouter.post('/opening-balances', financeController.postOpeningBalances)

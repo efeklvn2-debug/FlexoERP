@@ -55,6 +55,20 @@ async function main() {
   }
   console.log('Created stock locations')
 
+  const defaultInkColors = [
+    { name: 'RoyalBlue', mapping: 'RoyalBlue-Ink' },
+    { name: 'VioletBlue', mapping: 'VioletBlue-Ink' },
+    { name: 'SkyBlue', mapping: 'SkyBlue-Ink' }
+  ]
+  for (const ic of defaultInkColors) {
+    await prisma.inkColor.upsert({
+      where: { name: ic.name },
+      update: {},
+      create: ic
+    })
+  }
+  console.log(`Created ${defaultInkColors.length} default ink colors`)
+
   const existingAccounts = await prisma.account.findMany()
   if (existingAccounts.length === 0) {
     const accounts = [

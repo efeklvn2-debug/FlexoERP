@@ -222,3 +222,114 @@ The MTO workflow is fully functional:
 - Payment categories for tracking roll vs bag payments
 - Invoice modal shows all details including packing bags
 - UI properly handles cancelled orders and payment status
+
+# Accounting Books Initialization — Go-Live Procedure
+
+## Quick Checklist (for anyone)
+
+### Before you start
+- All customers, suppliers, and materials are already in the system
+- You have a physical stock count of every material
+- You know your current Cash on hand, Bank balance, money owed to you (receivables), and money you owe others (payables)
+
+---
+
+### Step 1: Seed the chart of accounts
+
+Go to **Finance > Opening Balances** tab. Click the **"Seed Accounts"** button. You'll see a green message confirming accounts were created.
+
+---
+
+### Step 2: Enter your starting balances
+
+Still on **Finance > Opening Balances** — a table shows every account. For each one, enter the amount in the box:
+
+| Account | Dr/Cr | What to enter |
+|---|---|---|---|
+| **Cash (1000)** | Dr | Cash in hand right now |
+| **Bank (1100)** | Dr | Bank account balance right now |
+| **Accounts Receivable (1200)** | Dr | Total money customers owe you |
+| **Raw Material Inventory (1300)** | Dr | Value of plain rolls, ink, solvents you have |
+| **Work in Progress (1310)** | Dr | Value of materials currently in production *(usually 0 on day one)* |
+| **Finished Goods (1320)** | Dr | Value of printed rolls ready for sale *(usually 0 if you haven't produced yet)* |
+| **Deferred COGS (1330)** | Dr | Deferred production costs *(usually 0 on day one)* |
+| **VAT Input (1400)** | Dr | VAT you can reclaim *(usually 0)* |
+| **Packing Bag Inventory (1510)** | Dr | Value of packing bags you have |
+| **Accounts Payable (2000)** | Cr | Total money you owe suppliers |
+| **VAT Output (2100)** | Cr | VAT you've collected but not yet remitted *(usually 0)* |
+| **Customer Deposits (2200)** | Cr | Total deposits customers have paid |
+| **Advance Customer Payments (2250)** | Cr | Prepayments for future orders *(usually 0)* |
+| **Opening Balance Equity (3000)** | — | Auto-calculated — leave at 0 |
+| **Retained Earnings (3100)** | Cr | Accumulated profits from prior period *(usually 0 for new business)* |
+
+The **Dr/Cr** column is automatic — **Dr** means it's an asset (you own it), **Cr** means it's a liability (you owe it). Just enter the amount in the box.
+
+Look at the bottom of the table — it tells you if everything balances:
+- ✅ *Balanced* means your assets = what you owe + your equity. Ready to post.
+- ⚠️ *Difference shown* means the system will automatically post the difference to **Opening Balance Equity**. This is normal for new businesses.
+
+---
+
+### Step 3: Post the opening entry
+
+Click **"Post Opening Entry"**. A green message confirms how many accounts were updated.
+
+---
+
+### Step 4: Verify on the Balances tab
+
+Go to **Finance > Balances**. Check that:
+- Cash shows what you entered
+- Accounts Receivable shows what you entered
+- Everything looks reasonable
+
+> **Important:** The balance you see is calculated as:
+> `balance = openingBalance + totalDebits − totalCredits` (includes ALL journal entries).
+>
+> If Cash already has transactions totalling −₦2,012,108, entering ₦10,000 gives:
+> `₦10,000 + (−₦2,012,108) = −₦2,002,108` (still negative, but ₦10,000 less negative).
+>
+> Your opening balance is **added to** existing transactions — it does NOT replace them.
+> To get Cash to show exactly ₦10,000, enter: `₦10,000 + ₦2,012,108 = ₦2,022,108`.
+
+---
+
+### Step 5: Set your physical stock levels
+
+Go to **Inventory > Initial Stock**. Click **"Initialize Stock"**.
+
+A window opens showing every material with its current stock. For each one, type the actual quantity you have (in kg, litres, or pieces). Only materials where you change the number will be saved.
+
+Click **"Save Initial Stock"**. The system updates stock levels AND records the inventory value in accounting.
+
+---
+
+### Done! You're live.
+
+From now on, all sales, purchases, expenses, and payments will automatically update your books.
+
+---
+
+## Technical notes (for developers)
+
+### How opening balances are stored
+- Asset accounts: stored as positive numbers
+- Liability/Equity accounts: stored as negative numbers
+- This makes the balance formula `balance = openingBalance + totalDebits - totalCredits` work correctly
+
+### How the balancing entry works
+When you post opening balances and total assets ≠ total liabilities+equity, the system posts the difference to account 3000 (Opening Balance Equity) as a single-line journal entry. This keeps your books balanced without creating dozens of journal lines.
+
+### How stock initialization posts to accounting
+When you save initial stock, the system calculates `material.costPrice × quantity` for every material that has a cost price set and posts:
+- Debit: Raw Material Inventory (1300)
+- Credit: Opening Balance Equity (3000)
+
+If a material has no cost price, its quantity is still recorded but no accounting value is posted.
+
+### Troubleshooting
+| Problem | Likely cause |
+|---|---|
+| "Account cannot have opening balance" | You entered an amount for a Revenue or Expense account. Only Asset, Liability, and Equity accounts need opening balances. |
+| Stock initialised but no journal entry posted | None of your materials have a **cost price** set. Set cost prices in Inventory > Materials, then initialize again. |
+| Backend changes not working | Run `npx tsc` in the `apps/backend/` folder to recompile. |

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { salesOrderApi, Customer } from '../api/salesOrders'
+import { salesOrderApi, Customer, CustomerBalance } from '../api/salesOrders'
+import { settingsApi } from '../api/settings'
 import { Layout } from '../components/Layout'
 
-const INK_COLORS = ['Red', 'Yellow', 'White', 'RoyalBlue', 'VioletBlue', 'SkyBlue']
+const DEFAULT_COLORS = ['RoyalBlue', 'VioletBlue', 'SkyBlue']
 
 export function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -12,15 +13,18 @@ export function CustomersPage() {
   const [search, setSearch] = useState('')
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
 
-  const [customerBalances, setCustomerBalances] = useState<Record<string, number>>({})
+  const [customerBalances, setCustomerBalances] = useState<Record<string, CustomerBalance>>({})
   const [depositModalCustomer, setDepositModalCustomer] = useState<Customer | null>(null)
   const [depositAmount, setDepositAmount] = useState('')
   const [depositError, setDepositError] = useState('')
+  const [showOutstandingOnly, setShowOutstandingOnly] = useState(false)
+  const [showHasRollsOnly, setShowHasRollsOnly] = useState(false)
 
   const userStr = localStorage.getItem('user')
   const user = userStr ? JSON.parse(userStr) : null
   const canAdjustDeposit = user?.role === 'ADMIN' || user?.role === 'MANAGER'
 
+  const [inkColors, setInkColors] = useState<any[]>([])
   const [form, setForm] = useState({
     name: '',
     code: '',
@@ -33,15 +37,23 @@ export function CustomersPage() {
   useEffect(() => {
     loadCustomers()
     loadBalances()
+    loadInkColors()
   }, [])
+
+  const loadInkColors = async () => {
+    try {
+      const res = await settingsApi.getInkColors()
+      setInkColors(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
+    } catch { /* ignore */ }
+  }
 
   const loadBalances = async () => {
     try {
       const res = await salesOrderApi.getAllCustomerBalances()
-      const balances = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
-      const map: Record<string, number> = {}
+      const balances: CustomerBalance[] = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
+      const map: Record<string, CustomerBalance> = {}
       for (const b of balances) {
-        map[b.customerId] = b.depositHeld
+        map[b.customerId] = b
       }
       setCustomerBalances(map)
     } catch { /* ignore */ }
@@ -123,8 +135,10 @@ export function CustomersPage() {
   }
 
   const filteredCustomers = customers.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.code && c.code.toLowerCase().includes(search.toLowerCase()))
+    (c.name.toLowerCase().includes(search.toLowerCase()) ||
+     (c.code && c.code.toLowerCase().includes(search.toLowerCase()))) &&
+    (!showOutstandingOnly || (customerBalances[c.id]?.totalOutstanding || 0) > 0) &&
+    (!showHasRollsOnly || (customerBalances[c.id]?.availableRollsCount || 0) > 0)
   )
 
   return (
@@ -135,7 +149,7 @@ export function CustomersPage() {
             <h1 className="text-2xl font-bold text-slate-900">Customers</h1>
             <p className="text-slate-500 mt-1">Manage customer information and ink color preferences</p>
           </div>
-          <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          <button onClick={() => { setForm({ name: '', code: '', email: '', phone: '', address: '', colors: [...DEFAULT_COLORS] }); setShowModal(true) }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
             Add Customer
           </button>
         </div>
@@ -143,7 +157,7 @@ export function CustomersPage() {
         {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200">
-          <div className="p-4 border-b border-slate-200">
+          <div className="p-4 border-b border-slate-200 flex items-center gap-3">
             <input
               type="text"
               placeholder="Search customers..."
@@ -151,6 +165,23 @@ export function CustomersPage() {
               onChange={e => setSearch(e.target.value)}
               className="w-full max-w-md px-4 py-2 border border-slate-300 rounded-lg"
             />
+            <button
+              onClick={() => setShowOutstandingOnly(!showOutstandingOnly)}
+              className={`px-3 py-1.5 text-xs rounded-lg font-medium border ${showOutstandingOnly ? 'bg-red-50 text-red-700 border-red-200' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+            >
+              Outstanding only
+            </button>
+            <button
+              onClick={() => setShowHasRollsOnly(!showHasRollsOnly)}
+              className={`px-3 py-1.5 text-xs rounded-lg font-medium border ${showHasRollsOnly ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+            >
+              Has Rolls
+            </button>
+            {(showOutstandingOnly || showHasRollsOnly || search) && (
+              <button onClick={() => { setShowOutstandingOnly(false); setShowHasRollsOnly(false); setSearch('') }} className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
+                Clear Filters
+              </button>
+            )}
           </div>
 
           {loading ? (
@@ -161,38 +192,62 @@ export function CustomersPage() {
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Code</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Email</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Phone</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Deposit Held</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Ink Colors</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Customer</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">Rolls</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Outstanding</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Deposit</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">Orders</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Last Activity</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Colors</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {filteredCustomers.map(c => (
                   <tr key={c.id} className="hover:bg-slate-50">
-                    <td className="px-6 py-4 text-sm font-medium text-slate-900">{c.code}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600">{c.name}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600">{c.email || '-'}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600">{c.phone || '-'}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {customerBalances[c.id] !== undefined ? (
-                        <span className="font-medium text-blue-600">₦{customerBalances[c.id].toLocaleString()}</span>
-                      ) : '-'}
+                    <td className="px-4 py-4">
+                      <a href={`/customers/${c.id}`} className="text-blue-600 hover:text-blue-800 font-medium text-sm">
+                        {c.name}
+                      </a>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4 text-center">
+                      {customerBalances[c.id] !== undefined ? (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${(customerBalances[c.id] as any).availableRollsCount > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {(customerBalances[c.id] as any).availableRollsCount ?? 0}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-xs">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-sm text-right">
+                      {customerBalances[c.id] !== undefined ? (
+                        <span className={customerBalances[c.id].totalOutstanding > 0 ? 'text-red-600 font-medium' : 'text-green-600'}>
+                          ₦{customerBalances[c.id].totalOutstanding.toLocaleString()}
+                        </span>
+                      ) : <span className="text-slate-400 text-xs">-</span>}
+                    </td>
+                    <td className="px-4 py-4 text-sm text-right text-blue-600 font-medium">
+                      {customerBalances[c.id] !== undefined ? `₦${customerBalances[c.id].depositHeld.toLocaleString()}` : <span className="text-slate-400 text-xs">-</span>}
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <span className="text-sm text-slate-600">{(customerBalances[c.id] as any)?.ordersCount ?? 0}</span>
+                    </td>
+                    <td className="px-4 py-4 text-xs text-slate-500">
+                      {(customerBalances[c.id] as any)?.lastTransactionDate
+                        ? new Date((customerBalances[c.id] as any).lastTransactionDate).toLocaleDateString()
+                        : '-'}
+                    </td>
+                    <td className="px-4 py-4">
                       <div className="flex flex-wrap gap-1">
                         {c.colors?.map((color: string) => (
                           <span key={color} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-full">
                             {color}
                           </span>
-                        )) || '-'}
+                        )) || <span className="text-slate-400 text-xs">-</span>}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <button onClick={() => handleEdit(c)} className="text-blue-600 hover:text-blue-800 text-sm">
+                    <td className="px-4 py-4 text-right">
+                      <button onClick={() => handleEdit(c)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">
                         Edit
                       </button>
                     </td>
@@ -251,17 +306,22 @@ export function CustomersPage() {
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-slate-700">Deposit Balance</span>
-                      <span className="text-lg font-bold text-blue-700">₦{(customerBalances[editingCustomer.id] || 0).toLocaleString()}</span>
+                      <span className="text-lg font-bold text-blue-700">₦{(customerBalances[editingCustomer.id]?.depositHeld || 0).toLocaleString()}</span>
                     </div>
                     {!depositModalCustomer ? (
-                      <button type="button" onClick={() => { setDepositModalCustomer(editingCustomer); setDepositAmount(''); setDepositError('') }} className="w-full px-3 py-2 text-sm border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100">
-                        Adjust Deposit
+                      <button
+                        type="button"
+                        onClick={() => { setDepositModalCustomer(editingCustomer); setDepositAmount(''); setDepositError('') }}
+                        className="w-full px-3 py-2 text-sm border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100"
+                        title="Admin/Manager only. Adjusts deposit balance via journal entry through Other Income — use for corrections, goodwill, or forfeitures only."
+                      >
+                        Credit Adjustment
                       </button>
                     ) : (
                       <div className="space-y-2">
                         <div className="flex items-center space-x-2">
                           <input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} placeholder="Amount (+/-)" className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg" />
-                          <span className="text-xs text-slate-500 whitespace-nowrap">→ ₦{((customerBalances[editingCustomer.id] || 0) + (parseFloat(depositAmount) || 0)).toLocaleString()}</span>
+                          <span className="text-xs text-slate-500 whitespace-nowrap">→ ₦{((customerBalances[editingCustomer.id]?.depositHeld || 0) + (parseFloat(depositAmount) || 0)).toLocaleString()}</span>
                         </div>
                         <div className="flex space-x-2">
                           <button type="button" onClick={async () => {
@@ -285,21 +345,21 @@ export function CustomersPage() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Ink Colors <span className="text-red-500">*</span></label>
                   <div className="grid grid-cols-3 gap-2">
-                    {INK_COLORS.map(color => (
-                      <label key={color} className="flex items-center space-x-2 text-sm">
+                    {inkColors.map(ic => (
+                      <label key={ic.id} className="flex items-center space-x-2 text-sm">
                         <input
                           type="checkbox"
-                          checked={form.colors.includes(color)}
+                          checked={form.colors.includes(ic.name)}
                           onChange={e => {
                             if (e.target.checked) {
-                              setForm({...form, colors: [...form.colors, color]})
+                              setForm({...form, colors: [...form.colors, ic.name]})
                             } else {
-                              setForm({...form, colors: form.colors.filter(c => c !== color)})
+                              setForm({...form, colors: form.colors.filter((c: string) => c !== ic.name)})
                             }
                           }}
                           className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                         />
-                        <span className="text-slate-600">{color.replace(/([A-Z])/g, ' $1').trim()}</span>
+                        <span className="text-slate-600">{ic.name.replace(/([A-Z])/g, ' $1').trim()}</span>
                       </label>
                     ))}
                   </div>

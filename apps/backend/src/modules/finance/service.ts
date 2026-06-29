@@ -595,15 +595,20 @@ export const financeService = {
         const inkRate = Number(settings.inkConsumptionRate) || 0.2
         const ipaRate = Number(settings.ipaConsumptionRate) || 0.1
         const butanolRate = Number(settings.butanolConsumptionRate) || 0.1
-        const inkCostRate = Number(settings.inkCostPerKg) || 50
 
-        const consumableMaterials = await prisma.material.findMany({ where: { category: 'INK_SOLVENTS' } })
+        const consumableMaterials = await prisma.material.findMany({ where: { category: 'INK_SOLVENTS', isActive: true } })
         const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
         const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
         const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
         const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
 
-        totalDeferredCost += totalPrintedWeight * inkRate * inkCostRate
+        // Average costPrice of ink materials (exclude IPA/Butanol)
+        const inkMats = consumableMaterials.filter(m => m.subCategory !== 'IPA' && m.subCategory !== 'Butanol')
+        const avgInkCostPrice = inkMats.length > 0
+          ? inkMats.reduce((sum, m) => sum + (Number(m.costPrice) || 0), 0) / inkMats.length
+          : 0
+
+        totalDeferredCost += totalPrintedWeight * inkRate * avgInkCostPrice
           + totalPrintedWeight * ipaRate * ipaCostPerLiter
           + totalPrintedWeight * butanolRate * butanolCostPerLiter
 
@@ -658,6 +663,114 @@ export const financeService = {
       reference: entry.reference || undefined,
       postedById: userId,
       lines: reversedLines
+    })
+  },
+
+  async postOpeningBalances(input: {
+    date: Date
+    lines: { accountId: string; amount: number }[]
+  }, userId?: string) {
+    const { lines, date } = input
+
+    if (!lines || lines.length === 0) {
+      throw new AppError(400, 'INVALID', 'At least one account line is required')
+    }
+
+    let totalAssetDebits = 0
+    let totalLiabilityEquityCredits = 0
+    const assetLines: { account: any; amount: number }[] = []
+    const liabilityEquityLines: { account: any; amount: number }[] = []
+
+    for (const line of lines) {
+      if (line.amount < 0) {
+        throw new AppError(400, 'INVALID', 'Amount must be non-negative')
+      }
+      const account = await prisma.account.findUnique({ where: { id: line.accountId } })
+      if (!account) throw new AppError(404, 'NOT_FOUND', `Account ${line.accountId} not found`)
+
+      if (account.type === 'ASSET') {
+        totalAssetDebits += line.amount
+        assetLines.push({ account, amount: line.amount })
+      } else if (account.type === 'LIABILITY' || account.type === 'EQUITY') {
+        totalLiabilityEquityCredits += line.amount
+        liabilityEquityLines.push({ account, amount: line.amount })
+      } else {
+        throw new AppError(400, 'INVALID', `Account ${account.code} (${account.type}) cannot have an opening balance. Only ASSET, LIABILITY, and EQUITY accounts are allowed.`)
+      }
+    }
+
+    const difference = totalAssetDebits - totalLiabilityEquityCredits
+    const obeAccount = await prisma.account.findUnique({ where: { code: '3000' } })
+    if (!obeAccount) throw new AppError(500, 'INTERNAL', 'Opening Balance Equity account (3000) not found')
+
+    return prisma.$transaction(async (tx) => {
+      for (const { account, amount } of assetLines) {
+        await tx.account.update({
+          where: { id: account.id },
+          data: { openingBalance: amount }
+        })
+      }
+
+      for (const { account, amount } of liabilityEquityLines) {
+        await tx.account.update({
+          where: { id: account.id },
+          data: { openingBalance: -amount }
+        })
+      }
+
+      const entryNumber = await financeRepository.getNextEntryNumber(tx)
+      const entryDate = dateFromInput(date as any)
+
+      if (Math.abs(difference) > 0.01) {
+        if (difference > 0) {
+          await tx.journalEntry.create({
+            data: {
+              entryNumber,
+              date: entryDate,
+              description: `Opening balances as of ${entryDate.toISOString().split('T')[0]} — credit to Opening Balance Equity (3000)`,
+              sourceModule: 'OPENING',
+              postedById: userId,
+              lines: {
+                create: [{
+                  accountId: obeAccount.id,
+                  debit: 0,
+                  credit: Math.abs(difference),
+                  memo: `Balancing entry: total assets (${totalAssetDebits}) exceed total liabilities + equity (${totalLiabilityEquityCredits})`
+                }]
+              }
+            }
+          })
+        } else {
+          await tx.journalEntry.create({
+            data: {
+              entryNumber,
+              date: entryDate,
+              description: `Opening balances as of ${entryDate.toISOString().split('T')[0]} — debit to Opening Balance Equity (3000)`,
+              sourceModule: 'OPENING',
+              postedById: userId,
+              lines: {
+                create: [{
+                  accountId: obeAccount.id,
+                  debit: Math.abs(difference),
+                  credit: 0,
+                  memo: `Balancing entry: total liabilities + equity (${totalLiabilityEquityCredits}) exceed total assets (${totalAssetDebits})`
+                }]
+              }
+            }
+          })
+        }
+      }
+
+      logger.info({ accountsUpdated: lines.length, difference, date: entryDate }, 'Opening balances posted')
+
+      return {
+        success: true,
+        accountsUpdated: lines.length,
+        totalAssetDebits,
+        totalLiabilityEquityCredits,
+        unbalancedAmount: Math.abs(difference),
+        obeAccountId: obeAccount.id
+      }
     })
   }
 }

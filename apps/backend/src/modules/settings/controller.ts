@@ -68,5 +68,47 @@ export const settingsController = {
       const settings = await settingsService.updateInvoiceSettings(input)
       res.json({ data: settings })
     } catch (error) { next(error) }
+  },
+
+  // ── Ink Colors ────────────────────────────────────────
+
+  async getInkColors(req: Request, res: Response, next: NextFunction) {
+    try {
+      const includeInactive = req.query.includeInactive === 'true'
+      const colors = await settingsService.getInkColors(includeInactive)
+      res.json({ data: colors })
+    } catch (error) { next(error) }
+  },
+
+  async createInkColor(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { name, mapping } = req.body
+      const color = await settingsService.createInkColor({ name, mapping })
+      res.status(201).json({ data: color })
+    } catch (error) { next(error) }
+  },
+
+  async updateInkColor(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params
+      const data = await settingsService.updateInkColor(id, req.body)
+      res.json({ data })
+    } catch (error) { next(error) }
+  },
+
+  async archiveInkColor(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params
+      const data = await settingsService.archiveInkColor(id)
+      res.json({ data })
+    } catch (error) { next(error) }
+  },
+
+  async restoreInkColor(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params
+      const data = await settingsService.restoreInkColor(id)
+      res.json({ data })
+    } catch (error) { next(error) }
   }
 }

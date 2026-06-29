@@ -5,7 +5,8 @@ import { logger } from '../../logger'
 export const pricingController = {
   async getMaterialsWithPrices(req: Request, res: Response) {
     try {
-      const materials = await pricingService.getMaterialsWithPrices()
+      const includeInactive = req.query.includeInactive === 'true'
+      const materials = await pricingService.getMaterialsWithPrices(includeInactive)
       res.json({ data: materials })
     } catch (error: any) {
       logger.error(error, 'Error fetching materials with prices')

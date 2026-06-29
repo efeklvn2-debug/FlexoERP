@@ -323,8 +323,9 @@ export const salesOrderRepository = {
     }
 
     // Add standalone deposits (no salesOrderId) that sit in 2250 Advance Customer Payments
+    // Include both DEPOSIT and PAYMENT types — a standalone PAYMENT (no order) is functionally a deposit
     const standaloneDeposits = await prisma.paymentTransaction.aggregate({
-      where: { customerId, transactionType: 'DEPOSIT', salesOrderId: null },
+      where: { customerId, transactionType: { in: ['DEPOSIT', 'PAYMENT'] }, salesOrderId: null },
       _sum: { amount: true }
     })
     const standaloneDepositTotal = Number(standaloneDeposits._sum.amount || 0)
@@ -339,13 +340,46 @@ export const salesOrderRepository = {
     const advancePaymentBalance = standaloneDepositTotal - appliedDepositTotal
     depositHeld += advancePaymentBalance
 
+    // Available printed rolls (IN_STOCK) for this customer via productionJob.customerName
+    const availableRollsCount = await prisma.printedRoll.count({
+      where: {
+        status: 'IN_STOCK',
+        productionJob: { customerName: customer.name }
+      }
+    })
+
+    // Last transaction date across orders, invoices, and payments
+    const lastOrder = await prisma.salesOrder.findFirst({
+      where: { customerId, isDeleted: false },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true }
+    })
+    const lastPayment = await prisma.paymentTransaction.findFirst({
+      where: { customerId },
+      orderBy: { receivedAt: 'desc' },
+      select: { receivedAt: true }
+    })
+    const lastInvoice = await prisma.invoice.findFirst({
+      where: { customerId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true }
+    })
+
+    const dates: Date[] = []
+    if (lastOrder?.createdAt) dates.push(lastOrder.createdAt)
+    if (lastPayment?.receivedAt) dates.push(lastPayment.receivedAt)
+    if (lastInvoice?.createdAt) dates.push(lastInvoice.createdAt)
+    const lastTransactionDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))).toISOString() : null
+
     return {
       customerId,
       customerName: customer.name,
       totalOutstanding,
       depositHeld,
       availableCredit: Number(customer.creditLimit) - totalOutstanding,
-      ordersCount
+      ordersCount,
+      availableRollsCount,
+      lastTransactionDate
     }
   },
 
@@ -406,6 +440,56 @@ export const salesOrderRepository = {
       where: { isActive: true }
     })
 
+    // Batch: IN_STOCK printed rolls grouped by customer name via production job
+    const inStockRolls = await prisma.printedRoll.findMany({
+      where: { status: 'IN_STOCK' },
+      select: { productionJob: { select: { customerName: true } } }
+    })
+    const rollCountByName: Record<string, number> = {}
+    for (const roll of inStockRolls) {
+      const name = roll.productionJob.customerName
+      if (name) {
+        rollCountByName[name] = (rollCountByName[name] || 0) + 1
+      }
+    }
+
+    // Batch: latest transaction date per customer
+    const latestOrders = await prisma.salesOrder.groupBy({
+      by: ['customerId'],
+      _max: { createdAt: true },
+      where: { isDeleted: false }
+    })
+    const latestPayments = await prisma.paymentTransaction.groupBy({
+      by: ['customerId'],
+      _max: { receivedAt: true }
+    })
+    const latestInvoices = await prisma.invoice.groupBy({
+      by: ['customerId'],
+      _max: { createdAt: true }
+    })
+    const lastDateByCustomerId: Record<string, string> = {}
+    for (const o of latestOrders) {
+      if (o._max.createdAt && o.customerId) {
+        const curr = lastDateByCustomerId[o.customerId]
+        const ts = o._max.createdAt.toISOString()
+        if (!curr || ts > curr) lastDateByCustomerId[o.customerId] = ts
+      }
+    }
+    for (const p of latestPayments) {
+      if (p._max.receivedAt && p.customerId) {
+        const curr = lastDateByCustomerId[p.customerId]
+        const ts = p._max.receivedAt.toISOString()
+        if (!curr || ts > curr) lastDateByCustomerId[p.customerId] = ts
+      }
+    }
+    for (const i of latestInvoices) {
+      if (i._max.createdAt && i.customerId) {
+        const curr = lastDateByCustomerId[i.customerId]
+        const ts = i._max.createdAt.toISOString()
+        if (!curr || ts > curr) lastDateByCustomerId[i.customerId] = ts
+      }
+    }
+
     const balances = []
     for (const customer of customers) {
       const orders = await prisma.salesOrder.findMany({
@@ -426,8 +510,9 @@ export const salesOrderRepository = {
       }
 
       // Add standalone deposits (no salesOrderId) that sit in 2250
+      // Include both DEPOSIT and PAYMENT types — a standalone PAYMENT (no order) is functionally a deposit
       const standaloneDeposits = await prisma.paymentTransaction.aggregate({
-        where: { customerId: customer.id, transactionType: 'DEPOSIT', salesOrderId: null },
+        where: { customerId: customer.id, transactionType: { in: ['DEPOSIT', 'PAYMENT'] }, salesOrderId: null },
         _sum: { amount: true }
       })
       const standaloneDepositTotal = Number(standaloneDeposits._sum.amount || 0)
@@ -448,12 +533,105 @@ export const salesOrderRepository = {
         totalOutstanding,
         depositHeld,
         availableCredit: Number(customer.creditLimit) - totalOutstanding,
-        ordersCount
+        ordersCount,
+        availableRollsCount: rollCountByName[customer.name] || 0,
+        lastTransactionDate: lastDateByCustomerId[customer.id] || null
       })
     }
 
     return balances
-  }
+  },
+
+  // Customer transaction history
+  async getCustomerTransactions(customerId: string) {
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { name: true }
+    })
+    if (!customer) throw new AppError(404, 'NOT_FOUND', 'Customer not found')
+
+    const [orders, invoices, payments, coreBuybacks] = await Promise.all([
+      prisma.salesOrder.findMany({
+        where: { customerId, isDeleted: false },
+        include: { productionJob: { select: { jobNumber: true } } },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.invoice.findMany({
+        where: { customerId },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.paymentTransaction.findMany({
+        where: { customerId },
+        orderBy: { receivedAt: 'desc' }
+      }),
+      prisma.coreBuyback.findMany({
+        where: { customerId },
+        orderBy: { date: 'desc' }
+      })
+    ])
+
+    const transactions: {
+      id: string
+      type: 'ORDER' | 'INVOICE' | 'PAYMENT' | 'CORE_BUYBACK'
+      date: string
+      description: string
+      amount: number
+      status: string
+      reference: string
+    }[] = []
+
+    for (const o of orders) {
+      transactions.push({
+        id: o.id,
+        type: 'ORDER',
+        date: o.createdAt.toISOString(),
+        description: `Sales Order${o.productionJob?.jobNumber ? ` (Job ${o.productionJob.jobNumber})` : ''}`,
+        amount: Number(o.totalAmount),
+        status: o.status,
+        reference: o.orderNumber
+      })
+    }
+
+    for (const inv of invoices) {
+      transactions.push({
+        id: inv.id,
+        type: 'INVOICE',
+        date: (inv.issuedAt || inv.createdAt).toISOString(),
+        description: `Invoice - ${inv.status === 'PAID' ? 'Paid' : 'Balance Due: ₦' + Number(inv.balanceDue).toLocaleString()}`,
+        amount: Number(inv.totalAmount),
+        status: inv.status,
+        reference: inv.invoiceNumber
+      })
+    }
+
+    for (const p of payments) {
+      transactions.push({
+        id: p.id,
+        type: 'PAYMENT',
+        date: p.receivedAt.toISOString(),
+        description: p.transactionType.replace(/_/g, ' ') + (p.paymentMethod ? ` (${p.paymentMethod})` : ''),
+        amount: Number(p.amount),
+        status: p.transactionType,
+        reference: p.referenceNumber || '-'
+      })
+    }
+
+    for (const cb of coreBuybacks) {
+      transactions.push({
+        id: cb.id,
+        type: 'CORE_BUYBACK',
+        date: cb.date.toISOString(),
+        description: `${cb.coresQuantity} cores @ ₦${Number(cb.ratePerCore).toLocaleString()}`,
+        amount: Number(cb.totalValue),
+        status: 'COMPLETED',
+        reference: cb.id.slice(0, 8)
+      })
+    }
+
+    transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+    return transactions
+  },
 }
 
 export const paymentRepository = {
@@ -675,7 +853,7 @@ export const coreBuybackRepository = {
       include: { customer: true },
       orderBy: { date: 'desc' }
     })
-  }
+  },
 }
 
 export const receiptRepository = {

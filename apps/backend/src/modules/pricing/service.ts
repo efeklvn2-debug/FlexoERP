@@ -106,9 +106,10 @@ export const pricingService = {
     return prisma.priceList.delete({ where: { id } })
   },
 
-  async getMaterialsWithPrices() {
+  async getMaterialsWithPrices(includeInactive = false) {
+    const where = includeInactive ? {} : { isActive: true }
     const materials = await prisma.material.findMany({
-      where: { isActive: true },
+      where,
       include: {
         priceLists: {
           orderBy: { effectiveFrom: 'desc' },
@@ -124,6 +125,7 @@ export const pricingService = {
       category: m.category,
       subCategory: m.subCategory,
       packSize: m.packSize,
+      isActive: m.isActive,
       costPrice: m.costPrice ? Number(m.costPrice) : null,
       pricePerKg: m.priceLists[0]?.pricePerKg ? Number(m.priceLists[0].pricePerKg) : null,
       pricePerPack: m.priceLists[0]?.pricePerPack ? Number(m.priceLists[0].pricePerPack) : null,

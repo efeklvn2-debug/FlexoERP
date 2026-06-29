@@ -34,15 +34,10 @@ const CATEGORY_LABELS: Record<ItemCategory, string> = {
   PACKAGING: 'Packaging',
 }
 
-const SUB_CATEGORIES: Record<ItemCategory, string[]> = {
-  PLAIN_ROLLS: ['25microns', '27microns', '28microns', '30microns', 'Premium', 'SuPremium'],
-  INK_SOLVENTS: ['IPA', 'Butanol', 'Red-Ink', 'Yellow-Ink', 'White-Ink', 'RoyalBlue-Ink', 'VioletBlue-Ink', 'SkyBlue-Ink'],
-  PACKAGING: ['PackingBag'],
-}
-
 export function ProcurementPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [materials, setMaterials] = useState<MaterialWithStock[]>([])
+  const [subCategories, setSubCategories] = useState<Record<string, string[]>>({})
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [newSupplier, setNewSupplier] = useState('')
   const [showSupplierModal, setShowSupplierModal] = useState(false)
@@ -100,15 +95,17 @@ export function ProcurementPage() {
     setLoading(true)
     setError('')
     try {
-      const [poRes, matRes, supRes, invRes] = await Promise.all([
+      const [poRes, matRes, supRes, invRes, subCatRes] = await Promise.all([
         procurementApi.getPOs(),
         inventoryApi.getMaterials(),
         suppliersApi.getAll(),
-        procurementApi.getSupplierInvoices()
+        procurementApi.getSupplierInvoices(),
+        inventoryApi.getSubCategories()
       ])
       setPurchaseOrders(Array.isArray(poRes.data) ? poRes.data : (poRes.data as any)?.data || [])
       setMaterials(Array.isArray(matRes.data) ? matRes.data : (matRes.data as any)?.data || [])
       setSuppliers(Array.isArray(supRes.data) ? supRes.data : (supRes.data as any)?.data || [])
+      setSubCategories((subCatRes.data as any)?.data || {})
       const invoices = Array.isArray(invRes.data) ? invRes.data : (invRes.data as any)?.data || []
       setSupplierInvoices(invoices)
       setInvoicedPOIds(new Set(invoices.map((inv: SupplierInvoice) => inv.poId)))
@@ -714,14 +711,10 @@ export function ProcurementPage() {
                           className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
                         >
                           <option value="">Select type</option>
-                          {currentItem.category === 'PLAIN_ROLLS' && SUB_CATEGORIES.PLAIN_ROLLS.map(sc => (
-                            <option key={sc} value={sc}>{sc}</option>
-                          ))}
-                          {currentItem.category === 'INK_SOLVENTS' && SUB_CATEGORIES.INK_SOLVENTS.map(sc => (
-                            <option key={sc} value={sc}>{sc.replace('-', ' ')}</option>
-                          ))}
-                          {currentItem.category === 'PACKAGING' && SUB_CATEGORIES.PACKAGING.map(sc => (
-                            <option key={sc} value={sc}>{sc}</option>
+                          {(subCategories[currentItem.category] || []).map(sc => (
+                            <option key={sc} value={sc}>
+                              {currentItem.category === 'INK_SOLVENTS' ? sc.replace('-', ' ') : sc}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -730,7 +723,7 @@ export function ProcurementPage() {
                     {currentItem.category === 'INK_SOLVENTS' && currentItem.materialId && (
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">
-                          {materials.find(m => m.id === currentItem.materialId)?.unitOfMeasure === 'liter' ? 'Drums' : 'Kegs'}
+                          {['IPA', 'Butanol'].includes(materials.find(m => m.id === currentItem.materialId)?.name || '') ? 'Quantity(Liters)' : 'Quantity(kg)'}
                         </label>
                         <input 
                           type="number" 
@@ -877,20 +870,32 @@ export function ProcurementPage() {
               <h2 className="text-xl font-bold mb-2">Receive PO: {selectedPO.poNumber}</h2>
               <p className="text-sm text-slate-500 mb-4">This will automatically:</p>
               <ul className="text-sm text-slate-600 space-y-1 mb-4">
-                <li>• Create rolls for each line item (avg weight per roll)</li>
-                <li>• Add total weight to inventory stock</li>
+                {(() => {
+                  const firstItem = selectedPO.items?.[0];
+                  const firstMat = firstItem?.materialId ? materials.find(m => m.id === firstItem.materialId) : undefined;
+                  if (firstMat?.category === 'PLAIN_ROLLS') return <>
+                    <li>• Create rolls for each line item (avg weight per roll)</li>
+                    <li>• Add total weight to inventory stock</li>
+                  </>;
+                  return <li>• Add total quantity to inventory stock</li>;
+                })()}
               </ul>
               
               <div className="bg-slate-50 rounded-lg p-3 mb-4">
                 <h3 className="font-medium text-slate-900 mb-2">Summary</h3>
-                {selectedPO.items?.map(item => (
-                  <div key={item.id} className="flex justify-between text-sm text-slate-600 py-1">
-                    <span>{item.material?.name || item.materialId}</span>
-                    <span>{item.quantity} rolls × {Number(item.totalWeight).toFixed(2)}kg</span>
-                  </div>
-                ))}
+                {selectedPO.items?.map(item => {
+                  const itemMat = item.materialId ? materials.find(m => m.id === item.materialId) : undefined;
+                  return (
+                    <div key={item.id} className="flex justify-between text-sm text-slate-600 py-1">
+                      <span>{item.material?.name || item.materialId}</span>
+                      <span>{itemMat?.category === 'PLAIN_ROLLS'
+                        ? `${item.quantity} rolls × ${Number(item.totalWeight).toFixed(2)}kg`
+                        : `${item.quantity} × ${Number(item.totalWeight).toFixed(2)}kg`}</span>
+                    </div>
+                  );
+                })}
                 <div className="border-t border-slate-200 mt-2 pt-2 flex justify-between font-medium">
-                  <span>Total Rolls:</span>
+                  <span>Total:</span>
                   <span>{selectedPO.items?.reduce((sum, i) => sum + i.quantity, 0) || 0}</span>
                 </div>
               </div>
@@ -914,7 +919,7 @@ export function ProcurementPage() {
                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLORS[selectedPO.status] || 'bg-slate-100'}`}>{selectedPO.status}</span>
               </div>
               
-              <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+              <div className="flex flex-wrap gap-x-6 gap-y-1.5 mb-4 text-sm">
                 <div>
                   <span className="text-slate-500">Expected Date:</span>
                   <span className="ml-2 text-slate-900">{selectedPO.expectedDate ? new Date(selectedPO.expectedDate).toLocaleDateString() : '-'}</span>
@@ -930,7 +935,7 @@ export function ProcurementPage() {
                   </div>
                 )}
                 {selectedPO.notes && (
-                  <div className="col-span-2">
+                  <div className="w-full">
                     <span className="text-slate-500">Notes:</span>
                     <p className="text-slate-900 mt-1">{selectedPO.notes}</p>
                   </div>
@@ -1075,14 +1080,10 @@ export function ProcurementPage() {
                           className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
                         >
                           <option value="">Select type</option>
-                          {editCurrentItem.category === 'PLAIN_ROLLS' && SUB_CATEGORIES.PLAIN_ROLLS.map(sc => (
-                            <option key={sc} value={sc}>{sc}</option>
-                          ))}
-                          {editCurrentItem.category === 'INK_SOLVENTS' && SUB_CATEGORIES.INK_SOLVENTS.map(sc => (
-                            <option key={sc} value={sc}>{sc.replace('-', ' ')}</option>
-                          ))}
-                          {editCurrentItem.category === 'PACKAGING' && SUB_CATEGORIES.PACKAGING.map(sc => (
-                            <option key={sc} value={sc}>{sc}</option>
+                          {(subCategories[editCurrentItem.category] || []).map(sc => (
+                            <option key={sc} value={sc}>
+                              {editCurrentItem.category === 'INK_SOLVENTS' ? sc.replace('-', ' ') : sc}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -1092,7 +1093,7 @@ export function ProcurementPage() {
                       <div>
                         <label className="block text-xs text-slate-500 mb-1">
                           {editCurrentItem.category === 'INK_SOLVENTS' ? 
-                            (materials.find(m => m.id === editCurrentItem.materialId)?.unitOfMeasure === 'liter' ? 'Drums' : 'Kegs') :
+                            (['IPA', 'Butanol'].includes(materials.find(m => m.id === editCurrentItem.materialId)?.name || '') ? 'Quantity(Liters)' : 'Quantity(kg)') :
                             'Bundles'}
                         </label>
                         <input 

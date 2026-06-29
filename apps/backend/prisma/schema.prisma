@@ -24,7 +24,8 @@ model User {
   passwordHash String
   role         Role           @default(OPERATOR)
   isActive     Boolean        @default(true)
-  createdAt    DateTime       @default(now())
+  archivedAt      DateTime?
+  createdAt       DateTime      @default(now())
   updatedAt    DateTime       @updatedAt
   refreshTokens RefreshToken[]
   receipts     Receipt[]
@@ -131,8 +132,8 @@ model Stock {
   id          String   @id @default(cuid())
   materialId  String
   material    Material @relation(fields: [materialId], references: [id])
-  quantity    Int      @default(0)
-  location    String?
+    quantity    Float    @default(0)
+    location    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   movements   StockMovement[]
@@ -148,7 +149,7 @@ model StockMovement {
   stockId     String?
   stock       Stock?       @relation(fields: [stockId], references: [id])
   type        MovementType
-  quantity    Int
+  quantity    Float
   reference   String?
   notes       String?
   createdAt   DateTime     @default(now())
@@ -201,7 +202,7 @@ model POLineItem {
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   materialId       String
   material        Material      @relation(fields: [materialId], references: [id])
-  quantity         Int           // number of rolls
+      quantity    Float           // number of rolls
   totalWeight     Decimal       @db.Decimal(10, 2) // total kg
   unitPrice       Decimal       @db.Decimal(12, 2) // price per kg
   receivedQty     Int           @default(0)
@@ -295,6 +296,21 @@ model PrintedRoll {
   @@index([rollId])
   @@index([status])
   @@index([customerId])
+}
+
+// ============================================================================
+// INK COLORS (managed in Settings, used across app)
+// ============================================================================
+
+model InkColor {
+  id        String   @id @default(cuid())
+  name      String   @unique       // Customer-facing name, e.g. "RoyalBlue"
+  mapping    String   @unique       // Material subCategory, e.g. "RoyalBlue-Ink"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
 }
 
 model Settings {

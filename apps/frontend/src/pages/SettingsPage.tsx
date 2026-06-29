@@ -1,17 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { settingsApi, ConsumptionRates, InvoiceSettings } from '../api/settings'
 import { pricingApi, MaterialWithPrice } from '../api/pricing'
 import { inventoryApi, MaterialCategory } from '../api/inventory'
 import { Layout } from '../components/Layout'
 
-type SettingsTab = 'consumption' | 'core-deposits' | 'products' | 'overhead' | 'vat' | 'invoice'
+type SettingsTab = 'consumption' | 'core-deposits' | 'products' | 'overhead' | 'vat' | 'invoice' | 'ink-colors'
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('products')
   const [rates, setRates] = useState<ConsumptionRates>({
     coreWeight: 0.7,
     inkConsumptionRate: 0.7,
-    inkCostPerLiter: 50,
     ipaConsumptionRate: 0.1,
     butanolConsumptionRate: 0.1,
     coreDepositValue: 150
@@ -33,14 +32,24 @@ export function SettingsPage() {
   const [showPriceModal, setShowPriceModal] = useState(false)
   const [selectedMaterial, setSelectedMaterial] = useState<MaterialWithPrice | null>(null)
 
+  const [showArchived, setShowArchived] = useState(false)
+  const [archiveConfirm, setArchiveConfirm] = useState<MaterialWithPrice | null>(null)
+
+  // Ink Colors state
+  const [inkColors, setInkColors] = useState<any[]>([])
+  const [showArchivedInkColors, setShowArchivedInkColors] = useState(false)
+  const [showAddInkColorModal, setShowAddInkColorModal] = useState(false)
+  const [inkColorForm, setInkColorForm] = useState({ name: '', mapping: '' })
+  const [archiveInkConfirm, setArchiveInkConfirm] = useState<any>(null)
+
   const [materialForm, setMaterialForm] = useState({
     name: '',
     code: '',
     category: 'PLAIN_ROLLS' as MaterialCategory,
-    subCategory: '',
     costPrice: 0,
     packSize: 1
   })
+  const codeManuallyEdited = useRef(false)
 
   const [priceForm, setPriceForm] = useState({
     costPrice: 0,
@@ -48,11 +57,27 @@ export function SettingsPage() {
     pricePerPack: 0
   })
 
-useEffect(() => {
+  useEffect(() => {
     loadSettings()
-    loadMaterials()
+    loadMaterials(false)
     loadOverheadRate()
   }, [])
+
+  useEffect(() => {
+    if (showMaterialModal) {
+      codeManuallyEdited.current = false
+    }
+  }, [showMaterialModal])
+
+  useEffect(() => {
+    if (materialForm.name && !codeManuallyEdited.current) {
+      const autoCode = materialForm.name
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase()
+        .slice(0, 5)
+      setMaterialForm(prev => ({ ...prev, code: autoCode }))
+    }
+  }, [materialForm.name])
 
   const loadOverheadRate = async () => {
     try {
@@ -105,7 +130,6 @@ const loadSettings = async () => {
         setRates({
           coreWeight: data.coreWeight ?? 0.7,
           inkConsumptionRate: inkRate,
-          inkCostPerLiter: data.inkCostPerLiter ?? 50,
           ipaConsumptionRate: data.ipaConsumptionRate ?? 0.1,
           butanolConsumptionRate: data.butanolConsumptionRate ?? 0.1,
           coreDepositValue: data.coreDepositValue ?? 150
@@ -119,13 +143,24 @@ const loadSettings = async () => {
     }
   }
 
-  const loadMaterials = async () => {
+  const loadMaterials = async (includeArchived?: boolean) => {
     try {
-      const res = await pricingApi.getMaterialsWithPrices()
+      const include = includeArchived !== undefined ? includeArchived : showArchived
+      const res = await pricingApi.getMaterialsWithPrices(include)
       const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
       setMaterials(data)
     } catch (err: any) {
       console.error('Failed to load materials:', err)
+    }
+  }
+
+  const loadInkColors = async (includeInactive?: boolean) => {
+    try {
+      const res = await settingsApi.getInkColors(includeInactive ?? showArchivedInkColors)
+      const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
+      setInkColors(data)
+    } catch (err: any) {
+      console.error('Failed to load ink colors:', err)
     }
   }
 
@@ -140,8 +175,6 @@ const loadSettings = async () => {
     const res = await settingsApi.updateConsumptionRates(rates)
     console.log('Save response:', res)
     console.log('Save response data:', res.data)
-    const respData = (res.data as any)?.data ?? res.data
-    console.log('inkCostPerLiter in response:', respData?.inkCostPerLiter)
     
     if (res.error) {
       setError(res.error.message)
@@ -173,7 +206,6 @@ const loadSettings = async () => {
         name: materialForm.name,
         code: materialForm.code,
         category: materialForm.category,
-        subCategory: materialForm.subCategory || undefined,
         costPrice: materialForm.costPrice || undefined,
         packSize: materialForm.packSize || 1,
         unitOfMeasure: materialForm.category === 'PACKAGING' ? 'bundle' : 'pcs',
@@ -184,7 +216,7 @@ const loadSettings = async () => {
         setError(res.error.message)
       } else {
         setShowMaterialModal(false)
-        setMaterialForm({ name: '', code: '', category: 'PLAIN_ROLLS', subCategory: '', costPrice: 0, packSize: 1 })
+        setMaterialForm({ name: '', code: '', category: 'PLAIN_ROLLS', costPrice: 0, packSize: 1 })
         loadMaterials()
         setSuccess('Material created successfully')
         setTimeout(() => setSuccess(''), 3000)
@@ -238,6 +270,33 @@ const loadSettings = async () => {
       pricePerPack: material.pricePerPack || 0
     })
     setShowPriceModal(true)
+  }
+
+  const handleArchive = async (material: MaterialWithPrice) => {
+    setSaving(true)
+    try {
+      await inventoryApi.archiveMaterial(material.id)
+      loadMaterials()
+      setSuccess(`${material.name} archived`)
+      setTimeout(() => setSuccess(''), 3000)
+    } catch (err: any) {
+      setError(err.message)
+    }
+    setSaving(false)
+    setArchiveConfirm(null)
+  }
+
+  const handleRestore = async (material: MaterialWithPrice) => {
+    setSaving(true)
+    try {
+      await inventoryApi.restoreMaterial(material.id)
+      loadMaterials()
+      setSuccess(`${material.name} restored`)
+      setTimeout(() => setSuccess(''), 3000)
+    } catch (err: any) {
+      setError(err.message)
+    }
+    setSaving(false)
   }
 
   if (loading) {
@@ -305,6 +364,14 @@ const loadSettings = async () => {
           >
             Invoices/Receipts
           </button>
+          <button
+            onClick={() => { setActiveTab('ink-colors'); loadInkColors() }}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'ink-colors' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Ink Colors
+          </button>
         </div>
 
         {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
@@ -322,24 +389,45 @@ const loadSettings = async () => {
               </button>
             </div>
 
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showArchived}
+                    onChange={() => {
+                      const next = !showArchived
+                      setShowArchived(next)
+                      loadMaterials(next)
+                    }}
+                    className="rounded border-slate-300"
+                  />
+                  Show archived
+                </label>
+              </div>
+            </div>
+
             <div className="bg-white rounded-xl shadow-sm border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Code</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Category</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Cost Price</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Selling Price (/kg)</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Selling Price (bundle)</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Selling Price (per pack)</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {materials.map(m => (
-                    <tr key={m.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 text-sm font-medium text-slate-900">{m.code}</td>
-                      <td className="px-4 py-3 text-sm text-slate-600">{m.name}</td>
+                    <tr key={m.id} className={`hover:bg-slate-50 ${m.isActive === false ? 'opacity-50' : ''}`}>
+                      <td className="px-4 py-3 text-sm text-slate-600">
+                        {m.name}
+                        {m.isActive === false && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-slate-200 text-slate-500">archived</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-slate-600">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                           m.category === 'PLAIN_ROLLS' ? 'bg-blue-100 text-blue-800' :
@@ -359,18 +447,35 @@ const loadSettings = async () => {
                         {m.pricePerPack ? `₦${m.pricePerPack.toLocaleString()}` : '-'}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => openPriceModal(m)}
-                          className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                        >
-                          {m.pricePerKg || m.pricePerPack ? 'Update Price' : 'Set Price'}
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => openPriceModal(m)}
+                            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                          >
+                            {m.pricePerKg || m.pricePerPack ? 'Update Price' : 'Set Price'}
+                          </button>
+                          {m.isActive === false ? (
+                            <button
+                              onClick={() => handleRestore(m)}
+                              className="text-green-600 hover:text-green-700 text-sm font-medium"
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setArchiveConfirm(m)}
+                              className="text-red-600 hover:text-red-700 text-sm font-medium"
+                            >
+                              Archive
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
                   {materials.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
                         No materials found. Click "Add Material" to create one.
                       </td>
                     </tr>
@@ -417,21 +522,6 @@ const loadSettings = async () => {
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                 />
                 <p className="text-xs text-slate-500 mt-1">Liters of ink per kg of printed roll. Default: 0.2 L</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Ink Cost Per Liter (₦)
-                </label>
-                <input
-                  type="number"
-                  step="1"
-                  min="0"
-                  value={rates.inkCostPerLiter}
-                  onChange={e => setRates({ ...rates, inkCostPerLiter: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                />
-                <p className="text-xs text-slate-500 mt-1">Cost per liter of ink. Default: ₦50</p>
               </div>
 
               <div>
@@ -867,6 +957,174 @@ const loadSettings = async () => {
           </div>
         )}
 
+        {activeTab === 'ink-colors' && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold">Ink Colors</h2>
+              <button
+                onClick={() => { setInkColorForm({ name: '', mapping: '' }); setShowAddInkColorModal(true) }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Add Ink Color
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showArchivedInkColors}
+                  onChange={() => {
+                    const next = !showArchivedInkColors
+                    setShowArchivedInkColors(next)
+                    loadInkColors(next)
+                  }}
+                  className="rounded border-slate-300"
+                />
+                Show archived
+              </label>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Color Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Material Mapping</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {inkColors.map(ic => (
+                    <tr key={ic.id} className={`hover:bg-slate-50 ${ic.isActive === false ? 'opacity-50' : ''}`}>
+                      <td className="px-4 py-3 text-sm text-slate-600">
+                        {ic.name.replace(/([A-Z])/g, ' $1').trim()}
+                        {ic.isActive === false && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-slate-200 text-slate-500">archived</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600">{ic.mapping}</td>
+                      <td className="px-4 py-3 text-right">
+                        {ic.isActive === false ? (
+                          <button
+                            onClick={async () => {
+                              await settingsApi.restoreInkColor(ic.id)
+                              setSuccess(`${ic.name} restored`)
+                              setTimeout(() => setSuccess(''), 3000)
+                              loadInkColors()
+                            }}
+                            className="text-green-600 hover:text-green-700 text-sm font-medium"
+                          >
+                            Restore
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setArchiveInkConfirm(ic)}
+                            className="text-red-600 hover:text-red-700 text-sm font-medium"
+                          >
+                            Archive
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {inkColors.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-4 py-8 text-center text-slate-500">
+                        No ink colors configured. Click "Add Ink Color" to create one.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Add Ink Color Modal */}
+        {showAddInkColorModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+              <h2 className="text-xl font-bold mb-4">Add Ink Color</h2>
+              <form onSubmit={async (e) => {
+                e.preventDefault()
+                setSaving(true)
+                setError('')
+                try {
+                  const res = await settingsApi.createInkColor(inkColorForm)
+                  if (res.error) { setError(res.error.message); return }
+                  setShowAddInkColorModal(false)
+                  setSuccess(`Ink color "${inkColorForm.name}" added`)
+                  setTimeout(() => setSuccess(''), 3000)
+                  loadInkColors()
+                } catch (err: any) {
+                  setError(err.message)
+                }
+                setSaving(false)
+              }} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Color Name <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={inkColorForm.name}
+                    onChange={e => setInkColorForm({ ...inkColorForm, name: e.target.value })}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    placeholder="e.g., Gold"
+                    required
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Customer-facing name, e.g. "Gold"</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Material Mapping <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={inkColorForm.mapping}
+                    onChange={e => setInkColorForm({ ...inkColorForm, mapping: e.target.value })}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    placeholder="e.g., Gold-Ink"
+                    required
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    The INK_SOLVENTS material subCategory this color maps to. If no material exists with this subCategory, one will be auto-created.
+                  </p>
+                </div>
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button type="button" onClick={() => setShowAddInkColorModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                  <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg">{saving ? 'Adding...' : 'Add'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Archive Ink Color Confirmation */}
+        {archiveInkConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+              <h2 className="text-xl font-bold mb-4">Archive Ink Color</h2>
+              <p className="text-slate-600 mb-6">
+                Are you sure you want to archive <strong>{archiveInkConfirm.name}</strong>? It will be hidden from the customer color selection.
+              </p>
+              <div className="flex justify-end space-x-3">
+                <button onClick={() => setArchiveInkConfirm(null)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button onClick={async () => {
+                  setSaving(true)
+                  try {
+                    await settingsApi.archiveInkColor(archiveInkConfirm.id)
+                    setSuccess(`${archiveInkConfirm.name} archived`)
+                    setTimeout(() => setSuccess(''), 3000)
+                    loadInkColors()
+                  } catch (err: any) {
+                    setError(err.message)
+                  }
+                  setSaving(false)
+                  setArchiveInkConfirm(null)
+                }} disabled={saving} className="px-4 py-2 bg-red-600 text-white rounded-lg">{saving ? 'Archiving...' : 'Archive'}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Add Material Modal */}
         {showMaterialModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -888,7 +1146,10 @@ const loadSettings = async () => {
                   <input
                     type="text"
                     value={materialForm.code}
-                    onChange={e => setMaterialForm({...materialForm, code: e.target.value.toUpperCase()})}
+                    onChange={e => {
+                      codeManuallyEdited.current = true
+                      setMaterialForm({...materialForm, code: e.target.value.toUpperCase()})
+                    }}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                     required
                   />
@@ -905,16 +1166,6 @@ const loadSettings = async () => {
                     <option value="INK_SOLVENTS">Ink & Solvents</option>
                     <option value="PACKAGING">Packaging</option>
                   </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Sub Category</label>
-                  <input
-                    type="text"
-                    value={materialForm.subCategory}
-                    onChange={e => setMaterialForm({...materialForm, subCategory: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                    placeholder="e.g., 25microns, Premium"
-                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Cost Price (₦)</label>
@@ -997,6 +1248,21 @@ const loadSettings = async () => {
                   <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg">{saving ? 'Saving...' : 'Save Prices'}</button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {archiveConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+              <h2 className="text-xl font-bold mb-4">Archive Material</h2>
+              <p className="text-slate-600 mb-6">
+                Are you sure you want to archive <strong>{archiveConfirm.name}</strong>? It will be hidden from all dropdowns in inventory, procurement, and sales.
+              </p>
+              <div className="flex justify-end space-x-3">
+                <button onClick={() => setArchiveConfirm(null)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button onClick={() => handleArchive(archiveConfirm)} disabled={saving} className="px-4 py-2 bg-red-600 text-white rounded-lg">{saving ? 'Archiving...' : 'Archive'}</button>
+              </div>
             </div>
           </div>
         )}

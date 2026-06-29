@@ -14,6 +14,13 @@ inventoryRouter.get(
 )
 
 inventoryRouter.get(
+  '/materials/sub-categories',
+  authenticate,
+  loadUser,
+  inventoryController.getSubCategories
+)
+
+inventoryRouter.get(
   '/materials/:id',
   authenticate,
   loadUser,

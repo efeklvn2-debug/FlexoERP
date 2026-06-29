@@ -150,6 +150,18 @@ export interface CustomerBalance {
   depositHeld: number
   availableCredit: number
   ordersCount: number
+  availableRollsCount: number
+  lastTransactionDate: string | null
+}
+
+export interface CustomerTransaction {
+  id: string
+  type: 'ORDER' | 'INVOICE' | 'PAYMENT' | 'CORE_BUYBACK'
+  date: string
+  description: string
+  amount: number
+  status: string
+  reference: string
 }
 
 export interface CustomerAging {
@@ -279,6 +291,7 @@ export const salesOrderApi = {
   // Customers (MTO)
   getCustomers: () => api.get<Customer[]>('/sales-orders/customers'),
   getCustomer: (id: string) => api.get<Customer>(`/sales-orders/customers/${id}`),
+  getCustomerTransactions: (customerId: string) => api.get<CustomerTransaction[]>(`/sales-orders/customers/${customerId}/transactions`),
   createCustomer: (data: {
     name: string
     code?: string

@@ -11,6 +11,7 @@ export interface MaterialWithPrice {
   pricePerKg: number | null
   pricePerPack: number | null
   priceListId: string | null
+  isActive?: boolean
 }
 
 export interface PriceListInput {
@@ -21,8 +22,9 @@ export interface PriceListInput {
 }
 
 export const pricingApi = {
-  getMaterialsWithPrices: async () => {
-    return api.get<MaterialWithPrice[]>('/pricing/materials-prices')
+  getMaterialsWithPrices: async (includeInactive?: boolean) => {
+    const params = includeInactive ? '?includeInactive=true' : ''
+    return api.get<MaterialWithPrice[]>(`/pricing/materials-prices${params}`)
   },
 
   getPriceLists: async () => {

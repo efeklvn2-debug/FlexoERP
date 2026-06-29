@@ -158,6 +158,9 @@ export const financeApi = {
   getRootAccounts: () => api.get<Account[]>('/finance/accounts/tree'),
   getAccountById: (id: string) => api.get<Account>(`/finance/accounts/${id}`),
   createAccount: (data: Partial<Account>) => api.post<Account>('/finance/accounts', data),
+  seedAccounts: () => api.post<{ message: string; count: number }>('/finance/seed', {}),
+  postOpeningBalances: (data: { date: string; lines: { accountId: string; amount: number }[] }) =>
+    api.post<{ success: boolean; accountsUpdated: number; totalAssetDebits: number; totalLiabilityEquityCredits: number; unbalancedAmount: number }>('/finance/opening-balances', data),
 
   // Journal
   getJournalEntries: (params?: { dateFrom?: string; dateTo?: string; sourceModule?: string; accountId?: string; limit?: number; offset?: number }) => {

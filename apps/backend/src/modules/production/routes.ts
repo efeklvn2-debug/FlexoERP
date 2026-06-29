@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { productionController } from './controller'
-import { authenticate, loadUser } from '../../middleware/auth'
+import { authenticate, loadUser, authorize } from '../../middleware/auth'
+import { Role } from '@flexoprint/types'
 
 export const productionRouter = Router()
 
@@ -20,3 +21,4 @@ productionRouter.post('/parent-roll/:id/dispose', authenticate, loadUser, produc
 productionRouter.post('/parent-roll/:id/return', authenticate, loadUser, productionController.returnRoll)
 productionRouter.post('/parent-roll/:id/receive-replacement', authenticate, loadUser, productionController.receiveReplacement)
 productionRouter.post('/printed-roll/:id/customer-return', authenticate, loadUser, productionController.customerReturnRoll)
+productionRouter.post('/printed-rolls/archive', authenticate, loadUser, authorize(Role.ADMIN, Role.MANAGER), productionController.archiveOldPrintedRolls)

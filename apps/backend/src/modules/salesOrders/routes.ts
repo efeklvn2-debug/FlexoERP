@@ -44,6 +44,7 @@ salesOrderRouter.patch('/customers/:customerId', salesOrderController.updateCust
 salesOrderRouter.get('/customers/:customerId/balance', salesOrderController.getCustomerBalance)
 salesOrderRouter.get('/customers/:customerId/aging', salesOrderController.getCustomerAging)
 salesOrderRouter.get('/customer-balances', salesOrderController.getAllCustomerBalances)
+salesOrderRouter.get('/customers/:customerId/transactions', salesOrderController.getCustomerTransactions)
 salesOrderRouter.post('/customers/:customerId/deposit', authorize(Role.ADMIN, Role.MANAGER), salesOrderController.adjustDeposit)
 
 // Packing Bag Sales

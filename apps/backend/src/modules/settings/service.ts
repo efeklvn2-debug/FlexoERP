@@ -6,7 +6,6 @@ const logger = createChildLogger('settings:service')
 export interface ConsumptionRates {
   coreWeight: number
   inkConsumptionRate: number
-  inkCostPerLiter: number
   ipaConsumptionRate: number
   butanolConsumptionRate: number
   coreDepositValue: number
@@ -19,7 +18,6 @@ export interface Settings {
   inkConsumptionRate: number
   ipaConsumptionRate: number
   butanolConsumptionRate: number
-  inkCostPerKg: number
   coreDepositValue: number
   vatRate: number
   overheadRatePerKg: number
@@ -79,7 +77,6 @@ export const settingsService = {
       inkConsumptionRate: Number(settings.inkConsumptionRate),
       ipaConsumptionRate: Number(settings.ipaConsumptionRate),
       butanolConsumptionRate: Number(settings.butanolConsumptionRate),
-      inkCostPerKg: Number(settings.inkCostPerKg || 500),
       coreDepositValue: Number(settings.coreDepositValue),
       vatRate: Number(settings.vatRate),
       overheadRatePerKg: Number(settings.overheadRatePerKg || 0),
@@ -101,7 +98,6 @@ export const settingsService = {
     return {
       coreWeight: settings.coreWeight,
       inkConsumptionRate: settings.inkConsumptionRate,
-      inkCostPerLiter: settings.inkCostPerKg,
       ipaConsumptionRate: settings.ipaConsumptionRate,
       butanolConsumptionRate: settings.butanolConsumptionRate,
       coreDepositValue: settings.coreDepositValue
@@ -116,7 +112,6 @@ export const settingsService = {
       update: {
         coreWeight: input.coreWeight,
         inkConsumptionRate: input.inkConsumptionRate,
-        inkCostPerKg: input.inkCostPerLiter,
         ipaConsumptionRate: input.ipaConsumptionRate,
         butanolConsumptionRate: input.butanolConsumptionRate,
         coreDepositValue: input.coreDepositValue
@@ -125,19 +120,15 @@ export const settingsService = {
         id: 'default',
         coreWeight: input.coreWeight || 0.7,
         inkConsumptionRate: input.inkConsumptionRate || 0.7,
-        inkCostPerKg: input.inkCostPerLiter || 500,
         ipaConsumptionRate: input.ipaConsumptionRate || 0.1,
         butanolConsumptionRate: input.butanolConsumptionRate || 0.1,
         coreDepositValue: input.coreDepositValue || 150
       }
     })
 
-    console.log('BACKEND updateConsumptionRates SETTINGS NOW:', settings.inkCostPerKg)
-
     const result = {
       coreWeight: Number(settings.coreWeight),
       inkConsumptionRate: Number(settings.inkConsumptionRate),
-      inkCostPerLiter: Number(settings.inkCostPerKg || 500),
       ipaConsumptionRate: Number(settings.ipaConsumptionRate),
       butanolConsumptionRate: Number(settings.butanolConsumptionRate),
       coreDepositValue: Number(settings.coreDepositValue)
@@ -237,6 +228,44 @@ export const settingsService = {
       }
     })
     return this.getInvoiceSettings()
+  },
+
+  // ── Ink Colors ──────────────────────────────────────────
+
+  async getInkColors(includeInactive = false): Promise<any[]> {
+    const where = includeInactive ? {} : { isActive: true }
+    const colors = await prisma.inkColor.findMany({ where, orderBy: { name: 'asc' } })
+    return colors.map(c => ({ ...c, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() }))
+  },
+
+  async createInkColor(data: { name: string; mapping: string }): Promise<any> {
+    const color = await prisma.inkColor.create({ data: { name: data.name, mapping: data.mapping } })
+    const existingMat = await prisma.material.findFirst({ where: { subCategory: data.mapping, category: 'INK_SOLVENTS' } })
+    if (!existingMat) {
+      await prisma.material.create({
+        data: {
+          code: `INK-${data.name.toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
+          name: `${data.name} Ink`,
+          category: 'INK_SOLVENTS',
+          subCategory: data.mapping,
+          unitOfMeasure: 'kg',
+          isActive: true
+        }
+      })
+    }
+    return color
+  },
+
+  async updateInkColor(id: string, data: { name?: string; mapping?: string }): Promise<any> {
+    return prisma.inkColor.update({ where: { id }, data })
+  },
+
+  async archiveInkColor(id: string): Promise<any> {
+    return prisma.inkColor.update({ where: { id }, data: { isActive: false } })
+  },
+
+  async restoreInkColor(id: string): Promise<any> {
+    return prisma.inkColor.update({ where: { id }, data: { isActive: true } })
   },
 
   async getOverheadRateHistory(): Promise<OverheadRateHistoryEntry[]> {

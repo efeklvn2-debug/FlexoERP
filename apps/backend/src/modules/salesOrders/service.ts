@@ -191,6 +191,14 @@ export const salesOrderService = {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      // Re-attribute PAYMENT transactions linked to this order as standalone deposits
+      // so the customer retains credit (cancelled order is excluded from balances).
+      // DEPOSIT transactions are already handled by the refund logic above.
+      await tx.paymentTransaction.updateMany({
+        where: { salesOrderId: id, transactionType: 'PAYMENT' },
+        data: { salesOrderId: null, transactionType: 'DEPOSIT' }
+      })
+
       const updatedOrder = await tx.salesOrder.update({
         where: { id },
         data: {
@@ -331,13 +339,17 @@ export const salesOrderService = {
                 const inkRate = Number(fbSettings.inkConsumptionRate) || 0.2
                 const ipaRate = Number(fbSettings.ipaConsumptionRate) || 0.1
                 const butanolRate = Number(fbSettings.butanolConsumptionRate) || 0.1
-                const inkCostRate = Number(fbSettings.inkCostPerKg) || 50
-                const consumableMaterials = await tx.material.findMany({ where: { category: 'INK_SOLVENTS' } })
+                const consumableMaterials = await tx.material.findMany({ where: { category: 'INK_SOLVENTS', isActive: true } })
                 const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
                 const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
                 const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
                 const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
-                totalJobCostCalc += totalPrintedWeight * inkRate * inkCostRate
+                // Average costPrice of ink materials (exclude IPA/Butanol)
+                const inkMats = consumableMaterials.filter(m => m.subCategory !== 'IPA' && m.subCategory !== 'Butanol')
+                const avgInkCostPrice = inkMats.length > 0
+                  ? inkMats.reduce((sum, m) => sum + (Number(m.costPrice) || 0), 0) / inkMats.length
+                  : 0
+                totalJobCostCalc += totalPrintedWeight * inkRate * avgInkCostPrice
                   + totalPrintedWeight * ipaRate * ipaCostPerLiter
                   + totalPrintedWeight * butanolRate * butanolCostPerLiter
                 const overheadRate = Number(fbSettings.overheadRatePerKg) || 0
@@ -987,6 +999,10 @@ export const salesOrderService = {
     return salesOrderRepository.getAllCustomerBalances()
   },
 
+  async getCustomerTransactions(customerId: string) {
+    return salesOrderRepository.getCustomerTransactions(customerId)
+  },
+
   async adjustDeposit(customerId: string, amount: number, userId?: string) {
     const customer = await prisma.customer.findUnique({ where: { id: customerId } })
     if (!customer) throw new AppError(404, 'NOT_FOUND', 'Customer not found')
@@ -1074,6 +1090,11 @@ export const paymentService = {
   }, userId?: string) {
     if (!input.salesOrderId && !input.customerId) {
       throw new AppError(400, 'VALIDATION', 'Either salesOrderId or customerId is required')
+    }
+
+    // Defensive: a standalone payment with no sales order is functionally a deposit
+    if (!input.salesOrderId && input.transactionType === 'PAYMENT') {
+      input.transactionType = 'DEPOSIT'
     }
 
     // Auto-generate reference number if not provided
@@ -1181,9 +1202,13 @@ export const paymentService = {
             orderBy: { createdAt: 'desc' }
           })
           if (linkedInvoice) {
-            const newInvoiceAmountPaid = (Number(linkedInvoice.amountPaid) || 0) + revenuePortion
-            const newInvoiceBalanceDue = Math.max(0, Number(linkedInvoice.totalAmount) - newInvoiceAmountPaid - Number(linkedInvoice.depositApplied) - Number(linkedInvoice.previousPayments))
-            const newInvoiceStatus = newInvoiceAmountPaid >= Number(linkedInvoice.totalAmount) ? 'PAID' : newInvoiceAmountPaid > 0 ? 'PARTIAL' : linkedInvoice.status
+            const prevAmountPaid = Number(linkedInvoice.amountPaid) || 0
+            const newInvoiceAmountPaid = prevAmountPaid + revenuePortion
+            // Decrement the old balanceDue by this payment's revenuePortion.
+            // This is correct regardless of whether depositApplied/previousPayments
+            // are already included in amountPaid (new invoices) or stored separately (old).
+            const newInvoiceBalanceDue = Math.max(0, (Number(linkedInvoice.balanceDue) || 0) - revenuePortion)
+            const newInvoiceStatus = newInvoiceBalanceDue <= 0 ? 'PAID' : newInvoiceAmountPaid > 0 ? 'PARTIAL' : linkedInvoice.status
 
             await tx.invoice.update({
               where: { id: linkedInvoice.id },

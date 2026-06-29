@@ -349,25 +349,60 @@ export const productionService = {
         if (customer) {
           const rates = await settingsService.getConsumptionRates()
           const customerColors = customer.colors || []
-          const colorCount = customerColors.length || 1
 
           const inkNeeded = totalPrintedWeight * rates.inkConsumptionRate
           const ipaNeeded = totalPrintedWeight * rates.ipaConsumptionRate
           const butanolNeeded = totalPrintedWeight * rates.butanolConsumptionRate
 
           const materials = await tx.material.findMany({
-            where: { category: 'INK_SOLVENTS' }
+            where: { category: 'INK_SOLVENTS', isActive: true }
           })
 
-          const inkColorMap: Record<string, string> = {
-            'Red': 'Red-Ink',
-            'Yellow': 'Yellow-Ink',
-            'White': 'White-Ink',
-            'RoyalBlue': 'RoyalBlue-Ink',
-            'VioletBlue': 'VioletBlue-Ink',
-            'SkyBlue': 'SkyBlue-Ink'
+          const inkColorRows = await tx.inkColor.findMany({ where: { isActive: true } })
+          const inkColorMap = Object.fromEntries(inkColorRows.map(ic => [ic.name, ic.mapping]))
+
+          const materialsSubCategories = materials.map(m => m.subCategory).filter(Boolean) as string[]
+          const mappedColorSubCategories = customerColors.map(c => {
+            return inkColorMap[c] || materialsSubCategories.find(sc => sc.toLowerCase() === c.toLowerCase()) || null
+          }).filter(Boolean) as string[]
+
+          const mappedColorCount = mappedColorSubCategories.length || 1
+
+          // Build deduction list
+          const deductions: { materialId: string; name: string; needed: number }[] = []
+          for (const mat of materials) {
+            if (mat.subCategory === 'IPA' && ipaNeeded > 0) {
+              deductions.push({ materialId: mat.id, name: mat.name, needed: ipaNeeded })
+            }
+            if (mat.subCategory === 'Butanol' && butanolNeeded > 0) {
+              deductions.push({ materialId: mat.id, name: mat.name, needed: butanolNeeded })
+            }
+            if (mappedColorCount > 0 && inkNeeded > 0) {
+              if (mappedColorSubCategories.includes(mat.subCategory || '')) {
+                deductions.push({ materialId: mat.id, name: mat.name, needed: inkNeeded / mappedColorCount })
+              }
+            }
           }
 
+          // Validate stock sufficiency before deducting
+          if (deductions.length > 0) {
+            const stockRecords = await tx.stock.findMany({
+              where: { materialId: { in: deductions.map(d => d.materialId) }, location: 'MAIN' }
+            })
+            const stockMap = new Map(stockRecords.map(s => [s.materialId, s.quantity]))
+            const shortages: string[] = []
+            for (const d of deductions) {
+              const available = stockMap.get(d.materialId) ?? 0
+              if (available < d.needed) {
+                shortages.push(`${d.name}: need ${Number(d.needed).toFixed(1)}, have ${available}`)
+              }
+            }
+            if (shortages.length > 0) {
+              throw new AppError(400, 'INSUFFICIENT_STOCK', `Cannot complete job ${job.jobNumber} — insufficient stock:\n${shortages.join('\n')}`)
+            }
+          }
+
+          // Execute deductions
           for (const mat of materials) {
             if (mat.subCategory === 'IPA' && ipaNeeded > 0) {
               await inventoryService.addStock(mat.id, -ipaNeeded, `Job ${job.jobNumber} completed`, jobId, undefined, tx)
@@ -375,12 +410,9 @@ export const productionService = {
             if (mat.subCategory === 'Butanol' && butanolNeeded > 0) {
               await inventoryService.addStock(mat.id, -butanolNeeded, `Job ${job.jobNumber} completed`, jobId, undefined, tx)
             }
-            
-            if (customerColors.length > 0 && inkNeeded > 0) {
-              const customerColorSubCategories = customerColors.map(c => inkColorMap[c]).filter(Boolean)
-              if (customerColorSubCategories.includes(mat.subCategory || '')) {
-                const inkPerColor = inkNeeded / colorCount
-                await inventoryService.addStock(mat.id, -inkPerColor, `Job ${job.jobNumber} completed`, jobId, undefined, tx)
+            if (mappedColorCount > 0 && inkNeeded > 0) {
+              if (mappedColorSubCategories.includes(mat.subCategory || '')) {
+                await inventoryService.addStock(mat.id, -(inkNeeded / mappedColorCount), `Job ${job.jobNumber} completed`, jobId, undefined, tx)
               }
             }
           }
@@ -442,10 +474,10 @@ export const productionService = {
         const totalWaste = parentRollIds.reduce((sum, id) => sum + (rollWasteMap[id] ?? 0), 0)
         const wasteCost = totalWaste * costPerKg
         
-        const settings = await tx.settings.findUnique({ where: { id: 'default' } })
+        const rates = await settingsService.getConsumptionRates()
         
         const consumableMaterials = await tx.material.findMany({
-          where: { category: 'INK_SOLVENTS' }
+          where: { category: 'INK_SOLVENTS', isActive: true }
         })
         
         const ipaMaterial = consumableMaterials.find(m => m.subCategory === 'IPA')
@@ -453,18 +485,33 @@ export const productionService = {
         const ipaCostPerLiter = ipaMaterial?.costPrice ? Number(ipaMaterial.costPrice) : 500
         const butanolCostPerLiter = butanolMaterial?.costPrice ? Number(butanolMaterial.costPrice) : 600
         
-        const inkRate = settings?.inkConsumptionRate ? Number(settings.inkConsumptionRate) : 0.2
-        const ipaRate = settings?.ipaConsumptionRate ? Number(settings.ipaConsumptionRate) : 0.1
-        const butanolRate = settings?.butanolConsumptionRate ? Number(settings.butanolConsumptionRate) : 0.1
-        
-        const inkCostRate = settings?.inkCostPerKg ? Number(settings.inkCostPerKg) : 50
-        const inkCost = totalPrintedWeight * inkRate * inkCostRate
-        const ipaCost = totalPrintedWeight * ipaRate * ipaCostPerLiter
-        const butanolCost = totalPrintedWeight * butanolRate * butanolCostPerLiter
+        // Compute average costPrice of ink materials mapped to this customer's colors
+        let avgInkCostPrice = 0
+        if (job.customerName) {
+          const customer = await tx.customer.findFirst({
+            where: { name: { contains: job.customerName, mode: 'insensitive' } }
+          })
+          const customerColors = customer?.colors || []
+          const inkColorRows = await tx.inkColor.findMany({ where: { isActive: true } })
+          const inkColorMap = Object.fromEntries(inkColorRows.map(ic => [ic.name, ic.mapping]))
+          const subCats = consumableMaterials.map(m => m.subCategory).filter(Boolean) as string[]
+          const mappedSubCategories = customerColors.map(c =>
+            inkColorMap[c] || subCats.find(sc => sc.toLowerCase() === c.toLowerCase()) || null
+          ).filter(Boolean) as string[]
+          const mappedInkMats = consumableMaterials.filter(m => mappedSubCategories.includes(m.subCategory || ''))
+          if (mappedInkMats.length > 0) {
+            avgInkCostPrice = mappedInkMats.reduce((sum, m) => sum + (Number(m.costPrice) || 0), 0) / mappedInkMats.length
+          }
+        }
+
+        const inkCost = totalPrintedWeight * rates.inkConsumptionRate * avgInkCostPrice
+        const ipaCost = totalPrintedWeight * rates.ipaConsumptionRate * ipaCostPerLiter
+        const butanolCost = totalPrintedWeight * rates.butanolConsumptionRate * butanolCostPerLiter
         consumablesCost = inkCost + ipaCost + butanolCost
         
-        const overheadRate = settings?.overheadRatePerKg ? Number(settings.overheadRatePerKg) : 0
-        overheadCost = totalPrintedWeight * overheadRate
+        const prodSettings = await settingsService.getSettings()
+        const overheadRatePerKg = prodSettings?.overheadRatePerKg ? Number(prodSettings.overheadRatePerKg) : 0
+        overheadCost = totalPrintedWeight * overheadRatePerKg
         
         const totalDeferredCost = materialCost + consumablesCost + overheadCost
         
@@ -688,7 +735,7 @@ export const productionService = {
     })
   },
 
-  async getPrintedRolls(status?: string) {
+  async getPrintedRolls(status?: string, includeArchived?: boolean) {
     const jobs = await prisma.productionJob.findMany({
       where: { status: 'COMPLETED' },
       include: {
@@ -720,6 +767,7 @@ export const productionService = {
       
       for (const pr of job.printedRolls) {
         if (status && pr.status !== status) continue
+        if (!includeArchived && (pr as any).archivedAt) continue
         
         const entry = mapping[pr.id]
         let parentRollsDisplay: string[] = []
@@ -775,6 +823,7 @@ export const productionService = {
           parentRolls: parentRollsDisplay,
           parentRollContributions,
           pickedUpAt: pr.pickedUpAt,
+          archivedAt: (pr as any).archivedAt,
           createdAt: pr.createdAt
         })
       }
@@ -1174,5 +1223,20 @@ export const productionService = {
     })
 
     return { success: true, rollNumber: newRollNumber }
+  },
+
+  async archiveOldPrintedRolls(userId?: string) {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 90)
+    const result = await (prisma.printedRoll.updateMany as any)({
+      where: {
+        status: 'PICKED_UP',
+        pickedUpAt: { lt: cutoff },
+        archivedAt: null
+      },
+      data: { archivedAt: new Date() }
+    })
+    logger.info({ count: result.count, userId }, 'Archived old picked-up printed rolls')
+    return { archived: result.count }
   }
 }

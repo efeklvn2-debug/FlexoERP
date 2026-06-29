@@ -5,10 +5,29 @@ import { Material, MaterialWithStock, StockMovement } from './types'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { prisma } from '../../database'
+import { financeService } from '../finance/service'
 
 const logger = createChildLogger('inventory:service')
 
 export const inventoryService = {
+  async getSubCategories(): Promise<Record<string, string[]>> {
+    const materials = await prisma.material.findMany({
+      where: { subCategory: { not: null }, isActive: true },
+      select: { category: true, subCategory: true },
+      distinct: ['category', 'subCategory']
+    })
+
+    const grouped: Record<string, string[]> = {}
+    for (const m of materials) {
+      const cat = m.category
+      const sub = m.subCategory!
+      if (!grouped[cat]) grouped[cat] = []
+      if (!grouped[cat].includes(sub)) grouped[cat].push(sub)
+    }
+
+    return grouped
+  },
+
   async getAllMaterials(): Promise<Material[]> {
     return inventoryRepository.findAllMaterials()
   },
@@ -31,9 +50,12 @@ export const inventoryService = {
       throw new AppError(409, 'CONFLICT', 'Material code already exists')
     }
 
+    const subCategory = input.subCategory || input.name.replace(/[^a-zA-Z0-9]/g, '')
+
     logger.info({ code: input.code, name: input.name, userId }, 'Creating material')
     return inventoryRepository.createMaterial({
       ...input,
+      subCategory,
       unitOfMeasure: input.unitOfMeasure || 'pcs',
       minStock: input.minStock || 0
     })
@@ -302,9 +324,10 @@ export const inventoryService = {
     materials: { materialId: string; quantity: number }[],
     date: Date,
     userId?: string
-  ): Promise<{ success: boolean; updated: number; movements: StockMovement[] }> {
+  ): Promise<{ success: boolean; updated: number; movements: StockMovement[]; journalEntry?: any }> {
     const movements: StockMovement[] = []
     let updated = 0
+    let totalInventoryValue = 0
 
     for (const item of materials) {
       const material = await inventoryRepository.findMaterialById(item.materialId)
@@ -329,12 +352,36 @@ export const inventoryService = {
 
         movements.push(movement)
         updated++
+
+        if (material.costPrice) {
+          totalInventoryValue += Number(material.costPrice) * item.quantity
+        }
       }
     }
 
-    logger.info({ count: updated, date }, 'Stock initialized')
+    let journalEntry: any = undefined
+    if (totalInventoryValue > 0) {
+      try {
+        journalEntry = await financeService.postJournalEntry({
+          description: `Initial stock valuation — ${updated} material(s)`,
+          sourceModule: 'OPENING',
+          sourceId: `INIT-${new Date().toISOString().split('T')[0]}`,
+          postedById: userId,
+          date: date,
+          lines: [
+            { accountId: await financeService.getAccountIdByCode('1300'), debit: totalInventoryValue, credit: 0, memo: 'Initial stock at cost' },
+            { accountId: await financeService.getAccountIdByCode('3000'), debit: 0, credit: totalInventoryValue, memo: 'Opening balance equity — inventory initialization' }
+          ]
+        })
+        logger.info({ totalInventoryValue, materialsCount: updated }, 'Journal entry posted for stock initialization')
+      } catch (err) {
+        logger.error({ err, totalInventoryValue }, 'Failed to post journal entry for stock initialization')
+      }
+    }
 
-    return { success: true, updated, movements }
+    logger.info({ count: updated, date, totalInventoryValue }, 'Stock initialized')
+
+    return { success: true, updated, movements, journalEntry }
   },
 
   async getInitialStockMovements(limit = 100): Promise<StockMovement[]> {
