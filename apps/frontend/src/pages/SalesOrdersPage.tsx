@@ -151,11 +151,13 @@ export function SalesOrdersPage() {
   })
 
   const [pickupForm, setPickupForm] = useState({
-    quantityToPickup: 0,
     packingBags: 0,
     packingBagPrice: 0,
     notes: ''
   })
+
+  const [pickupRolls, setPickupRolls] = useState<{ id: string; weightUsed: number; status: string; rollId: string }[]>([])
+  const [selectedRollIds, setSelectedRollIds] = useState<string[]>([])
 
   const [packingBagForm, setPackingBagForm] = useState({
     customerId: '',
@@ -978,15 +980,14 @@ export function SalesOrdersPage() {
 
   const openPickupModal = (order: SalesOrder) => {
     setProductionOrder(order)
-    const producedQty = Number(order.quantityProduced || 0)
-    const alreadyDelivered = Number(order.quantityDelivered || 0)
-    const remainingQty = producedQty - alreadyDelivered
-    
+    const rolls = order.productionJob?.printedRolls || []
+    setPickupRolls(rolls)
+    setSelectedRollIds(rolls.map(r => r.id))
+
     const pbagMaterial = allMaterials.find((m: any) => m.code === 'PBAG')
     const defaultPrice = (pbagMaterial?.pricePerPack || 0) * (pbagMaterial?.packSize || 1)
-    
+
     setPickupForm({
-      quantityToPickup: remainingQty,
       packingBags: 0,
       packingBagPrice: defaultPrice,
       notes: ''
@@ -1011,17 +1012,9 @@ export function SalesOrdersPage() {
     const selectedRollsData = availableRolls.filter(r => productionForm.rollIds.includes(r.id))
     const totalParentWeight = selectedRollsData.reduce((sum, r) => sum + Number(r.remainingWeight || 0), 0)
     const totalPrintedWeight = weights.reduce((sum, w) => sum + w, 0)
-    const excessWeight = totalPrintedWeight - totalParentWeight
-
-    if (excessWeight > 10) {
-      setError(`Cannot create job: Printed weight exceeds available by more than 10kg`)
+    if (totalPrintedWeight > totalParentWeight) {
+      setError(`Cannot create job: Printed weight (${totalPrintedWeight.toFixed(2)}kg) exceeds available parent weight (${totalParentWeight.toFixed(2)}kg)`)
       return
-    }
-
-    if (excessWeight > 0) {
-      if (!confirm(`Warning: Printed weight exceeds available by ${excessWeight.toFixed(2)}kg. Continue anyway?`)) {
-        return
-      }
     }
 
     const originalMaterial = productionOrder.specsJson?.materialType || ''
@@ -1053,18 +1046,20 @@ export function SalesOrdersPage() {
 
   const handleRecordPickup = async () => {
     if (!productionOrder) return
-    if (pickupForm.quantityToPickup <= 0) { setError('Quantity must be greater than 0'); return }
+    if (selectedRollIds.length === 0) { setError('Select at least one roll to pick up'); return }
 
     try {
       const res = await salesOrderApi.recordPickup(
-        productionOrder.id, 
-        pickupForm.quantityToPickup,
+        productionOrder.id,
+        selectedRollIds,
         pickupForm.packingBags > 0 ? pickupForm.packingBags : undefined,
         pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 ? pickupForm.packingBagPrice : undefined
       )
-      if (res.error) { setShowPickupModal(false); setProductionOrder(null); setError(res.error.message); return }
+      if (res.error) { setShowPickupModal(false); setProductionOrder(null); setPickupRolls([]); setSelectedRollIds([]); setError(res.error.message); return }
       setShowPickupModal(false)
       setProductionOrder(null)
+      setPickupRolls([])
+      setSelectedRollIds([])
       loadData()
       if (showOrderDetails?.id === productionOrder.id) {
         const updated = await salesOrderApi.getOrderById(productionOrder.id)
@@ -1073,6 +1068,8 @@ export function SalesOrdersPage() {
       }
     } catch (err: any) {
       setShowPickupModal(false); setProductionOrder(null)
+      setPickupRolls([])
+      setSelectedRollIds([])
       setError(err.message || 'Failed to record pickup')
     }
   }
@@ -1096,7 +1093,6 @@ export function SalesOrdersPage() {
         actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
         break
       case 'PICKED_UP':
-        // Allow additional pickups if not fully delivered
         if (Number(order.quantityDelivered) < Number(order.quantityOrdered)) {
           actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
         }
@@ -1465,6 +1461,7 @@ export function SalesOrdersPage() {
                     <thead className="bg-slate-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Invoice #</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Order #</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
@@ -1479,7 +1476,7 @@ export function SalesOrdersPage() {
                         const nameMatch = !invoiceCustomerSearch || (inv.customer?.name || '').toLowerCase().includes(invoiceCustomerSearch.toLowerCase())
                         return statusMatch && nameMatch
                       })).length === 0 ? (
-                        <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-500">No invoices found</td></tr>
+                        <tr><td colSpan={8} className="px-6 py-8 text-center text-slate-500">No invoices found</td></tr>
                       ) : (
                         invoices.filter(inv => {
                           const statusMatch = !invoiceStatusFilter || inv.status === invoiceStatusFilter
@@ -1488,6 +1485,7 @@ export function SalesOrdersPage() {
                         }).map(inv => (
                           <tr key={inv.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setCurrentInvoice(inv); setShowInvoiceModal(true) }}>
                             <td className="px-6 py-4 text-sm font-medium text-slate-900">{inv.invoiceNumber}</td>
+                            <td className="px-6 py-4 text-sm text-slate-600">{inv.salesOrder?.orderNumber || '-'}</td>
                             <td className="px-6 py-4 text-sm text-slate-600">{inv.customer?.name || '-'}</td>
                             <td className="px-6 py-4">
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[inv.status] || 'bg-slate-100'}`}>
@@ -2218,67 +2216,117 @@ export function SalesOrdersPage() {
         {/* Pickup Modal */}
         {showPickupModal && productionOrder && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
               <h2 className="text-xl font-bold mb-4">Record Pickup - {productionOrder.orderNumber}</h2>
-              
-              <div className="mb-4 p-3 bg-teal-50 rounded-lg border border-teal-200">
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <span className="text-slate-500">Customer:</span>
-                    <span className="ml-2 font-medium">{productionOrder.customer?.name}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Ordered:</span>
-                    <span className="ml-2 font-medium">{Number(productionOrder.quantityOrdered).toFixed(1)} kg</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Produced:</span>
-                    <span className="ml-2 font-medium text-indigo-600">{Number(productionOrder.quantityProduced || 0).toFixed(1)} kg</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Already Delivered:</span>
-                    <span className="ml-2 font-medium">{Number(productionOrder.quantityDelivered).toFixed(1)} kg</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Remaining:</span>
-                    <span className="ml-2 font-medium text-teal-600">{((Number(productionOrder.quantityProduced || 0)) - Number(productionOrder.quantityDelivered)).toFixed(1)} kg</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Unit Price:</span>
-                    <span className="ml-2 font-medium">₦{Number(productionOrder.unitPrice).toLocaleString()}/kg</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Pickup Value:</span>
-                    <span className="ml-2 font-medium text-teal-600">₦{((productionOrder.unitPrice || 0) * pickupForm.quantityToPickup).toLocaleString()}</span>
-                  </div>
-                  {pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 && (
-                    <div>
-                      <span className="text-slate-500">Packing Bags:</span>
-                      <span className="ml-2 font-medium text-teal-600">+₦{(pickupForm.packingBags * pickupForm.packingBagPrice).toLocaleString()}</span>
-                    </div>
+
+              {/* Roll Selection */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-slate-700">Select Rolls to Pick Up</label>
+                  {pickupRolls.length > 0 && (
+                    <button
+                      onClick={() => {
+                        if (selectedRollIds.length === pickupRolls.length) {
+                          setSelectedRollIds([])
+                        } else {
+                          setSelectedRollIds(pickupRolls.map(r => r.id))
+                        }
+                      }}
+                      className="text-xs text-teal-600 hover:text-teal-800 font-medium"
+                    >
+                      {selectedRollIds.length === pickupRolls.length ? 'Deselect All' : 'Select All'}
+                    </button>
                   )}
-                  <div className="border-t border-teal-300 pt-1 mt-1">
-                    <span className="text-sm font-semibold text-slate-700">Pickup Value:</span>
-                    <span className="ml-2 font-bold text-teal-700">₦{((productionOrder.unitPrice || 0) * pickupForm.quantityToPickup + (pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 ? pickupForm.packingBags * pickupForm.packingBagPrice : 0)).toLocaleString()}</span>
-                  </div>
                 </div>
+                {pickupRolls.length === 0 ? (
+                  <div className="p-4 bg-slate-50 rounded-lg text-sm text-slate-500 text-center">
+                    No rolls available for pickup. All rolls from this production job have already been picked up.
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-lg max-h-[55vh] overflow-y-auto p-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                      {pickupRolls.map((roll) => {
+                        const selected = selectedRollIds.includes(roll.id)
+                        return (
+                          <label
+                            key={roll.id}
+                            className={`flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer border transition-colors text-sm ${
+                              selected
+                                ? 'bg-teal-50 border-teal-300'
+                                : 'border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => {
+                                if (selected) {
+                                  setSelectedRollIds(prev => prev.filter(id => id !== roll.id))
+                                } else {
+                                  setSelectedRollIds(prev => [...prev, roll.id])
+                                }
+                              }}
+                              className="w-3.5 h-3.5 text-teal-600 rounded border-slate-300 shrink-0"
+                            />
+                            <span className={`font-medium ${selected ? 'text-teal-700' : 'text-slate-700'}`}>
+                              {Number(roll.weightUsed).toFixed(1)} kg
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Quantity to Pick Up (kg) <span className="text-red-500">*</span></label>
-                  <input
-                    type="number"
-                    value={pickupForm.quantityToPickup || ''}
-                    onChange={e => setPickupForm({...pickupForm, quantityToPickup: parseFloat(e.target.value) || 0})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                    min="0.1"
-                    max={Number(productionOrder.quantityProduced || 0) - Number(productionOrder.quantityDelivered)}
-                    step="0.1"
-                    required
-                  />
-                </div>
+              {/* Summary */}
+              {(() => {
+                const selectedWeight = pickupRolls
+                  .filter(r => selectedRollIds.includes(r.id))
+                  .reduce((sum, r) => sum + Number(r.weightUsed), 0)
+                const unitPrice = Number(productionOrder.unitPrice || 0)
+                const deliveryValue = selectedWeight * unitPrice
+                const bagValue = pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0
+                  ? pickupForm.packingBags * pickupForm.packingBagPrice
+                  : 0
+                const totalValue = deliveryValue + bagValue
+                return (
+                  <div className="mb-4 p-3 bg-teal-50 rounded-lg border border-teal-200">
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-slate-500">Selected Rolls:</span>
+                        <span className="ml-2 font-medium">{selectedRollIds.length} / {pickupRolls.length}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Total Weight:</span>
+                        <span className="ml-2 font-medium">{selectedWeight.toFixed(1)} kg</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Unit Price:</span>
+                        <span className="ml-2 font-medium">₦{unitPrice.toLocaleString()}/kg</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Delivery Value:</span>
+                        <span className="ml-2 font-medium text-teal-600">₦{deliveryValue.toLocaleString()}</span>
+                      </div>
+                      {bagValue > 0 && (
+                        <div>
+                          <span className="text-slate-500">Packing Bags:</span>
+                          <span className="ml-2 font-medium text-teal-600">+₦{bagValue.toLocaleString()}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-teal-300 pt-1 mt-1 col-span-2">
+                        <div className="flex justify-between">
+                          <span className="text-sm font-semibold text-slate-700">Total Pickup Value:</span>
+                          <span className="font-bold text-teal-700">₦{totalValue.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
 
+              <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
                   <textarea
@@ -2329,7 +2377,7 @@ export function SalesOrdersPage() {
 
                 <div className="flex justify-end space-x-3 pt-4">
                   <button type="button" onClick={() => setShowPickupModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
-                  <button onClick={handleRecordPickup} className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700">Record Pickup</button>
+                  <button onClick={handleRecordPickup} disabled={selectedRollIds.length === 0} className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed">Record Pickup</button>
                 </div>
               </div>
             </div>
@@ -2810,11 +2858,13 @@ export function SalesOrdersPage() {
                   </div>
                 )}
 
-                <div className="flex justify-between items-center p-4 bg-slate-50 rounded-xl">
+                  <div className="flex justify-between items-center p-4 bg-slate-50 rounded-xl">
                   <div>
                     <p className="text-xs text-slate-500">Invoice #</p>
                     <p className="font-medium">{currentInvoice.invoiceNumber}</p>
-                    {businessTin && <p className="text-xs text-slate-500 mt-1">TIN: {businessTin}</p>}
+                    <p className="text-xs text-slate-500 mt-2">Order #</p>
+                    <p className="font-medium">{currentInvoice.salesOrder?.orderNumber || '-'}</p>
+                    {businessTin && <p className="text-xs text-slate-500 mt-2">TIN: {businessTin}</p>}
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-slate-500">Date</p>

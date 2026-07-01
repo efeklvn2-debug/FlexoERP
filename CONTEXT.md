@@ -49,11 +49,42 @@ Simple decrement of old balance — works for old invoices (D+P separate) and ne
 ### Corrective script
 `_fix_invoice.cjs` — fixed 18 stuck invoices incl. Freshyo (INV-2026-0093) and Y2K (INV-2026-0100).
 
-## Recompile
-After TS changes: `npx tsc` in `apps/backend/` — pre-existing errors in auth/ middleware/ sales/ (unrelated), exit 2 but emits `dist/`.
+## Accounting Integrity (Unique Value Proposition)
 
-## Quick Audit
-`node _audit.cjs SO-2026-XXXX` from `apps/backend/` — searches notes+reference for stock movements.
+### Core Principle
+Every financial transaction is double-entry. No revenue without matching receivable. No COGS without matching inventory reduction. Every invoice is backed by a verified physical delivery.
+
+### Revenue Recognition Flow
+1. **Order created** → No GL impact (commercial commitment only)
+2. **Job completed** → Dr 1330 (Deferred COGS), Cr 1510/1520 (Inventory). Costs accrued at production, not delivery.
+3. **Pickup recorded** → Dr 1200 (AR), Cr 4000 (Revenue) + Cr 2100 (VAT). Revenue recognized on physical transfer. Dr 5000 (COGS), Cr 1330 (Deferred COGS). Invoice created automatically for the picked-up quantity.
+4. **Payment received** → Dr 1000 (Bank/Cash), Cr 1200 (AR). If deposit, Cr 2250 (Advance Customer Payments) instead.
+5. **Advance deposit applied** → Dr 2250, Cr 1200. Posted inside `createInvoice` when auto-applying available deposits.
+
+### Per-Pickup Invoicing (FIXED 30 Jun 2026)
+Every pickup generates a separate invoice for the exact quantity picked up. No more "wait for full delivery" pattern.
+
+**Fixed bugs discovered during audit:**
+1. **`completeOrder` duplicate invoice** (service.ts:531-535): Called `createInvoice` unconditionally even when `recordPickup` already created one. Fixed with `existingInvoiceCount === 0` guard.
+2. **`createInvoice` overwrites cumulative `quantityDelivered`** (service.ts:643-644): Unconditionally set order's `quantityDelivered` to the single-pickup amount, corrupting the cumulative total after multi-pickup workflows. Fixed with `Math.max(Number(order.quantityDelivered), quantityDelivered)`.
+
+**Corrective script:** `_fix_quantity_delivered.cjs` — fixed SO-2026-0132 (DCC) where `quantityDelivered` was 1.5 instead of 4.5 after split pickups.
+
+### Edge Cases Tested
+| Scenario | Behaviour | Integrity |
+|----------|-----------|-----------|
+| Full delivery (12→12) | Invoice for 12kg via recordPickup | ✓ |
+| Partial delivery + Complete (12→10) | Invoice from pickup; completeOrder skips invoice | ✓ |
+| Split pickups (3+7=10) | Two invoices (3kg, 7kg); order.quantityDelivered = 10 | ✓ |
+| CompleteOrder with no prior invoices | Fallback: creates invoice for delivered amount | ✓ |
+| CompleteOrder with existing invoices | Guard skips duplicate invoice | ✓ |
+| CompleteOrder on COMPLETED order | Error: "Only picked-up orders can be completed" | ✓ |
+| Concurrent completeOrder | Idempotent — guard + order update are idempotent | ✓ |
+| createInvoice overwrite guard | MAX preserves cumulative total | ✓ |
+
+### Audit Scripts
+- `node _audit.cjs SO-2026-XXXX` — searches notes+reference for stock movements
+- `node _audit_complete_order.cjs` — checks PICKED_UP orders for: partial delivery, invoice count consistency, quantityDelivered integrity, duplicate invoices
 
 ## Customers
 - Table: Customer | Rolls | Outstanding | Deposit | Orders | Last Activity | Colors | Action

@@ -53,7 +53,7 @@ export interface SalesOrder {
   paymentStatus: MTOPaymentStatus
   status: MTOOrderStatus
   productionJobId?: string
-  productionJob?: { id: string; jobNumber: string }
+  productionJob?: { id: string; jobNumber: string; printedRolls?: { id: string; weightUsed: number; status: string; rollId: string }[] }
   createdAt: string
   updatedAt: string
   approvedAt?: string
@@ -225,7 +225,7 @@ export const salesOrderApi = {
   }) => api.patch<{ order: SalesOrder; productionJob: any }>(`/sales-orders/orders/${id}/start-production`, data),
   cancelOrder: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/cancel`, {}),
   markReady: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/ready`, {}),
-  recordPickup: (id: string, quantityPickedUp?: number, packingBags?: number, packingBagPrice?: number) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { quantityPickedUp, packingBags, packingBagPrice }),
+  recordPickup: (id: string, rollIds?: string[], packingBags?: number, packingBagPrice?: number) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { rollIds, packingBags, packingBagPrice }),
 
   // Payments
   recordPayment: (data: {

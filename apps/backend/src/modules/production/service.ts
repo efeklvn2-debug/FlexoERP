@@ -243,7 +243,13 @@ export const productionService = {
       const parentRolls = await prisma.roll.findMany({
         where: { id: { in: parentRollIds } }
       })
-      parentRolls.sort((a, b) => Number(a.remainingWeight) - Number(b.remainingWeight))
+      parentRolls.sort((a, b) => {
+        const dateA = a.receivedDate ?? a.createdAt
+        const dateB = b.receivedDate ?? b.createdAt
+        const dateDiff = dateA.getTime() - dateB.getTime()
+        if (dateDiff !== 0) return dateDiff
+        return Number(a.remainingWeight) - Number(b.remainingWeight)
+      })
 
       const rollWasteMap: Record<string, number> = (job.rollWaste as Record<string, number>) ?? {}
       const effectiveCapacities = parentRolls.map(r =>

@@ -25,7 +25,14 @@ export const salesOrderRepository = {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
         invoices: { orderBy: { createdAt: 'desc' } },
-        productionJob: { select: { id: true, jobNumber: true } }
+        productionJob: {
+          include: {
+            printedRolls: {
+              where: { status: 'IN_STOCK' },
+              select: { id: true, weightUsed: true, status: true, rollId: true }
+            }
+          }
+        }
       }
     })
   },
@@ -37,7 +44,14 @@ export const salesOrderRepository = {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
         invoices: { orderBy: { createdAt: 'desc' } },
-        productionJob: { select: { id: true, jobNumber: true } }
+        productionJob: {
+          include: {
+            printedRolls: {
+              where: { status: 'IN_STOCK' },
+              select: { id: true, weightUsed: true, status: true, rollId: true }
+            }
+          }
+        }
       }
     })
   },
@@ -67,7 +81,16 @@ export const salesOrderRepository = {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
         invoices: { orderBy: { createdAt: 'desc' } },
-        productionJob: { select: { id: true, jobNumber: true } }
+        productionJob: {
+          select: {
+            id: true,
+            jobNumber: true,
+            printedRolls: {
+              where: { status: 'IN_STOCK' },
+              select: { id: true, weightUsed: true, status: true, rollId: true }
+            }
+          }
+        }
       },
       orderBy: { createdAt: 'desc' },
       take: options?.limit || 50,
@@ -323,9 +346,8 @@ export const salesOrderRepository = {
     }
 
     // Add standalone deposits (no salesOrderId) that sit in 2250 Advance Customer Payments
-    // Include both DEPOSIT and PAYMENT types — a standalone PAYMENT (no order) is functionally a deposit
     const standaloneDeposits = await prisma.paymentTransaction.aggregate({
-      where: { customerId, transactionType: { in: ['DEPOSIT', 'PAYMENT'] }, salesOrderId: null },
+      where: { customerId, transactionType: 'DEPOSIT', salesOrderId: null },
       _sum: { amount: true }
     })
     const standaloneDepositTotal = Number(standaloneDeposits._sum.amount || 0)
@@ -509,10 +531,8 @@ export const salesOrderRepository = {
         depositHeld += Number(order.depositPaid)
       }
 
-      // Add standalone deposits (no salesOrderId) that sit in 2250
-      // Include both DEPOSIT and PAYMENT types — a standalone PAYMENT (no order) is functionally a deposit
       const standaloneDeposits = await prisma.paymentTransaction.aggregate({
-        where: { customerId: customer.id, transactionType: { in: ['DEPOSIT', 'PAYMENT'] }, salesOrderId: null },
+        where: { customerId: customer.id, transactionType: 'DEPOSIT', salesOrderId: null },
         _sum: { amount: true }
       })
       const standaloneDepositTotal = Number(standaloneDeposits._sum.amount || 0)

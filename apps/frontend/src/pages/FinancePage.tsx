@@ -105,7 +105,7 @@ export function FinancePage() {
     const res = await financeApi.getJournalEntries({
       dateFrom: dateFrom || journalDateFrom || undefined,
       dateTo: dateTo || journalDateTo || undefined,
-      sourceModule: sourceModule || journalSourceModule || undefined,
+      sourceModule: sourceModule !== undefined ? (sourceModule || undefined) : journalSourceModule || undefined,
       limit: 1000
     })
     if (res.data) setJournalEntries((res.data as any).data || [])
@@ -1071,7 +1071,7 @@ export function FinancePage() {
                       </select>
                     </div>
                     {(journalDateFrom !== initDateFrom() || journalDateTo !== initDateTo() || journalSourceModule) && (
-                      <button onClick={() => { setJournalDateFrom(initDateFrom()); setJournalDateTo(initDateTo()); setJournalSourceModule(''); loadJournal(initDateFrom(), initDateTo()) }}
+                      <button onClick={() => { setJournalDateFrom(initDateFrom()); setJournalDateTo(initDateTo()); setJournalSourceModule(''); loadJournal(initDateFrom(), initDateTo(), '') }}
                         className="px-3 py-2 text-sm text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg border border-slate-300">
                         Reset
                       </button>

@@ -267,9 +267,9 @@ export const salesOrderService = {
     return updated
   },
 
-  async recordPickup(id: string, userId?: string, quantityPickedUp?: number, packingBags?: number, packingBagPrice?: number) {
+  async recordPickup(id: string, userId?: string, rollIds?: string[], packingBags?: number, packingBagPrice?: number) {
     const order = await salesOrderRepository.findById(id)
-    
+
     if (!order) {
       throw new AppError(404, 'NOT_FOUND', 'Sales order not found')
     }
@@ -278,49 +278,80 @@ export const salesOrderService = {
       throw new AppError(400, 'INVALID', 'Order is not ready for pickup')
     }
 
-    const currentDelivered = Number(order.quantityDelivered) || 0
-    const quantityOrdered = Number(order.quantityOrdered)
-    const produced = Number(order.quantityProduced || 0)
-    const remaining = Math.max(quantityOrdered, produced) - currentDelivered
+    // Resolve quantity from selected rolls, or fall back to order defaults
+    let selectedRolls: any[] = []
+    let quantity = 0
 
-    if (quantityPickedUp && quantityPickedUp > remaining) {
-      throw new AppError(400, 'INVALID', `Cannot pick up more than remaining quantity. Remaining: ${remaining} kg`)
+    if (rollIds && rollIds.length > 0) {
+      // Validate rolls belong to this order's production job
+      const productionJob = await prisma.productionJob.findUnique({
+        where: { id: order.productionJobId! },
+        include: { printedRolls: true }
+      })
+      if (!productionJob) {
+        throw new AppError(400, 'INVALID', 'No production job found for this order')
+      }
+
+      const validRollIds = new Set(productionJob.printedRolls.map(pr => pr.id))
+      for (const rid of rollIds) {
+        if (!validRollIds.has(rid)) {
+          throw new AppError(400, 'INVALID', `Roll ${rid} does not belong to this order's production job`)
+        }
+      }
+
+      selectedRolls = productionJob.printedRolls.filter(pr => rollIds.includes(pr.id))
+
+      // Validate all selected rolls are available
+      for (const roll of selectedRolls) {
+        if (roll.status !== 'IN_STOCK') {
+          throw new AppError(400, 'INVALID', `Roll ${roll.id} is not available for pickup (status: ${roll.status})`)
+        }
+      }
+
+      quantity = selectedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed || 0), 0)
+      if (quantity <= 0) {
+        throw new AppError(400, 'INVALID', 'Selected rolls have zero weight')
+      }
+    } else {
+      // No roll selection — use default quantity (backward compat for manual orders)
+      quantity = Number(order.quantityOrdered)
     }
 
-    const quantity = quantityPickedUp || quantityOrdered
+    const currentDelivered = Number(order.quantityDelivered) || 0
     const newDelivered = currentDelivered + quantity
+    const quantityOrdered = Number(order.quantityOrdered)
     const fullyDelivered = newDelivered >= quantityOrdered
 
     const result = await prisma.$transaction(async (tx) => {
-      if (order.productionJobId) {
-        const productionJob = await tx.productionJob.findUnique({
-          where: { id: order.productionJobId },
-          include: { printedRolls: true }
+      if (selectedRolls.length > 0) {
+        // Only mark the selected rolls as picked up
+        await tx.printedRoll.updateMany({
+          where: { id: { in: selectedRolls.map(pr => pr.id) } },
+          data: {
+          status: 'PICKED_UP',
+            customerId: order.customerId,
+            pickedUpAt: new Date()
+          }
         })
 
-        if (productionJob && productionJob.printedRolls.length > 0) {
-          await tx.printedRoll.updateMany({
-            where: { id: { in: productionJob.printedRolls.map(pr => pr.id) } },
-            data: {
-              status: 'PICKED_UP',
-              customerId: order.customerId,
-              pickedUpAt: new Date()
-            }
+        // =====================================================
+        // RECOGNIZE DEFERRED COGS (Move from 1330 to 5000)
+        // =====================================================
+        try {
+          const cogsAccountId = await financeService.getAccountIdByCode('5000')
+          const deferredCogsAccountId = await financeService.getAccountIdByCode('1330')
+
+          // Get the full production job to compute COGS
+          const productionJob = await tx.productionJob.findUnique({
+            where: { id: order.productionJobId! },
+            include: { printedRolls: true }
           })
-          
-          // =====================================================
-          // RECOGNIZE DEFERRED COGS (Move from 1330 to 5000)
-          // =====================================================
-          try {
-            const cogsAccountId = await financeService.getAccountIdByCode('5000')
-            const deferredCogsAccountId = await financeService.getAccountIdByCode('1330')
-            
-            // Read cost snapshot from ProductionJob (saved at completion)
+
+          if (productionJob) {
             const totalJobCost = Number(productionJob.materialCost || 0)
               + Number((productionJob as any).consumablesCost || 0)
               + Number(productionJob.overheadCost || 0)
 
-            // Fallback for pre-fix jobs where costs were never saved
             const totalPrintedWeight = productionJob.printedRolls.reduce((sum: number, pr: any) => sum + Number(pr.weightUsed || 0), 0)
             let totalJobCostCalc = totalJobCost
             if (!totalJobCostCalc && totalPrintedWeight > 0) {
@@ -344,7 +375,6 @@ export const salesOrderService = {
                 const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
                 const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
                 const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
-                // Average costPrice of ink materials (exclude IPA/Butanol)
                 const inkMats = consumableMaterials.filter(m => m.subCategory !== 'IPA' && m.subCategory !== 'Butanol')
                 const avgInkCostPrice = inkMats.length > 0
                   ? inkMats.reduce((sum, m) => sum + (Number(m.costPrice) || 0), 0) / inkMats.length
@@ -357,12 +387,14 @@ export const salesOrderService = {
               }
             }
 
-            // Prorate COGS for partial pickup
+            // Prorate COGS by actual selected weight vs total printed weight
             const cogsRatio = totalPrintedWeight > 0
               ? quantity / totalPrintedWeight
               : 1
-            const cogsAmount = totalJobCostCalc > 0 ? Math.round((totalJobCostCalc * cogsRatio) * 100) / 100 : 0
-            
+            const cogsAmount = totalJobCostCalc > 0
+              ? Math.round((totalJobCostCalc * cogsRatio) * 100) / 100
+              : 0
+
             if (cogsAmount > 0) {
               await financeService.postJournalEntry({
                 description: `Recognize COGS - SO ${order.orderNumber}`,
@@ -374,45 +406,45 @@ export const salesOrderService = {
                   { accountId: deferredCogsAccountId, debit: 0, credit: cogsAmount, memo: 'Deferred COGS cleared' }
                 ]
               }, tx)
-              
+
               logger.info({ orderId: order.id, orderNumber: order.orderNumber, cogsAmount }, 'Deferred COGS recognized on pickup')
             }
-          } catch (financeErr) {
-            logger.error({ err: financeErr, orderId: order.id }, 'Failed to recognize Deferred COGS - continuing anyway')
           }
+        } catch (financeErr) {
+          logger.error({ err: financeErr, orderId: order.id }, 'Failed to recognize Deferred COGS - continuing anyway')
         }
       }
 
-      const packingBagMaterial = packingBags && packingBags > 0 
+      const packingBagMaterial = packingBags && packingBags > 0
         ? await tx.material.findFirst({ where: { code: 'PBAG' } })
         : null
-      
+
       let bagCostPerUnit = 0
       if (packingBagMaterial) {
         bagCostPerUnit = packingBagMaterial.costPrice ? Number(packingBagMaterial.costPrice) : 0
       }
-      
-      const bagCostAmount = packingBags && packingBags > 0 
-        ? packingBags * bagCostPerUnit 
+
+      const bagCostAmount = packingBags && packingBags > 0
+        ? packingBags * bagCostPerUnit
         : 0
       const bagSellingPrice = (packingBagPrice && packingBagPrice > 0) ? packingBagPrice : bagCostPerUnit
-      const bagRevenueAmount = packingBags && packingBags > 0 
-        ? packingBags * bagSellingPrice 
+      const bagRevenueAmount = packingBags && packingBags > 0
+        ? packingBags * bagSellingPrice
         : 0
-      
+
       const updated = await tx.salesOrder.update({
         where: { id },
         data: {
-          status: 'PICKED_UP',
+          status: fullyDelivered ? 'COMPLETED' : 'PICKED_UP',
           quantityDelivered: newDelivered,
           completedAt: fullyDelivered ? new Date() : undefined,
-          packingBagsQuantity: packingBags && packingBags > 0 
+          packingBagsQuantity: packingBags && packingBags > 0
             ? { increment: packingBags }
             : undefined,
-          packingBagsAmount: bagCostAmount > 0 
+          packingBagsAmount: bagCostAmount > 0
             ? { increment: bagCostAmount }
             : undefined,
-          totalAmount: bagRevenueAmount > 0 
+          totalAmount: bagRevenueAmount > 0
             ? { increment: bagRevenueAmount }
             : undefined
         }
@@ -497,18 +529,15 @@ export const salesOrderService = {
         logger.error({ err: financeErr, orderId: id }, 'Failed to post revenue journal at pickup - continuing anyway')
       }
 
-      logger.info({ orderId: id, quantityPickedUp: quantity, totalDelivered: newDelivered, fullyDelivered, packingBags }, 'Sales order pickup recorded')
+      logger.info({ orderId: id, quantity, totalDelivered: newDelivered, fullyDelivered, packingBags, rollCount: selectedRolls.length }, 'Sales order pickup recorded')
 
       return updated
     })
 
-    // After transaction, auto-create invoice on first full delivery only
-    if (fullyDelivered && (!order.invoices || order.invoices.length === 0)) {
-      try {
-        await invoiceService.createInvoice({ salesOrderId: id })
-      } catch (err) {
-        logger.error({ err, orderId: id }, 'Failed to create invoice after pickup')
-      }
+    try {
+      await invoiceService.createInvoice({ salesOrderId: id, quantityDelivered: quantity })
+    } catch (err) {
+      logger.error({ err, orderId: id }, 'Failed to create invoice after pickup')
     }
 
     return result
@@ -521,8 +550,8 @@ export const salesOrderService = {
       throw new AppError(404, 'NOT_FOUND', 'Sales order not found')
     }
 
-    if (order.status !== 'READY' && order.status !== 'PICKED_UP') {
-      throw new AppError(400, 'INVALID', 'Order must be ready or picked up to generate invoice')
+    if (order.status !== 'READY' && order.status !== 'PICKED_UP' && order.status !== 'COMPLETED') {
+      throw new AppError(400, 'INVALID', 'Order must be ready, picked up, or completed to generate invoice')
     }
 
     const settings = await prisma.settings.findUnique({
@@ -557,7 +586,16 @@ export const salesOrderService = {
     const totalAmount = subtotal + packingBagsInclusive
 
     let depositApplied = Number(order.depositPaid)
-    const previousPayments = Number(order.balancePaid)
+    // Unallocated cash = balancePaid minus what's already in existing invoices' amountPaid
+    // (amountPaid already includes depositApplied, so subtract that)
+    const existingInvoices = await prisma.invoice.findMany({
+      where: { salesOrderId: order.id },
+      select: { amountPaid: true, depositApplied: true }
+    })
+    const cashAllocatedToInvoices = existingInvoices.reduce(
+      (sum, inv) => sum + Number(inv.amountPaid) - Number(inv.depositApplied), 0
+    )
+    const previousPayments = Math.max(0, Number(order.balancePaid) - cashAllocatedToInvoices)
     let balanceDue = totalAmount - depositApplied - previousPayments
 
     // Auto-apply available advance payment balance (2250) if there's an outstanding balance
@@ -609,9 +647,9 @@ export const salesOrderService = {
           include: { customer: true, salesOrder: true }
         })
 
-        // Update order quantity and payment tracking if advance was applied
+        // Update order quantity (never decrease — recordPickup sets cumulative total)
         const orderUpdateData: any = {
-          quantityDelivered: new Prisma.Decimal(String(quantityDelivered))
+          quantityDelivered: new Prisma.Decimal(String(Math.max(Number(order.quantityDelivered || 0), quantityDelivered)))
         }
         if (advancePaymentApplied > 0) {
           const newTotalPaid = Number(order.totalPaid) + advancePaymentApplied
@@ -1178,9 +1216,10 @@ export const paymentService = {
             paymentStatus = 'DEPOSIT_COMPLETE'
           }
 
+          const newBalancePaid = Number(order.balancePaid) + revenuePortion
           const orderUpdateData: any = {
             totalPaid: newPaid,
-            balancePaid: newPaid,
+            balancePaid: newBalancePaid,
             paymentStatus: paymentStatus as any
           }
           if (input.transactionType === 'DEPOSIT') {
