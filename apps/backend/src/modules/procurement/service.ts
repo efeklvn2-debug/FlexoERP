@@ -157,7 +157,7 @@ export const procurementService = {
     await procurementRepository.deletePO(id)
   },
 
-  async receivePO(poId: string, userId?: string): Promise<{ po: PurchaseOrder; rolls: Roll[] }> {
+  async receivePO(poId: string, userId?: string, date?: string): Promise<{ po: PurchaseOrder; rolls: Roll[] }> {
     const po = await procurementRepository.findPOById(poId)
     if (!po) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
     if (po.status === 'RECEIVED') throw new AppError(400, 'INVALID_OPERATION', 'PO already fully received')
@@ -196,7 +196,7 @@ export const procurementService = {
 
     const updatedPO = await procurementRepository.updatePO(poId, {
       status: 'RECEIVED',
-      receivedDate: new Date()
+      receivedDate: dateFromInput(date)
     })
 
     logger.info({ poId, rollsCreated: allRolls.length }, 'PO received successfully')
@@ -342,6 +342,7 @@ export const procurementService = {
   async createSupplierInvoice(poId: string, date: string | Date, amount: number, invoiceNumber?: string): Promise<SupplierInvoice> {
     const po = await procurementRepository.findPOById(poId)
     if (!po) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
+    if (po.status !== 'RECEIVED') throw new AppError(400, 'INVALID_OPERATION', 'Purchase order must be received before creating a supplier invoice')
 
     const supplier = await supplierService.findOrCreateByName(po.supplier)
     const finalInvoiceNumber = invoiceNumber || await generateSupplierInvoiceNumber()
@@ -372,6 +373,8 @@ export const procurementService = {
         packagingExclusive = totalExclusive * (packagingTotal / grandTotal)
       }
     }
+
+    const jeDateStr = typeof date === 'string' ? date : date instanceof Date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : undefined
 
     const inv = await prisma.$transaction(async (tx) => {
       const createdInvoice = await tx.supplierInvoice.create({
@@ -416,6 +419,7 @@ export const procurementService = {
         sourceModule: 'PROCUREMENT',
         sourceId: createdInvoice.id,
         reference: finalInvoiceNumber,
+        date: jeDateStr,
         lines
       }, tx)
 
@@ -480,6 +484,8 @@ export const procurementService = {
 
     logger.info({ supplierInvoiceId, amount, newStatus, paymentMethod }, 'Recording payment to supplier invoice')
 
+    const payJeDateStr = typeof date === 'string' ? date : date instanceof Date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : undefined
+
     const result = await prisma.$transaction(async (tx) => {
       const payment = await tx.paymentMade.create({
         data: {
@@ -509,6 +515,7 @@ export const procurementService = {
         sourceModule: 'PROCUREMENT',
         sourceId: inv.id,
         reference: reference || inv.invoiceNumber,
+        date: payJeDateStr,
         lines: [
           { accountId: apAccountId, debit: amount, credit: 0, memo: `Payment to supplier ${inv.invoiceNumber}` },
           { accountId: cashAccountId, debit: 0, credit: amount, memo: paymentMethod === 'Cash' ? 'Cash payment' : 'Bank transfer' }

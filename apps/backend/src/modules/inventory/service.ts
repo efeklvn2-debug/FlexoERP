@@ -367,7 +367,7 @@ export const inventoryService = {
           sourceModule: 'OPENING',
           sourceId: `INIT-${new Date().toISOString().split('T')[0]}`,
           postedById: userId,
-          date: date,
+          date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
           lines: [
             { accountId: await financeService.getAccountIdByCode('1300'), debit: totalInventoryValue, credit: 0, memo: 'Initial stock at cost' },
             { accountId: await financeService.getAccountIdByCode('3000'), debit: 0, credit: totalInventoryValue, memo: 'Opening balance equity — inventory initialization' }

@@ -94,7 +94,7 @@ export const financeService = {
     sourceId?: string
     reference?: string
     postedById?: string
-    date?: Date
+    date?: string
     lines: { accountId: string; debit: number; credit: number; memo?: string }[]
   }, tx?: Prisma.TransactionClient) {
     const { lines, description, sourceModule, sourceId, reference, postedById, date } = input
@@ -120,7 +120,7 @@ export const financeService = {
       }
     }
 
-    const entryDate = dateFromInput(date as string | undefined)
+    const entryDate = dateFromInput(date)
     await this.validateJournalDate(entryDate, db)
 
     const entryNumber = await financeRepository.getNextEntryNumber(db)

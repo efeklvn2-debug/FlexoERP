@@ -61,7 +61,8 @@ export const procurementController = {
 
   async receivePO(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const result = await procurementService.receivePO(req.params.id, req.user?.id)
+      const { date } = req.body
+      const result = await procurementService.receivePO(req.params.id, req.user?.id, date)
       res.status(201).json({ data: result })
     } catch (error) { next(error) }
   },

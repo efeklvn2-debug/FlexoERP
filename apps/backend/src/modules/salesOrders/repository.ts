@@ -24,7 +24,7 @@ export const salesOrderRepository = {
       include: {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
-        invoices: { orderBy: { createdAt: 'desc' } },
+        invoices: { orderBy: { issuedAt: 'desc' } },
         productionJob: {
           include: {
             printedRolls: {
@@ -43,7 +43,7 @@ export const salesOrderRepository = {
       include: {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
-        invoices: { orderBy: { createdAt: 'desc' } },
+        invoices: { orderBy: { issuedAt: 'desc' } },
         productionJob: {
           include: {
             printedRolls: {
@@ -80,7 +80,7 @@ export const salesOrderRepository = {
       include: {
         customer: true,
         payments: { orderBy: { receivedAt: 'desc' } },
-        invoices: { orderBy: { createdAt: 'desc' } },
+        invoices: { orderBy: { issuedAt: 'desc' } },
         productionJob: {
           select: {
             id: true,
@@ -93,7 +93,7 @@ export const salesOrderRepository = {
         }
       },
       orderBy: { createdAt: 'desc' },
-      take: options?.limit || 50,
+      take: options?.limit || 500,
       skip: options?.offset || 0
     })
   },
@@ -373,8 +373,8 @@ export const salesOrderRepository = {
     // Last transaction date across orders, invoices, and payments
     const lastOrder = await prisma.salesOrder.findFirst({
       where: { customerId, isDeleted: false },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true }
+      orderBy: [{ approvedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+      select: { approvedAt: true, createdAt: true }
     })
     const lastPayment = await prisma.paymentTransaction.findFirst({
       where: { customerId },
@@ -383,14 +383,15 @@ export const salesOrderRepository = {
     })
     const lastInvoice = await prisma.invoice.findFirst({
       where: { customerId },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true }
+      orderBy: { issuedAt: 'desc' },
+      select: { issuedAt: true }
     })
 
     const dates: Date[] = []
-    if (lastOrder?.createdAt) dates.push(lastOrder.createdAt)
+    if (lastOrder?.approvedAt) dates.push(lastOrder.approvedAt)
+    else if (lastOrder?.createdAt) dates.push(lastOrder.createdAt)
     if (lastPayment?.receivedAt) dates.push(lastPayment.receivedAt)
-    if (lastInvoice?.createdAt) dates.push(lastInvoice.createdAt)
+    if (lastInvoice?.issuedAt) dates.push(lastInvoice.issuedAt)
     const lastTransactionDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))).toISOString() : null
 
     return {
@@ -574,11 +575,11 @@ export const salesOrderRepository = {
       prisma.salesOrder.findMany({
         where: { customerId, isDeleted: false },
         include: { productionJob: { select: { jobNumber: true } } },
-        orderBy: { createdAt: 'desc' }
+        orderBy: [{ approvedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
       }),
       prisma.invoice.findMany({
         where: { customerId },
-        orderBy: { createdAt: 'desc' }
+        orderBy: { issuedAt: 'desc' }
       }),
       prisma.paymentTransaction.findMany({
         where: { customerId },
@@ -759,7 +760,6 @@ export const invoiceRepository = {
     depositApplied: Prisma.Decimal | number
     previousPayments: Prisma.Decimal | number
     balanceDue: Prisma.Decimal | number
-    coresReturned?: number
     packingBagsQuantity?: Prisma.Decimal | number
     packingBagsUnitPrice?: number
     packingBagsSubtotal?: number
@@ -778,7 +778,6 @@ export const invoiceRepository = {
         depositApplied: new Prisma.Decimal(String(data.depositApplied)),
         previousPayments: new Prisma.Decimal(String(data.previousPayments)),
         balanceDue: new Prisma.Decimal(String(data.balanceDue)),
-        coresReturned: data.coresReturned || 0,
         packingBagsQuantity: data.packingBagsQuantity ? new Prisma.Decimal(String(data.packingBagsQuantity)) : undefined,
         packingBagsUnitPrice: new Prisma.Decimal(String(data.packingBagsUnitPrice || 0)),
         packingBagsSubtotal: new Prisma.Decimal(String(data.packingBagsSubtotal || 0)),
@@ -818,7 +817,7 @@ export const invoiceRepository = {
         salesOrder: true,
         payments: true
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { issuedAt: 'desc' }
     })
   },
 

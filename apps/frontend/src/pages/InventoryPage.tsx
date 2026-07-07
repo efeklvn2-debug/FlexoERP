@@ -44,9 +44,12 @@ export function InventoryPage() {
   const [printedFromRoll, setPrintedFromRoll] = useState<any[] | null>(null)
   const [loadingPrintedFromRoll, setLoadingPrintedFromRoll] = useState(false)
   const [disposeRoll, setDisposeRoll] = useState<Roll | null>(null)
+  const [disposeDate, setDisposeDate] = useState('')
   const [returnRoll, setReturnRoll] = useState<Roll | null>(null)
+  const [returnDate, setReturnDate] = useState('')
   const [disposalReason, setDisposalReason] = useState('Manufacturing defect')
   const [disposing, setDisposing] = useState(false)
+  const today = new Date().toISOString().split('T')[0]
 
   const ADJUSTMENT_REASONS = [
     'Opening Balance',
@@ -576,10 +579,10 @@ export function InventoryPage() {
               </div>
               {selectedParentRoll.status === 'AVAILABLE' && (
                 <div className="flex gap-3 mb-6">
-                  <button onClick={() => { setDisposeRoll(selectedParentRoll); setDisposalReason('Manufacturing defect') }} className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">
+                  <button onClick={() => { setDisposeRoll(selectedParentRoll); setDisposeDate(today); setDisposalReason('Manufacturing defect') }} className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">
                     Mark as Waste
                   </button>
-                  <button onClick={() => { setReturnRoll(selectedParentRoll) }} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                  <button onClick={() => { setReturnRoll(selectedParentRoll); setReturnDate(today) }} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
                     Return to Supplier
                   </button>
                 </div>
@@ -668,6 +671,10 @@ export function InventoryPage() {
                 This will dispose roll <strong>{disposeRoll.rollNumber}</strong> ({Number(disposeRoll.remainingWeight).toFixed(2)} kg remaining) and post a journal entry.
               </p>
               <div className="mb-4">
+                <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+                <DateInput value={disposeDate} onChange={e => setDisposeDate(e.target.value)} max={today} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
+              </div>
+              <div className="mb-4">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Reason</label>
                 <select value={disposalReason} onChange={e => setDisposalReason(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
                   <option value="Manufacturing defect">Manufacturing defect</option>
@@ -682,7 +689,7 @@ export function InventoryPage() {
                   onClick={async () => {
                     setDisposing(true)
                     try {
-                      await productionApi.disposeRoll(disposeRoll.id, disposalReason)
+                      await productionApi.disposeRoll(disposeRoll.id, disposalReason, disposeDate || undefined)
                       setDisposeRoll(null)
                       setSelectedParentRoll(null)
                       setPrintedFromRoll(null)
@@ -710,13 +717,17 @@ export function InventoryPage() {
               <p className="text-sm text-slate-600 mb-4">
                 This will return roll <strong>{returnRoll.rollNumber}</strong> ({Number(returnRoll.remainingWeight).toFixed(2)} kg remaining) to the supplier and post a journal entry.
               </p>
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+                <DateInput value={returnDate} onChange={e => setReturnDate(e.target.value)} max={today} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
+              </div>
               <div className="flex gap-3 justify-end">
                 <button onClick={() => setReturnRoll(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-sm">Cancel</button>
                 <button
                   onClick={async () => {
                     setDisposing(true)
                     try {
-                      await productionApi.returnRoll(returnRoll.id)
+                      await productionApi.returnRoll(returnRoll.id, returnDate || undefined)
                       setReturnRoll(null)
                       setSelectedParentRoll(null)
                       setPrintedFromRoll(null)
@@ -925,7 +936,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
   const [selectedRoll, setSelectedRoll] = useState<PrintedRollDisplay | null>(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showReturnModal, setShowReturnModal] = useState(false)
-  const [returnForm, setReturnForm] = useState({ qty: 0, reason: '', condition: 'SCRAP', refundMethod: 'CREDIT_NOTE' })
+  const [returnForm, setReturnForm] = useState({ qty: 0, reason: '', condition: 'SCRAP', refundMethod: 'CREDIT_NOTE', date: '' })
   const [returnLoading, setReturnLoading] = useState(false)
   const [returnError, setReturnError] = useState('')
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
@@ -1165,7 +1176,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             <div className="flex justify-between pt-4 border-t border-slate-200 mt-4">
               <div>
                 {selectedRoll.status === 'PICKED_UP' && (
-                  <button type="button" onClick={() => { setReturnForm({ qty: Number(selectedRoll.weight), reason: '', condition: 'SCRAP', refundMethod: 'CREDIT_NOTE' }); setShowReturnModal(true) }} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                  <button type="button" onClick={() => { setReturnForm({ qty: Number(selectedRoll.weight), reason: '', condition: 'SCRAP', refundMethod: 'CREDIT_NOTE', date: today }); setShowReturnModal(true) }} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
                     Customer Return
                   </button>
                 )}
@@ -1185,6 +1196,10 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             {returnError && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm mb-4">{returnError}</div>}
 
             <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                <DateInput value={returnForm.date} onChange={e => setReturnForm({ ...returnForm, date: e.target.value })} max={today} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Return Qty (kg)</label>
                 <input type="number" step="0.01" value={returnForm.qty} onChange={e => setReturnForm({ ...returnForm, qty: Math.min(Number(selectedRoll.weight), Math.max(0, Number(e.target.value))) })} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />

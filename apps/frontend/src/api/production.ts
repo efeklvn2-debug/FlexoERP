@@ -32,6 +32,7 @@ export interface PrintedRoll {
   status?: string
   customerId?: string
   pickedUpAt?: string
+  isCombination?: boolean
   createdAt: string
   roll?: {
     id: string
@@ -95,6 +96,7 @@ export interface CreateJobInput {
   wasteWeight?: number
   rollWaste?: Record<string, number>
   notes?: string
+  date?: string
 }
 
 export const productionApi = {
@@ -136,27 +138,27 @@ export const productionApi = {
     return api.put<ProductionJob>(`/production/${id}`, data)
   },
 
-  completeJob: async (id: string) => {
-    return api.post<ProductionJob>(`/production/${id}/complete`, {})
+  completeJob: async (id: string, date?: string) => {
+    return api.post<ProductionJob>(`/production/${id}/complete`, { date })
   },
 
   deleteJob: async (id: string) => {
     return api.delete<void>(`/production/${id}`)
   },
 
-  disposeRoll: async (id: string, reason: string) => {
-    return api.post(`/production/parent-roll/${id}/dispose`, { reason })
+  disposeRoll: async (id: string, reason: string, date?: string) => {
+    return api.post(`/production/parent-roll/${id}/dispose`, { reason, date })
   },
 
-  returnRoll: async (id: string) => {
-    return api.post(`/production/parent-roll/${id}/return`, {})
+  returnRoll: async (id: string, date?: string) => {
+    return api.post(`/production/parent-roll/${id}/return`, { date })
   },
 
-  receiveReplacement: async (id: string) => {
-    return api.post(`/production/parent-roll/${id}/receive-replacement`, {})
+  receiveReplacement: async (id: string, date?: string) => {
+    return api.post(`/production/parent-roll/${id}/receive-replacement`, { date })
   },
 
-  customerReturnRoll: async (id: string, data: { qty: number; reason: string; condition: string; refundMethod?: string }) => {
+  customerReturnRoll: async (id: string, data: { qty: number; reason: string; condition: string; refundMethod?: string; date?: string }) => {
     return api.post(`/production/printed-roll/${id}/customer-return`, data)
   },
 

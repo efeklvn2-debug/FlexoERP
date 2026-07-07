@@ -118,7 +118,7 @@ export const procurementApi = {
   
   deletePO: async (id: string) => api.delete(`/procurement/purchase-orders/${id}`),
   
-  receivePO: async (poId: string) => api.post<{ po: PurchaseOrder; rolls: Roll[] }>(`/procurement/purchase-orders/${poId}/receive`, {}),
+  receivePO: async (poId: string, date?: string) => api.post<{ po: PurchaseOrder; rolls: Roll[] }>(`/procurement/purchase-orders/${poId}/receive`, { date }),
 
   // Rolls
   getRolls: async (materialId?: string, status?: string) => {
@@ -142,7 +142,6 @@ export const procurementApi = {
     api.post<ProductionJob>('/procurement/jobs', data),
   assignRolls: async (jobId: string, rolls: { rollId: string; weightUsed: number }[]) => 
     api.post('/procurement/jobs/assign-rolls', { jobId, rolls }),
-  completeJob: async (id: string) => api.post<ProductionJob>(`/procurement/jobs/${id}/complete`, {}),
 
   // Supplier Invoices
   getSupplierInvoices: async (status?: string) => {

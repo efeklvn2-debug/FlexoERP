@@ -92,6 +92,32 @@ Every pickup generates a separate invoice for the exact quantity picked up. No m
 - `getAllCustomerBalances`: batch-queries availableRollsCount, lastTransactionDate, ordersCount, availableCredit
 - Filter toggles: "Outstanding only", "Has Rolls"
 
+## Payment/Deposit Flow (Refactored 6 Jul 2026)
+
+### Payment vs Deposit — Separate Entry Points
+- **Payment modal** (triggered by "Pay" button on order row/modal/invoice): Title "Record Payment — {orderNumber}", customer + order pre-filled, amount defaults to balance due. No Transaction Type dropdown, no Payment For dropdown, no Customer selector. Excess → deposit automatically (backend handles it).
+- **Deposit modal** (triggered by "+ Deposit" in Payments tab): Title "Record Deposit", customer selector + amount + method, no order association.
+- `paymentModalMode` state (`'payment' | 'deposit'`) controls which variant of the single modal renders.
+- `paymentForm` no longer has `transactionType` or `paymentCategory`. Type is determined by context in `handleRecordPayment`.
+- Overpayment toast: green success banner shows "₦X overpaid — applied as advance deposit" when `res.data.overpayment > 0`.
+- Backend `recordPayment()` return changed from single payment object to `{ payment, overpayment }`.
+- `paymentCategory` field remains in Prisma schema (nullable, historical) but is no longer sent from frontend.
+
+### Cores Returned Removed (Obliterated)
+- `Invoice.coresReturned` column dropped from schema. Migration: `20260706171259_remove_cores_returned`.
+- Removed from `createInvoice` input, `repository.ts`, frontend API types.
+- Core buyback is the sole path for handling cores (separate Core Buyback modal + `core/service.ts`).
+
+### Dead Code Removed
+- `statusTransitionService.ts` deleted entirely — never imported or called anywhere.
+- `CORE_CREDIT_APPLIED` removed from `TransactionType` union (TS types). Prisma enum kept for historical DB records.
+- `CORE_CREDIT_APPLIED: 'CCA'` removed from reference prefix map.
+
+### Revenue Accounts
+- **4000**: Roll/Sales Revenue
+- **4100**: Packing Bag Revenue
+- Revenue split is computed automatically in `recordPickup` from actual pickup data (roll weight × unit price, bag quantity × bag price). GL: Dr 1200 AR, Cr 4000 (rolls excl. VAT), Cr 4100 (bags excl. VAT), Cr 2100 (VAT).
+
 ## Misc
 - Clear buttons: `text-red-700 bg-red-50 border-red-200 rounded-lg hover:bg-red-100`
 - Period filters default to `''` (not "This Month")

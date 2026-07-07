@@ -1,4 +1,4 @@
-import { prisma } from '../../database'
+﻿import { prisma } from '../../database'
 import { Prisma } from '@prisma/client'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
@@ -85,7 +85,7 @@ export const salesOrderService = {
     return updated
   },
 
-  async approveOrder(id: string, userId?: string) {
+  async approveOrder(id: string, userId?: string, date?: string) {
     const order = await salesOrderRepository.findById(id)
     
     if (!order) {
@@ -98,7 +98,7 @@ export const salesOrderService = {
 
     const updated = await salesOrderRepository.update(id, {
       status: 'APPROVED',
-      approvedAt: new Date()
+      approvedAt: dateFromInput(date)
     })
 
     logger.info({ orderId: id }, 'Sales order approved')
@@ -151,7 +151,7 @@ export const salesOrderService = {
     return { order: updated, productionJob }
   },
 
-  async cancelOrder(id: string, userId?: string) {
+  async cancelOrder(id: string, userId?: string, date?: string) {
     const order = await salesOrderRepository.findById(id)
     
     if (!order) {
@@ -203,7 +203,7 @@ export const salesOrderService = {
         where: { id },
         data: {
           status: 'CANCELLED',
-          cancelledAt: new Date()
+          cancelledAt: dateFromInput(date)
         }
       })
 
@@ -267,7 +267,7 @@ export const salesOrderService = {
     return updated
   },
 
-  async recordPickup(id: string, userId?: string, rollIds?: string[], packingBags?: number, packingBagPrice?: number) {
+  async recordPickup(id: string, userId?: string, rollIds?: string[], packingBags?: number, packingBagPrice?: number, date?: string) {
     const order = await salesOrderRepository.findById(id)
 
     if (!order) {
@@ -313,7 +313,7 @@ export const salesOrderService = {
         throw new AppError(400, 'INVALID', 'Selected rolls have zero weight')
       }
     } else {
-      // No roll selection — use default quantity (backward compat for manual orders)
+      // No roll selection ΓÇö use default quantity (backward compat for manual orders)
       quantity = Number(order.quantityOrdered)
     }
 
@@ -330,7 +330,7 @@ export const salesOrderService = {
           data: {
           status: 'PICKED_UP',
             customerId: order.customerId,
-            pickedUpAt: new Date()
+            pickedUpAt: dateFromInput(date)
           }
         })
 
@@ -401,6 +401,7 @@ export const salesOrderService = {
                 sourceModule: 'SALES',
                 sourceId: order.id,
                 reference: order.orderNumber,
+                date,
                 lines: [
                   { accountId: cogsAccountId, debit: cogsAmount, credit: 0, memo: 'COGS recognized on delivery' },
                   { accountId: deferredCogsAccountId, debit: 0, credit: cogsAmount, memo: 'Deferred COGS cleared' }
@@ -437,7 +438,7 @@ export const salesOrderService = {
         data: {
           status: fullyDelivered ? 'COMPLETED' : 'PICKED_UP',
           quantityDelivered: newDelivered,
-          completedAt: fullyDelivered ? new Date() : undefined,
+          completedAt: fullyDelivered ? dateFromInput(date) : undefined,
           packingBagsQuantity: packingBags && packingBags > 0
             ? { increment: packingBags }
             : undefined,
@@ -469,6 +470,7 @@ export const salesOrderService = {
               sourceModule: 'SALES',
               sourceId: order.id,
               reference: order.orderNumber,
+              date,
               lines: [
                 { accountId: cogsId, debit: bagCostAmount, credit: 0, memo: 'COGS - Packing Bags' },
                 { accountId: packingBagInventoryId, debit: 0, credit: bagCostAmount, memo: 'Packing Bag Inventory' }
@@ -522,6 +524,7 @@ export const salesOrderService = {
             sourceModule: 'SALES',
             sourceId: order.id,
             reference: order.orderNumber,
+            date,
             lines
           }, tx)
         }
@@ -535,7 +538,7 @@ export const salesOrderService = {
     })
 
     try {
-      await invoiceService.createInvoice({ salesOrderId: id, quantityDelivered: quantity })
+      await invoiceService.createInvoice({ salesOrderId: id, quantityDelivered: quantity, date })
     } catch (err) {
       logger.error({ err, orderId: id }, 'Failed to create invoice after pickup')
     }
@@ -543,7 +546,7 @@ export const salesOrderService = {
     return result
   },
 
-  async createInvoice(input: { salesOrderId: string; quantityDelivered?: number; coresReturned?: number }, userId?: string) {
+  async createInvoice(input: { salesOrderId: string; quantityDelivered?: number; date?: string }, userId?: string) {
     const order = await salesOrderRepository.findById(input.salesOrderId)
     
     if (!order) {
@@ -634,20 +637,19 @@ export const salesOrderService = {
             depositApplied: new Prisma.Decimal(String(depositApplied)),
             previousPayments: new Prisma.Decimal(String(previousPayments)),
             balanceDue: new Prisma.Decimal(String(balanceDue)),
-            coresReturned: input.coresReturned || 0,
             packingBagsQuantity: new Prisma.Decimal(String(packingBagsQuantity)),
             packingBagsUnitPrice: new Prisma.Decimal(String(packingBagsUnitPrice)),
             packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotalExcl)),
             packingBagsPaid: new Prisma.Decimal('0'),
             amountPaid: new Prisma.Decimal(String(depositApplied + previousPayments)),
             status: invoiceStatus as any,
-            issuedAt: new Date(),
-            ...(invoiceStatus === 'PAID' ? { paidAt: new Date() } : {})
+            issuedAt: dateFromInput(input.date),
+            ...(invoiceStatus === 'PAID' ? { paidAt: dateFromInput(input.date) } : {})
           },
           include: { customer: true, salesOrder: true }
         })
 
-        // Update order quantity (never decrease — recordPickup sets cumulative total)
+        // Update order quantity (never decrease ΓÇö recordPickup sets cumulative total)
         const orderUpdateData: any = {
           quantityDelivered: new Prisma.Decimal(String(Math.max(Number(order.quantityDelivered || 0), quantityDelivered)))
         }
@@ -665,13 +667,13 @@ export const salesOrderService = {
           orderUpdateData.paymentStatus = newPaymentStatus
           if (newPaymentStatus === 'FULLY_PAID' && order.status === 'PICKED_UP') {
             orderUpdateData.status = 'COMPLETED'
-            orderUpdateData.completedAt = new Date()
+            orderUpdateData.completedAt = dateFromInput(input.date)
           }
         }
         // Already fully paid via direct payment before pickup
         if (Number(order.totalPaid) >= Number(order.totalAmount) && order.status === 'PICKED_UP' && !orderUpdateData.status) {
           orderUpdateData.status = 'COMPLETED'
-          orderUpdateData.completedAt = new Date()
+          orderUpdateData.completedAt = dateFromInput(input.date)
         }
         await tx.salesOrder.update({
           where: { id: order.id },
@@ -697,6 +699,7 @@ export const salesOrderService = {
               sourceModule: 'SALES',
               sourceId: order.id,
               reference: invoiceNumber,
+              date: input.date,
               lines: [
                 { accountId: creditAccountId, debit: advancePaymentApplied, credit: 0, memo: 'Advance payment applied to invoice' },
                 { accountId: arAccountId, debit: 0, credit: advancePaymentApplied, memo: `Applied to ${invoiceNumber}` }
@@ -730,6 +733,7 @@ export const salesOrderService = {
     notes?: string
     userId?: string
     applyDeposit?: boolean
+    date?: string
   }) {
     const material = await prisma.material.findFirst({
       where: { code: 'PBAG' }
@@ -830,8 +834,8 @@ export const salesOrderService = {
             depositRequired: new Prisma.Decimal('0'),
             status: 'COMPLETED' as any,
             paymentStatus: 'FULLY_PAID' as any,
-            approvedAt: new Date(),
-            completedAt: new Date(),
+            approvedAt: dateFromInput(input.date),
+            completedAt: dateFromInput(input.date),
             totalPaid: new Prisma.Decimal(String(totalAmountWithVat)),
             balancePaid: new Prisma.Decimal(String(totalAmountWithVat))
           }
@@ -850,14 +854,13 @@ export const salesOrderService = {
             depositApplied: new Prisma.Decimal(String(depositToApply)),
             previousPayments: new Prisma.Decimal('0'),
             balanceDue: new Prisma.Decimal('0'),
-            coresReturned: 0,
             packingBagsQuantity: new Prisma.Decimal(String(input.quantity)),
             packingBagsUnitPrice: new Prisma.Decimal(String(input.unitPrice)),
             packingBagsSubtotal: new Prisma.Decimal(String(packingBagsSubtotal)),
             packingBagsPaid: new Prisma.Decimal(String(cashPaymentAmount)),
             amountPaid: new Prisma.Decimal(String(totalAmountWithVat)),
             status: 'PAID' as any,
-            paidAt: new Date()
+            paidAt: dateFromInput(input.date)
           }
         })
 
@@ -906,6 +909,7 @@ export const salesOrderService = {
             sourceModule: 'SALES',
             sourceId: invoice.id,
             reference: invoiceNumber,
+            date: input.date,
             postedById: input.userId,
             lines: [
               { accountId: arAccountId, debit: totalAmountWithVat, credit: 0, memo: 'Accounts Receivable' },
@@ -920,6 +924,7 @@ export const salesOrderService = {
             sourceModule: 'SALES',
             sourceId: invoice.id,
             reference: invoiceNumber,
+            date: input.date,
             lines: [
               { accountId: cogsId, debit: packingBagsCost, credit: 0, memo: 'COGS - Packing Bags' },
               { accountId: packingBagInventoryId, debit: 0, credit: packingBagsCost, memo: 'Packing Bag Inventory' }
@@ -932,6 +937,7 @@ export const salesOrderService = {
               sourceModule: 'PAYMENT',
               sourceId: invoice.id,
               reference: input.referenceNumber || invoiceNumber,
+              date: input.date,
               lines: [
                 { accountId: debitAccountId, debit: cashPaymentAmount, credit: 0, memo: isElectronic ? 'Bank transfer' : 'Cash received' },
                 { accountId: arAccountId, debit: 0, credit: cashPaymentAmount, memo: 'AR cleared (cash portion)' }
@@ -946,6 +952,7 @@ export const salesOrderService = {
               sourceModule: 'SALES',
               sourceId: invoice.id,
               reference: invoiceNumber,
+              date: input.date,
               lines: [
                 { accountId: depositLiabilityId, debit: depositToApply, credit: 0, memo: 'Customer deposit applied' },
                 { accountId: arAccountId, debit: 0, credit: depositToApply, memo: 'AR cleared (deposit portion)' }
@@ -1124,7 +1131,7 @@ export const paymentService = {
     amount: number
     referenceNumber?: string
     notes?: string
-    paymentCategory?: 'ROLL' | 'BAG' | 'BOTH'
+    date?: string
   }, userId?: string) {
     if (!input.salesOrderId && !input.customerId) {
       throw new AppError(400, 'VALIDATION', 'Either salesOrderId or customerId is required')
@@ -1139,11 +1146,11 @@ export const paymentService = {
     if (!input.referenceNumber) {
       const prefixMap: Record<string, string> = {
         DEPOSIT: 'DEP', PAYMENT: 'PAY', CORE_BUYBACK: 'CBY',
-        CORE_CREDIT_APPLIED: 'CCA', REFUND: 'RFD'
+        REFUND: 'RFD'
       }
       const prefix = prefixMap[input.transactionType] || 'PAY'
-      const now = new Date()
-      const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+      const refDate = dateFromInput(input.date)
+      const ymd = `${refDate.getFullYear()}${String(refDate.getMonth() + 1).padStart(2, '0')}${String(refDate.getDate()).padStart(2, '0')}`
       const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
       input.referenceNumber = `${prefix}-${ymd}-${suffix}`
     }
@@ -1155,9 +1162,14 @@ export const paymentService = {
       if (input.salesOrderId && input.transactionType === 'PAYMENT') {
         const order = await tx.salesOrder.findUnique({
           where: { id: input.salesOrderId },
-          select: { totalPaid: true, totalAmount: true }
+          select: { totalPaid: true, totalAmount: true, approvedAt: true }
         })
         if (order) {
+          const payDate = dateFromInput(input.date)
+          if (order.approvedAt && payDate < order.approvedAt) {
+            logger.warn({ orderId: input.salesOrderId, paymentDate: payDate, approvedAt: order.approvedAt },
+              'Payment date is before order approval date — sequencing issue')
+          }
           const previousPayments = Number(order.totalPaid)
           const orderTotal = Number(order.totalAmount)
           const remaining = Math.max(0, orderTotal - previousPayments)
@@ -1180,7 +1192,7 @@ export const paymentService = {
             referenceNumber: input.referenceNumber,
             notes: input.notes,
             receivedById: userId,
-            paymentCategory: input.paymentCategory as any
+            receivedAt: dateFromInput(input.date)
           }
         })
       }
@@ -1197,12 +1209,13 @@ export const paymentService = {
             amount: new Prisma.Decimal(String(overpayment)),
             receivedById: userId,
             referenceNumber: depRef,
-            notes: `Overpayment from payment ${input.referenceNumber || ''}`
+            notes: `Overpayment from payment ${input.referenceNumber || ''}`,
+            receivedAt: dateFromInput(input.date)
           }
         })
       }
 
-      // Update sales order if linked (skip if revenuePortion is 0 — no change needed)
+      // Update sales order if linked (skip if revenuePortion is 0 ΓÇö no change needed)
       if (input.salesOrderId && revenuePortion > 0) {
         const order = await tx.salesOrder.findUnique({
           where: { id: input.salesOrderId }
@@ -1227,7 +1240,7 @@ export const paymentService = {
           }
           if (paymentStatus === 'FULLY_PAID' && order.status === 'PICKED_UP' && Number(order.quantityDelivered) >= Number(order.quantityOrdered)) {
             orderUpdateData.status = 'COMPLETED'
-            orderUpdateData.completedAt = new Date()
+            orderUpdateData.completedAt = dateFromInput(input.date)
           }
 
           await tx.salesOrder.update({
@@ -1255,7 +1268,7 @@ export const paymentService = {
                 amountPaid: new Prisma.Decimal(String(newInvoiceAmountPaid)),
                 balanceDue: new Prisma.Decimal(String(newInvoiceBalanceDue)),
                 status: newInvoiceStatus as any,
-                ...(newInvoiceStatus === 'PAID' ? { paidAt: new Date() } : {})
+                ...(newInvoiceStatus === 'PAID' ? { paidAt: dateFromInput(input.date) } : {})
               }
             })
           }
@@ -1310,16 +1323,17 @@ export const paymentService = {
           sourceModule: 'PAYMENT',
           sourceId: input.salesOrderId,
           reference: input.referenceNumber,
+          date: input.date,
           lines: journalLines
         }, tx)
       } catch (jeErr) {
         logger.error({ err: jeErr, amount: input.amount }, 'Failed to post payment journal entry - continuing')
       }
 
-      return payment || overpaymentDeposit
+      return { payment: payment || overpaymentDeposit, overpayment }
     })
 
-    logger.info({ paymentId: result?.id, amount: input.amount }, 'Payment recorded')
+    logger.info({ paymentId: result?.payment?.id, amount: input.amount, overpayment: result.overpayment }, 'Payment recorded')
     return result
   },
 
@@ -1359,7 +1373,7 @@ export const paymentService = {
 
 // Invoice Service  
 export const invoiceService = {
-  async createInvoice(input: { salesOrderId: string; quantityDelivered?: number; coresReturned?: number }, userId?: string) {
+  async createInvoice(input: { salesOrderId: string; quantityDelivered?: number; date?: string }, userId?: string) {
     return salesOrderService.createInvoice(input, userId)
   },
 
@@ -1371,8 +1385,8 @@ export const invoiceService = {
     return invoiceRepository.findById(id)
   },
 
-  async issueInvoice(id: string) {
-    return invoiceRepository.update(id, { status: 'ISSUED' as any, issuedAt: new Date() })
+  async issueInvoice(id: string, date?: string) {
+    return invoiceRepository.update(id, { status: 'ISSUED' as any, issuedAt: dateFromInput(date) })
   },
 
   async addPayment(invoiceId: string, amount: number, date: string | Date, reference?: string, notes?: string, paymentMethod?: string) {
@@ -1399,7 +1413,7 @@ export const invoiceService = {
           data: {
             invoiceId,
             amount: new Prisma.Decimal(String(amount)),
-            date: typeof date === 'string' ? dateFromInput(date) : date,
+            date: typeof date === 'string' ? date : undefined,
             reference,
             notes,
             paymentMethod
@@ -1426,7 +1440,7 @@ export const invoiceService = {
             sourceModule: 'PAYMENT',
             sourceId: createdPayment.id,
             reference: reference || `Inv ${invoice.invoiceNumber}`,
-            date: typeof date === 'string' ? dateFromInput(date) : date,
+            date: typeof date === 'string' ? date : undefined,
             lines: [
               { accountId: debitAccountId, debit: amount, credit: 0, memo: isElectronicPayment ? 'Bank transfer' : 'Cash received' },
               { accountId: arAccountId, debit: 0, credit: amount, memo: `Payment against ${invoice.invoiceNumber}` }
@@ -1502,14 +1516,14 @@ export const coreBuybackService = {
             paymentMethod: 'CASH' as any,
             amount: new Prisma.Decimal(String(totalValue)),
             referenceNumber: `CORE-${buyback.id.slice(-8)}`,
-            notes: `Core buyback: ${input.coresQuantity} cores (₦${totalValue.toLocaleString()})`,
+            notes: `Core buyback: ${input.coresQuantity} cores (Γéª${totalValue.toLocaleString()})`,
             receivedById: userId,
             salesOrderId: null
           }
         })
 
         await financeService.postJournalEntry({
-          description: `Core buyback - ${input.coresQuantity} cores (₦${totalValue.toLocaleString()})`,
+          description: `Core buyback - ${input.coresQuantity} cores (Γéª${totalValue.toLocaleString()})`,
           sourceModule: 'SALES',
           sourceId: buyback.id,
           reference: `CORE-${buyback.id.slice(-8)}`,
@@ -1553,7 +1567,7 @@ export const coreBuybackService = {
           paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
           amount: new Prisma.Decimal(String(paidAmount)),
           referenceNumber: `CORE-${buyback.id.slice(-8)}`,
-          notes: `Core buyback - ${input.sellerName}: ${input.coresQuantity} cores (₦${paidAmount.toLocaleString()})`,
+          notes: `Core buyback - ${input.sellerName}: ${input.coresQuantity} cores (Γéª${paidAmount.toLocaleString()})`,
           receivedById: userId,
           sellerName: input.sellerName,
           coresQuantity: input.coresQuantity
@@ -1561,7 +1575,7 @@ export const coreBuybackService = {
       })
 
       await financeService.postJournalEntry({
-        description: `Core buyback (walk-in) - ${input.sellerName}: ${input.coresQuantity} cores (₦${paidAmount.toLocaleString()})`,
+        description: `Core buyback (walk-in) - ${input.sellerName}: ${input.coresQuantity} cores (Γéª${paidAmount.toLocaleString()})`,
         sourceModule: 'SALES',
         sourceId: buyback.id,
         reference: `CORE-${buyback.id.slice(-8)}`,

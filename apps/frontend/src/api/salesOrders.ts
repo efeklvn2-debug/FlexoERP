@@ -3,7 +3,7 @@ import { api } from './client'
 export type DeliveryMethod = 'PICKUP' | 'SHIPPING'
 export type MTOOrderStatus = 'PENDING' | 'APPROVED' | 'MRP_PENDING' | 'IN_PRODUCTION' | 'READY' | 'PICKED_UP' | 'COMPLETED' | 'CANCELLED'
 export type MTOPaymentStatus = 'PENDING_PAYMENT' | 'PARTIAL_DEPOSIT' | 'DEPOSIT_COMPLETE' | 'PARTIAL_PAYMENT' | 'FULLY_PAID' | 'OVERPAID'
-export type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'DEPOSIT_APPLIED' | 'REFUND'
+export type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'DEPOSIT_APPLIED' | 'REFUND'
 export type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'CANCELLED'
 
@@ -92,7 +92,6 @@ export interface Invoice {
   depositApplied: number
   previousPayments: number
   balanceDue: number
-  coresReturned: number
   packingBagsQuantity?: number
   packingBagsUnitPrice?: number
   packingBagsSubtotal?: number
@@ -213,7 +212,7 @@ export const salesOrderApi = {
     shippingAddress?: string
   }) => api.post<SalesOrder>('/sales-orders/orders', data),
   updateOrder: (id: string, data: any) => api.patch<SalesOrder>(`/sales-orders/orders/${id}`, data),
-  approveOrder: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/approve`, {}),
+  approveOrder: (id: string, date?: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/approve`, { date }),
   startProduction: (id: string, data: {
     machine: string
     category?: string
@@ -223,9 +222,9 @@ export const salesOrderApi = {
     rollWaste?: Record<string, number>
     notes?: string
   }) => api.patch<{ order: SalesOrder; productionJob: any }>(`/sales-orders/orders/${id}/start-production`, data),
-  cancelOrder: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/cancel`, {}),
+  cancelOrder: (id: string, date?: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/cancel`, { date }),
   markReady: (id: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/ready`, {}),
-  recordPickup: (id: string, rollIds?: string[], packingBags?: number, packingBagPrice?: number) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { rollIds, packingBags, packingBagPrice }),
+  recordPickup: (id: string, rollIds?: string[], packingBags?: number, packingBagPrice?: number, date?: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/pickup`, { rollIds, packingBags, packingBagPrice, date }),
 
   // Payments
   recordPayment: (data: {
@@ -233,10 +232,10 @@ export const salesOrderApi = {
     customerId?: string
     transactionType: TransactionType
     paymentMethod: PaymentMethod
-    paymentCategory?: 'ROLL' | 'BAG' | 'BOTH'
     amount: number
     referenceNumber?: string
     notes?: string
+    date?: string
   }) => api.post<PaymentTransaction>('/sales-orders/payments', data),
   getPayments: (params?: { salesOrderId?: string; customerId?: string; dateFrom?: string; dateTo?: string }) => {
     const query = new URLSearchParams()
@@ -250,7 +249,7 @@ export const salesOrderApi = {
   getPaymentsByOrder: (salesOrderId: string) => api.get<PaymentTransaction[]>(`/sales-orders/payments/order/${salesOrderId}`),
 
   // Invoices
-  createInvoice: (data: { salesOrderId: string; quantityDelivered?: number; coresReturned?: number }) =>
+  createInvoice: (data: { salesOrderId: string; quantityDelivered?: number }) =>
     api.post<Invoice>('/sales-orders/invoices', data),
   getInvoices: (params?: { status?: string; customerId?: string }) => {
     const query = new URLSearchParams()
@@ -260,7 +259,7 @@ export const salesOrderApi = {
     return api.get<Invoice[]>(`/sales-orders/invoices${queryStr ? '?' + queryStr : ''}`)
   },
   getInvoiceById: (id: string) => api.get<Invoice>(`/sales-orders/invoices/${id}`),
-  issueInvoice: (id: string) => api.patch<Invoice>(`/sales-orders/invoices/${id}/issue`, {}),
+  issueInvoice: (id: string, date?: string) => api.patch<Invoice>(`/sales-orders/invoices/${id}/issue`, { date }),
   addPayment: (id: string, data: { amount: number; date: string; paymentMethod?: string; reference?: string; notes?: string }) =>
     api.post<PaymentReceived>(`/sales-orders/invoices/${id}/payments`, data),
 
@@ -329,6 +328,7 @@ export const salesOrderApi = {
     referenceNumber?: string
     notes?: string
     applyDeposit?: boolean
+    date?: string
   }) => api.post<{
     success: boolean
     order: { id: string; orderNumber: string }

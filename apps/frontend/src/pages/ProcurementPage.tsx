@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { procurementApi, PurchaseOrder, SupplierInvoice, SupplierInvoiceStatus } from '../api/procurement'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
@@ -45,6 +45,7 @@ export function ProcurementPage() {
   const [error, setError] = useState('')
   const [showPOModal, setShowPOModal] = useState(false)
   const [showReceiveModal, setShowReceiveModal] = useState(false)
+  const [receiveDate, setReceiveDate] = useState(new Date().toISOString().split('T')[0])
   const [showViewPOModal, setShowViewPOModal] = useState(false)
   const [showEditPOModal, setShowEditPOModal] = useState(false)
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
@@ -72,6 +73,45 @@ export function ProcurementPage() {
   const [poForInv, setPoForInv] = useState<PurchaseOrder | null>(null)
   const [invForm, setInvForm] = useState({ poId: '', invoiceNumber: '', date: '', amount: 0 })
   const [payForm, setPayForm] = useState({ amount: 0, date: '', paymentMethod: 'Cash' as 'Cash' | 'Bank Transfer', reference: '', notes: '' })
+
+  // PO filters
+  const [poFilterSearch, setPoFilterSearch] = useState('')
+  const [poFilterStatus, setPoFilterStatus] = useState('')
+
+  // Invoice filters
+  const [invFilterSearch, setInvFilterSearch] = useState('')
+  const [invFilterStatus, setInvFilterStatus] = useState('')
+
+  const filteredPOs = useMemo(() => {
+    let result = purchaseOrders
+    if (poFilterSearch) {
+      const term = poFilterSearch.toLowerCase()
+      result = result.filter(po =>
+        po.poNumber.toLowerCase().includes(term) ||
+        po.supplier.toLowerCase().includes(term)
+      )
+    }
+    if (poFilterStatus) {
+      result = result.filter(po => po.status === poFilterStatus)
+    }
+    return result
+  }, [purchaseOrders, poFilterSearch, poFilterStatus])
+
+  const filteredInvoices = useMemo(() => {
+    let result = supplierInvoices
+    if (invFilterSearch) {
+      const term = invFilterSearch.toLowerCase()
+      result = result.filter(inv =>
+        (inv.invoiceNumber || '').toLowerCase().includes(term) ||
+        (inv.purchaseOrder?.poNumber || '').toLowerCase().includes(term) ||
+        (inv.purchaseOrder?.supplier || inv.supplier?.name || '').toLowerCase().includes(term)
+      )
+    }
+    if (invFilterStatus) {
+      result = result.filter(inv => inv.status === invFilterStatus)
+    }
+    return result
+  }, [supplierInvoices, invFilterSearch, invFilterStatus])
 
   const [poForm, setPoForm] = useState({ supplier: '', expectedDate: '', notes: '' })
   const [poLineItems, setPoLineItems] = useState<POLineItemForm[]>([])
@@ -168,7 +208,7 @@ export function ProcurementPage() {
   const handleReceivePO = async () => {
     if (!selectedPO) return
     
-    const res = await procurementApi.receivePO(selectedPO.id)
+    const res = await procurementApi.receivePO(selectedPO.id, receiveDate || undefined)
     if (!res.error) {
       setShowReceiveModal(false)
       setSelectedPO(null)
@@ -543,10 +583,41 @@ export function ProcurementPage() {
         {loading ? (
           <div className="text-center py-12">Loading...</div>
         ) : activeTab === 'pos' ? (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200">
             <div className="p-4 border-b border-slate-200 flex justify-between items-center">
               <h2 className="font-semibold">Purchase Orders</h2>
               <button onClick={() => setShowPOModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg">New PO</button>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Search</label>
+                  <input
+                    type="text"
+                    placeholder="PO # or supplier..."
+                    value={poFilterSearch}
+                    onChange={e => setPoFilterSearch(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
+                  <select value={poFilterStatus} onChange={e => setPoFilterStatus(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
+                    <option value="">All</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="RECEIVED">Received</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </select>
+                </div>
+                <div className="flex items-end gap-2">
+                  {(poFilterSearch || poFilterStatus) && (
+                    <button onClick={() => { setPoFilterSearch(''); setPoFilterStatus('') }} className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
+                      Clear
+                    </button>
+                  )}
+                  <span className="text-xs text-slate-500">{filteredPOs.length} of {purchaseOrders.length} items</span>
+                </div>
+              </div>
             </div>
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
@@ -561,7 +632,7 @@ export function ProcurementPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {purchaseOrders.map(po => (
+                {filteredPOs.map(po => (
                   <tr key={po.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => openViewPOModal(po)}>
                     <td className="px-6 py-4 text-sm font-medium text-blue-600 hover:text-blue-800">{po.poNumber}</td>
                     <td className="px-6 py-4 text-sm text-slate-600">{po.supplier}</td>
@@ -589,10 +660,41 @@ export function ProcurementPage() {
             </table>
           </div>
         ) : (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200">
             <div className="p-4 border-b border-slate-200 flex justify-between items-center">
               <h2 className="font-semibold">Supplier Invoices</h2>
               <button onClick={() => openInvoiceModal()} className="px-4 py-2 bg-blue-600 text-white rounded-lg">New Invoice</button>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Search</label>
+                  <input
+                    type="text"
+                    placeholder="Invoice #, PO # or supplier..."
+                    value={invFilterSearch}
+                    onChange={e => setInvFilterSearch(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
+                  <select value={invFilterStatus} onChange={e => setInvFilterStatus(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg">
+                    <option value="">All</option>
+                    <option value="UNPAID">Unpaid</option>
+                    <option value="PARTIAL">Partial</option>
+                    <option value="PAID">Paid</option>
+                  </select>
+                </div>
+                <div className="flex items-end gap-2">
+                  {(invFilterSearch || invFilterStatus) && (
+                    <button onClick={() => { setInvFilterSearch(''); setInvFilterStatus('') }} className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
+                      Clear
+                    </button>
+                  )}
+                  <span className="text-xs text-slate-500">{filteredInvoices.length} of {supplierInvoices.length} items</span>
+                </div>
+              </div>
             </div>
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
@@ -608,11 +710,11 @@ export function ProcurementPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {supplierInvoices.length === 0 ? (
+                {filteredInvoices.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="px-6 py-8 text-center text-slate-500">No supplier invoices found</td>
                   </tr>
-                ) : supplierInvoices.map(inv => {
+                ) : filteredInvoices.map(inv => {
                   const balance = Number(inv.amount) - Number(inv.amountPaid)
                   return (
                     <tr key={inv.id} className="hover:bg-slate-50">
@@ -900,6 +1002,11 @@ export function ProcurementPage() {
                 </div>
               </div>
                 
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Receive Date</label>
+                <DateInput value={receiveDate} onChange={e => setReceiveDate(e.target.value)} max={new Date().toISOString().split('T')[0]} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+              </div>
+
               <div className="flex justify-end space-x-3">
                 <button type="button" onClick={() => { setShowReceiveModal(false); setSelectedPO(null) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
                 <button type="button" onClick={handleReceivePO} className="px-4 py-2 bg-green-600 text-white rounded-lg">Receive PO</button>

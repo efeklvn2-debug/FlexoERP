@@ -7,7 +7,7 @@ import { productionApi, ParentRoll, ProductionJob } from '../api/production'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
 
-type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'CORE_CREDIT_APPLIED' | 'DEPOSIT_APPLIED' | 'REFUND'
+
 type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
 type QuantityType = 'rolls' | 'kg'
 
@@ -87,6 +87,7 @@ export function SalesOrdersPage() {
   const [allMaterials, setAllMaterials] = useState<MaterialType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
 
   const [rollWeight, setRollWeight] = useState(15)
 
@@ -111,6 +112,11 @@ export function SalesOrdersPage() {
   const [customerFilter, setCustomerFilter] = useState('')
   const [paymentFilter, setPaymentFilter] = useState('')
 
+  const [orderSortDir, setOrderSortDir] = useState<'asc' | 'desc'>('desc')
+  const [paymentSortDir, setPaymentSortDir] = useState<'asc' | 'desc'>('desc')
+  const [invoiceSortDir, setInvoiceSortDir] = useState<'asc' | 'desc'>('desc')
+  const [coreBuybackSortDir, setCoreBuybackSortDir] = useState<'asc' | 'desc'>('desc')
+
   const [orderForm, setOrderForm] = useState({
     customerId: '',
     materialTypeId: '',
@@ -123,15 +129,15 @@ export function SalesOrdersPage() {
     notes: ''
   })
 
+  const [paymentModalMode, setPaymentModalMode] = useState<'payment' | 'deposit'>('payment')
   const [paymentForm, setPaymentForm] = useState({
     salesOrderId: '',
     customerId: '',
-    transactionType: 'DEPOSIT' as TransactionType,
-    paymentMethod: 'CASH' as PaymentMethod,
-    paymentCategory: 'ROLL' as 'ROLL' | 'BAG' | 'BOTH',
+    paymentMethod: 'Cash' as PaymentMethod,
     amount: 0,
     referenceNumber: '',
-    notes: ''
+    notes: '',
+    date: new Date().toISOString().split('T')[0]
   })
 
   const [coreBuybackForm, setCoreBuybackForm] = useState(() => {
@@ -153,7 +159,8 @@ export function SalesOrdersPage() {
   const [pickupForm, setPickupForm] = useState({
     packingBags: 0,
     packingBagPrice: 0,
-    notes: ''
+    notes: '',
+    date: new Date().toISOString().split('T')[0]
   })
 
   const [pickupRolls, setPickupRolls] = useState<{ id: string; weightUsed: number; status: string; rollId: string }[]>([])
@@ -165,7 +172,8 @@ export function SalesOrdersPage() {
     unitPrice: 0,
     paymentMethod: 'Cash' as 'Cash' | 'Electronic',
     referenceNumber: '',
-    notes: ''
+    notes: '',
+    date: new Date().toISOString().split('T')[0]
   })
 
   const [packingBagDeposit, setPackingBagDeposit] = useState(0)
@@ -704,6 +712,32 @@ export function SalesOrdersPage() {
     return true
   })
 
+  const sortedOrders = [...filteredOrders].sort((a, b) => {
+    const d = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    return orderSortDir === 'desc' ? -d : d
+  })
+
+  const sortedPayments = [...payments].sort((a, b) => {
+    const d = new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime()
+    return paymentSortDir === 'desc' ? -d : d
+  })
+
+  const sortedInvoices = [...invoices].sort((a, b) => {
+    const d = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    return invoiceSortDir === 'desc' ? -d : d
+  })
+
+  const sortedCoreBuybacks = [...coreBuybacks].sort((a, b) => {
+    const d = new Date(a.date).getTime() - new Date(b.date).getTime()
+    return coreBuybackSortDir === 'desc' ? -d : d
+  })
+
+  const filteredInvoices = sortedInvoices.filter(inv => {
+    const statusMatch = !invoiceStatusFilter || inv.status === invoiceStatusFilter
+    const nameMatch = !invoiceCustomerSearch || (inv.customer?.name || '').toLowerCase().includes(invoiceCustomerSearch.toLowerCase())
+    return statusMatch && nameMatch
+  })
+
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -770,21 +804,29 @@ export function SalesOrdersPage() {
     if (!paymentForm.amount || paymentForm.amount <= 0) { setError('Amount is required'); return }
     if (!paymentForm.customerId) { setError('Customer is required'); return }
 
+    const isPayment = paymentModalMode === 'payment' && paymentForm.salesOrderId
+
     try {
       const res = await salesOrderApi.recordPayment({
         salesOrderId: paymentForm.salesOrderId || undefined,
         customerId: paymentForm.customerId,
-        transactionType: paymentForm.transactionType,
+        transactionType: isPayment ? 'PAYMENT' : 'DEPOSIT',
         paymentMethod: paymentForm.paymentMethod,
-        paymentCategory: paymentForm.paymentCategory,
         amount: paymentForm.amount,
         referenceNumber: paymentForm.referenceNumber || undefined,
-        notes: paymentForm.notes || undefined
+        notes: paymentForm.notes || undefined,
+        date: paymentForm.date || undefined
       })
       if (res.error) { setError(res.error.message); return }
+      const overpayment = (res.data as any)?.overpayment || 0
+      const msg = isPayment
+        ? `Payment of ₦${paymentForm.amount.toLocaleString()} recorded` + (overpayment > 0 ? `. ₦${overpayment.toLocaleString()} overpaid — applied as advance deposit.` : '')
+        : `Deposit of ₦${paymentForm.amount.toLocaleString()} recorded`
+      setSuccess(msg)
+      setTimeout(() => setSuccess(''), 5000)
       setShowPaymentModal(false)
       setShowInvoiceModal(false)
-      setPaymentForm({ salesOrderId: '', customerId: '', transactionType: 'DEPOSIT', paymentMethod: 'Cash', paymentCategory: 'ROLL', amount: 0, referenceNumber: '', notes: '' })
+      setPaymentForm({ salesOrderId: '', customerId: '', paymentMethod: 'Cash', amount: 0, referenceNumber: '', notes: '', date: new Date().toISOString().split('T')[0] })
       loadData()
       loadPayments()
       loadInvoices()
@@ -817,7 +859,8 @@ export function SalesOrdersPage() {
         paymentMethod: packingBagForm.paymentMethod,
         referenceNumber: packingBagForm.referenceNumber || undefined,
         notes: packingBagForm.notes || undefined,
-        applyDeposit
+        applyDeposit,
+        date: packingBagForm.date || undefined
       })
       
       if (res.error) { 
@@ -838,7 +881,8 @@ export function SalesOrdersPage() {
         unitPrice: 0,
         paymentMethod: 'Cash',
         referenceNumber: '',
-        notes: ''
+        notes: '',
+        date: new Date().toISOString().split('T')[0]
       })
       
       loadData()
@@ -990,7 +1034,8 @@ export function SalesOrdersPage() {
     setPickupForm({
       packingBags: 0,
       packingBagPrice: defaultPrice,
-      notes: ''
+      notes: '',
+      date: new Date().toISOString().split('T')[0]
     })
     setShowPickupModal(true)
   }
@@ -1053,7 +1098,8 @@ export function SalesOrdersPage() {
         productionOrder.id,
         selectedRollIds,
         pickupForm.packingBags > 0 ? pickupForm.packingBags : undefined,
-        pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 ? pickupForm.packingBagPrice : undefined
+        pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 ? pickupForm.packingBagPrice : undefined,
+        pickupForm.date || undefined
       )
       if (res.error) { setShowPickupModal(false); setProductionOrder(null); setPickupRolls([]); setSelectedRollIds([]); setError(res.error.message); return }
       setShowPickupModal(false)
@@ -1102,15 +1148,29 @@ export function SalesOrdersPage() {
   }
 
   const openPaymentModal = (order?: SalesOrder) => {
+    setPaymentModalMode('payment')
     setPaymentForm({
       salesOrderId: order?.id || '',
       customerId: order?.customerId || '',
-      transactionType: order ? 'PAYMENT' : 'DEPOSIT',
       paymentMethod: 'Cash',
-      paymentCategory: 'ROLL',
       amount: order ? order.totalAmount - order.totalPaid : 0,
       referenceNumber: '',
-      notes: ''
+      notes: '',
+      date: new Date().toISOString().split('T')[0]
+    })
+    setShowPaymentModal(true)
+  }
+
+  const openDepositModal = () => {
+    setPaymentModalMode('deposit')
+    setPaymentForm({
+      salesOrderId: '',
+      customerId: '',
+      paymentMethod: 'Cash',
+      amount: 0,
+      referenceNumber: '',
+      notes: '',
+      date: new Date().toISOString().split('T')[0]
     })
     setShowPaymentModal(true)
   }
@@ -1161,6 +1221,7 @@ export function SalesOrdersPage() {
           ))}
         </div>
 
+        {success && <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-green-700 mb-3">{success}</div>}
         {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
 
         {loading ? (
@@ -1211,15 +1272,17 @@ export function SalesOrdersPage() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Payment</th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Total</th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Paid</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase cursor-pointer select-none" onClick={() => setOrderSortDir(orderSortDir === 'desc' ? 'asc' : 'desc')}>
+                          Date {orderSortDir === 'desc' ? '▼' : '▲'}
+                        </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {filteredOrders.length === 0 ? (
+                      {sortedOrders.length === 0 ? (
                         <tr><td colSpan={9} className="px-6 py-8 text-center text-slate-500">No orders found</td></tr>
                       ) : (
-                        filteredOrders.map(o => (
+                        sortedOrders.map(o => (
                           <tr key={o.id} className={`hover:bg-slate-50 cursor-pointer ${o.status === 'CANCELLED' ? 'line-through text-slate-400' : ''}`} onClick={async () => {
                             const updated = await salesOrderApi.getOrderById(o.id)
                             const order = (updated.data as any)?.data || updated.data
@@ -1309,7 +1372,7 @@ export function SalesOrdersPage() {
                 <div className="p-4 border-b border-slate-200 space-y-3">
                   <div className="flex justify-between items-center">
                     <h2 className="font-semibold">Payment Transactions</h2>
-                    <button onClick={() => openPaymentModal()} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                    <button onClick={openDepositModal} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
                       + Deposit
                     </button>
                   </div>
@@ -1363,7 +1426,9 @@ export function SalesOrdersPage() {
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase cursor-pointer select-none" onClick={() => setPaymentSortDir(paymentSortDir === 'desc' ? 'asc' : 'desc')}>
+                        Date {paymentSortDir === 'desc' ? '▼' : '▲'}
+                      </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Method</th>
@@ -1373,17 +1438,17 @@ export function SalesOrdersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
-                    {payments.length === 0 ? (
+                    {sortedPayments.length === 0 ? (
                       <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-500">No payments found</td></tr>
                     ) : (
-                      payments.map(p => (
+                      sortedPayments.map(p => (
                         <tr key={p.id} className="hover:bg-slate-50">
                           <td className="px-6 py-4 text-sm text-slate-600">{new Date(p.receivedAt).toLocaleDateString()}</td>
                           <td className="px-6 py-4">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                               p.transactionType === 'DEPOSIT' ? 'bg-blue-100 text-blue-800' :
                               p.transactionType === 'PAYMENT' ? 'bg-green-100 text-green-800' :
-                              p.transactionType === 'CORE_CREDIT_APPLIED' ? 'bg-purple-100 text-purple-800' :
+                              (p.transactionType as string) === 'CORE_CREDIT_APPLIED' ? 'bg-purple-100 text-purple-800' :
                               p.transactionType === 'DEPOSIT_APPLIED' ? 'bg-yellow-100 text-yellow-800' :
                               p.transactionType === 'REFUND' ? 'bg-red-100 text-red-800' :
                               'bg-slate-100 text-slate-800'
@@ -1466,24 +1531,18 @@ export function SalesOrdersPage() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Balance</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase cursor-pointer select-none" onClick={() => setInvoiceSortDir(invoiceSortDir === 'desc' ? 'asc' : 'desc')}>
+                          Date {invoiceSortDir === 'desc' ? '▼' : '▲'}
+                        </th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {(invoices.filter(inv => {
-                        const statusMatch = !invoiceStatusFilter || inv.status === invoiceStatusFilter
-                        const nameMatch = !invoiceCustomerSearch || (inv.customer?.name || '').toLowerCase().includes(invoiceCustomerSearch.toLowerCase())
-                        return statusMatch && nameMatch
-                      })).length === 0 ? (
+                      {filteredInvoices.length === 0 ? (
                         <tr><td colSpan={8} className="px-6 py-8 text-center text-slate-500">No invoices found</td></tr>
                       ) : (
-                        invoices.filter(inv => {
-                          const statusMatch = !invoiceStatusFilter || inv.status === invoiceStatusFilter
-                          const nameMatch = !invoiceCustomerSearch || (inv.customer?.name || '').toLowerCase().includes(invoiceCustomerSearch.toLowerCase())
-                          return statusMatch && nameMatch
-                        }).map(inv => (
-                          <tr key={inv.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setCurrentInvoice(inv); setShowInvoiceModal(true) }}>
+                        filteredInvoices.map(inv => (
+                        <tr key={inv.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setCurrentInvoice(inv); setShowInvoiceModal(true) }}>
                             <td className="px-6 py-4 text-sm font-medium text-slate-900">{inv.invoiceNumber}</td>
                             <td className="px-6 py-4 text-sm text-slate-600">{inv.salesOrder?.orderNumber || '-'}</td>
                             <td className="px-6 py-4 text-sm text-slate-600">{inv.customer?.name || '-'}</td>
@@ -1592,7 +1651,9 @@ export function SalesOrdersPage() {
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase cursor-pointer select-none" onClick={() => setCoreBuybackSortDir(coreBuybackSortDir === 'desc' ? 'asc' : 'desc')}>
+                        Date {coreBuybackSortDir === 'desc' ? '▼' : '▲'}
+                      </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Customer/Seller</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Cores</th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Amount</th>
@@ -1600,10 +1661,10 @@ export function SalesOrdersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
-                    {coreBuybacks.length === 0 ? (
+                    {sortedCoreBuybacks.length === 0 ? (
                       <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-500">No core buybacks found</td></tr>
                     ) : (
-                      coreBuybacks.map(cb => (
+                      sortedCoreBuybacks.map(cb => (
                         <tr key={cb.id} className="hover:bg-slate-50">
                           <td className="px-6 py-4 text-sm text-slate-600">{new Date(cb.date).toLocaleDateString()}</td>
                           <td className="px-6 py-4 text-sm text-slate-600">{cb.customer?.name || cb.sellerName || '-'}</td>
@@ -1746,6 +1807,11 @@ export function SalesOrdersPage() {
                       />
                     </div>
 
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                      <DateInput value={packingBagForm.date} onChange={e => setPackingBagForm({...packingBagForm, date: e.target.value})} max={new Date().toISOString().split('T')[0]} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+                    </div>
+
                     <button type="submit" className="w-full px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 font-medium">
                       Record Sale
                     </button>
@@ -1880,35 +1946,40 @@ export function SalesOrdersPage() {
           </div>
         )}
 
-        {/* Payment Modal */}
-        {showPaymentModal && (
+        {/* Payment / Deposit Modal */}
+        {showPaymentModal && (() => {
+          const isPayment = paymentModalMode === 'payment'
+          const order = isPayment ? orders.find(o => o.id === paymentForm.salesOrderId) : null
+          const title = isPayment ? `Record Payment${order ? ` — ${order.orderNumber}` : ''}` : 'Record Deposit'
+          return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
             <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-              <h2 className="text-xl font-bold mb-4">Record Payment</h2>
+              <h2 className="text-xl font-bold mb-4">{title}</h2>
               <form onSubmit={handleRecordPayment} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Customer <span className="text-red-500">*</span></label>
-                  <select value={paymentForm.customerId} onChange={e => setPaymentForm({...paymentForm, customerId: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required>
-                    <option value="">Select customer</option>
-                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  {paymentForm.customerId && <DepositBadge customerId={paymentForm.customerId} />}
-                </div>
-
-                    {paymentForm.salesOrderId && (
-                      <div className="p-3 bg-slate-50 rounded-lg text-sm">
-                        <span className="text-slate-600">For Order: </span>
-                        <span className="font-medium">{orders.find(o => o.id === paymentForm.salesOrderId)?.orderNumber || paymentForm.salesOrderId}</span>
+                {isPayment ? (
+                  <>
+                    {order && (
+                      <div className="p-3 bg-slate-50 rounded-lg space-y-1 text-sm">
+                        <div><span className="text-slate-500">Customer: </span><span className="font-medium">{order.customer?.name || 'N/A'}</span></div>
+                        <div><span className="text-slate-500">Order: </span><span className="font-medium">{order.orderNumber}</span></div>
+                        <div className="flex justify-between items-center pt-1 border-t border-slate-200 mt-1">
+                          <span className="text-slate-500">Balance Due:</span>
+                          <span className="font-bold text-teal-600">₦{Number(order.totalAmount - order.totalPaid).toLocaleString()}</span>
+                        </div>
                       </div>
                     )}
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Transaction Type</label>
-                  <select value={paymentForm.transactionType} onChange={e => setPaymentForm({...paymentForm, transactionType: e.target.value as TransactionType})} className="w-full px-4 py-2 border border-slate-300 rounded-lg">
-                    <option value="DEPOSIT">Deposit</option>
-                    <option value="CORE_CREDIT_APPLIED">Apply Core Credit</option>
-                  </select>
-                </div>
+                    {paymentForm.customerId && <DepositBadge customerId={paymentForm.customerId} />}
+                  </>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Customer <span className="text-red-500">*</span></label>
+                    <select value={paymentForm.customerId} onChange={e => setPaymentForm({...paymentForm, customerId: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required>
+                      <option value="">Select customer</option>
+                      {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    {paymentForm.customerId && <DepositBadge customerId={paymentForm.customerId} />}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
@@ -1920,17 +1991,13 @@ export function SalesOrdersPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Payment For</label>
-                  <select value={paymentForm.paymentCategory} onChange={e => setPaymentForm({...paymentForm, paymentCategory: e.target.value as 'ROLL' | 'BAG' | 'BOTH'})} className="w-full px-4 py-2 border border-slate-300 rounded-lg">
-                    <option value="ROLL">Rolls</option>
-                    <option value="BAG">Packing Bags</option>
-                    <option value="BOTH">Both</option>
-                  </select>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Amount (₦) <span className="text-red-500">*</span></label>
+                  <input type="number" min="1" value={paymentForm.amount || ''} onChange={e => setPaymentForm({...paymentForm, amount: parseFloat(e.target.value) || 0})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Amount (₦) <span className="text-red-500">*</span></label>
-                  <input type="number" min="1" value={paymentForm.amount || ''} onChange={e => setPaymentForm({...paymentForm, amount: parseFloat(e.target.value) || 0})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                  <DateInput value={paymentForm.date} onChange={e => setPaymentForm({...paymentForm, date: e.target.value})} max={new Date().toISOString().split('T')[0]} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
                 </div>
 
                 <div>
@@ -1945,12 +2012,13 @@ export function SalesOrdersPage() {
 
                 <div className="flex justify-end space-x-3 pt-4">
                   <button type="button" onClick={() => setShowPaymentModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
-                  <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded-lg">Record Payment</button>
+                  <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded-lg">{isPayment ? 'Record Payment' : 'Record Deposit'}</button>
                 </div>
               </form>
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {/* Core Buyback Modal */}
         {showCoreBuybackModal && (
@@ -2338,6 +2406,11 @@ export function SalesOrdersPage() {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                  <DateInput value={pickupForm.date} onChange={e => setPickupForm({...pickupForm, date: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+                </div>
+
                 <div className="border-t border-slate-200 pt-4 mt-4">
                   <h4 className="text-sm font-medium text-slate-700 mb-3">Packing Bags (Optional)</h4>
                   <div className="grid grid-cols-2 gap-4">
@@ -2583,6 +2656,7 @@ export function SalesOrdersPage() {
             </div>
           </div>
         )}
+
         {/* Production Job View Modal */}
         {showProductionJobModal && viewingProductionJob && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -2951,15 +3025,15 @@ export function SalesOrdersPage() {
                   {currentInvoice.status !== 'PAID' && (
                     <button
                       onClick={() => {
+                        setPaymentModalMode('payment')
                         setPaymentForm({
                           salesOrderId: currentInvoice.salesOrderId,
                           customerId: currentInvoice.customerId,
-                          transactionType: 'PAYMENT',
                           paymentMethod: 'Cash',
-                          paymentCategory: 'ROLL',
                           amount: Number(currentInvoice.balanceDue) || 0,
                           referenceNumber: '',
-                          notes: ''
+                          notes: '',
+                          date: new Date().toISOString().split('T')[0]
                         })
                         setShowPaymentModal(true)
                       }}

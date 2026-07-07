@@ -129,7 +129,8 @@ export const productionController = {
   async completeJob(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const job = await productionService.completeJob(id)
+      const { date } = req.body
+      const job = await productionService.completeJob(id, date)
       res.json({ data: job })
     } catch (error: any) {
       logger.error(error, 'Error completing production job')
@@ -151,9 +152,9 @@ export const productionController = {
   async disposeRoll(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const { reason } = req.body
+      const { reason, date } = req.body
       if (!reason) return res.status(400).json({ error: 'Reason is required' })
-      const result = await productionService.disposeRoll(id, reason, (req as any).user?.id)
+      const result = await productionService.disposeRoll(id, reason, (req as any).user?.id, date)
       res.json(result)
     } catch (error: any) {
       logger.error(error, 'Error disposing roll')
@@ -164,7 +165,8 @@ export const productionController = {
   async returnRoll(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const result = await productionService.returnRoll(id, (req as any).user?.id)
+      const { date } = req.body
+      const result = await productionService.returnRoll(id, (req as any).user?.id, date)
       res.json(result)
     } catch (error: any) {
       logger.error(error, 'Error returning roll')
@@ -175,12 +177,12 @@ export const productionController = {
   async customerReturnRoll(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const { qty, reason, condition, refundMethod } = req.body
+      const { qty, reason, condition, refundMethod, date } = req.body
       if (!qty || !reason || !condition) {
         return res.status(400).json({ error: 'qty, reason, and condition are required' })
       }
       if (qty <= 0) return res.status(400).json({ error: 'qty must be positive' })
-      const result = await productionService.customerReturnRoll(id, { qty, reason, condition, refundMethod, userId: (req as any).user?.id })
+      const result = await productionService.customerReturnRoll(id, { qty, reason, condition, refundMethod, userId: (req as any).user?.id, date })
       res.json(result)
     } catch (error: any) {
       logger.error(error, 'Error processing customer return')
@@ -191,7 +193,8 @@ export const productionController = {
   async receiveReplacement(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const result = await productionService.receiveReplacement(id, (req as any).user?.id)
+      const { date } = req.body
+      const result = await productionService.receiveReplacement(id, (req as any).user?.id, date)
       res.json(result)
     } catch (error: any) {
       logger.error(error, 'Error receiving replacement')

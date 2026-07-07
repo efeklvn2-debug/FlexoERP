@@ -219,6 +219,9 @@ model Roll {
   material       Material   @relation(fields: [materialId], references: [id])
   purchaseOrderId String?
   purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  parentRollId   String?
+  parentRoll     Roll?      @relation("RollParent", fields: [parentRollId], references: [id])
+  childRolls     Roll[]     @relation("RollParent")
   weight         Decimal    @db.Decimal(10, 2)
   remainingWeight Decimal   @db.Decimal(10, 2)
   width         Decimal?   @db.Decimal(8, 2)
@@ -238,6 +241,7 @@ model Roll {
   @@index([materialId])
   @@index([status])
   @@index([rollNumber])
+  @@index([parentRollId])
 }
 
 model ProductionJob {
@@ -768,8 +772,7 @@ model Invoice {
   previousPayments      Decimal          @default(0) @db.Decimal(15, 2)
   balanceDue            Decimal          @db.Decimal(15, 2)
   
-  // Core tracking
-  coresReturned         Int              @default(0)
+
   
   // Packing Bags Line Items
   packingBagsQuantity  Decimal          @default(0) @db.Decimal(15, 2)

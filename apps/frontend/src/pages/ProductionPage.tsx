@@ -20,6 +20,10 @@ export function ProductionPage() {
   const [error, setError] = useState('')
   const [showViewModal, setShowViewModal] = useState(false)
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null)
+  const [showCompleteModal, setShowCompleteModal] = useState(false)
+  const [completeJobId, setCompleteJobId] = useState<string | null>(null)
+  const [completeDate, setCompleteDate] = useState(new Date().toISOString().split('T')[0])
+  const [showCompleteSuccess, setShowCompleteSuccess] = useState(false)
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<string>('')
@@ -44,13 +48,19 @@ export function ProductionPage() {
   }
 
   const handleCompleteJob = async (jobId: string) => {
-    if (!confirm('Complete this job? This will deduct ink/solvents based on customer colors.')) return
-    const res = await productionApi.completeJob(jobId)
+    setCompleteJobId(jobId)
+    setCompleteDate(new Date().toISOString().split('T')[0])
+    setShowCompleteModal(true)
+  }
+
+  const confirmCompleteJob = async () => {
+    if (!completeJobId) return
+    const res = await productionApi.completeJob(completeJobId, completeDate || undefined)
+    setShowCompleteModal(false)
+    setCompleteJobId(null)
     if (!res.error) {
       loadData()
-      if (confirm('Job completed! View printed rolls in Inventory?')) {
-        navigate('/inventory?tab=printed-rolls')
-      }
+      setShowCompleteSuccess(true)
     } else {
       setError(res.error.message)
     }
@@ -468,6 +478,36 @@ export function ProductionPage() {
 
               <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
                 <button type="button" onClick={() => { setShowViewModal(false); setSelectedJob(null); }} className="px-4 py-2 border border-slate-300 rounded-lg">Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Complete Job Modal */}
+        {showCompleteModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+              <h2 className="text-xl font-bold mb-4">Complete Job</h2>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Completion Date</label>
+                <DateInput value={completeDate} onChange={e => setCompleteDate(e.target.value)} max={new Date().toISOString().split('T')[0]} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button type="button" onClick={() => { setShowCompleteModal(false); setCompleteJobId(null) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button type="button" onClick={confirmCompleteJob} className="px-4 py-2 bg-green-600 text-white rounded-lg">Complete Job</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Complete Job - Success Modal */}
+        {showCompleteSuccess && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+              <h2 className="text-xl font-bold mb-4">Job Completed</h2>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button type="button" onClick={() => setShowCompleteSuccess(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Close</button>
+                <button type="button" onClick={() => navigate('/inventory?tab=printed-rolls')} className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700">View Printed Rolls</button>
               </div>
             </div>
           </div>

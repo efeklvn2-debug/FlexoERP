@@ -58,7 +58,8 @@ export const salesOrderController = {
   async approveOrder(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const order = await salesOrderService.approveOrder(id, (req as any).user?.id)
+      const { date } = req.body
+      const order = await salesOrderService.approveOrder(id, (req as any).user?.id, date)
       res.json({ data: order })
     } catch (error: any) {
       logger.error(error, 'Error approving sales order')
@@ -80,7 +81,8 @@ export const salesOrderController = {
   async cancelOrder(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const order = await salesOrderService.cancelOrder(id, (req as any).user?.id)
+      const { date } = req.body
+      const order = await salesOrderService.cancelOrder(id, (req as any).user?.id, date)
       res.json({ data: order })
     } catch (error: any) {
       logger.error(error, 'Error cancelling sales order')
@@ -102,8 +104,8 @@ export const salesOrderController = {
   async recordPickup(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const { rollIds, packingBags, packingBagPrice } = req.body
-      const order = await salesOrderService.recordPickup(id, (req as any).user?.id, rollIds, packingBags, packingBagPrice)
+      const { rollIds, packingBags, packingBagPrice, date } = req.body
+      const order = await salesOrderService.recordPickup(id, (req as any).user?.id, rollIds, packingBags, packingBagPrice, date)
       res.json({ data: order })
     } catch (error: any) {
       logger.error(error, 'Error recording pickup')
@@ -306,7 +308,8 @@ export const invoiceController = {
   async issueInvoice(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const invoice = await invoiceService.issueInvoice(id)
+      const { date } = req.body
+      const invoice = await invoiceService.issueInvoice(id, date)
       res.json({ data: invoice })
     } catch (error: any) {
       logger.error(error, 'Error issuing invoice')
@@ -393,7 +396,7 @@ export const coreBuybackController = {
 
   async sellPackingBags(req: Request, res: Response) {
     try {
-      const { customerId, quantity, unitPrice, paymentMethod, referenceNumber, notes, applyDeposit } = req.body
+      const { customerId, quantity, unitPrice, paymentMethod, referenceNumber, notes, applyDeposit, date } = req.body
       const userId = (req as any).user?.id
 
       const result = await salesOrderService.sellPackingBags({
@@ -404,7 +407,8 @@ export const coreBuybackController = {
         referenceNumber,
         notes,
         userId,
-        applyDeposit
+        applyDeposit,
+        date
       })
 
       res.status(201).json({ data: result })

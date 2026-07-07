@@ -6,6 +6,7 @@ import { settingsService } from '../settings/service'
 import { inventoryService } from '../inventory/service'
 import { financeService } from '../finance/service'
 import { logger } from '../../logger'
+import { dateFromInput } from '../../utils/dates'
 
 export const productionJobSchema = z.object({
   salesOrderId: z.string().optional(),
@@ -17,7 +18,8 @@ export const productionJobSchema = z.object({
   printedRollWeights: z.array(z.number().positive()).min(1).max(200),
   wasteWeight: z.number().optional(),
   rollWaste: z.record(z.string(), z.number().min(0)).optional(),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  date: z.string().optional()
 })
 
 export type ProductionJobInput = z.infer<typeof productionJobSchema>
@@ -32,7 +34,7 @@ export const productionService = {
           include: { roll: { include: { material: true } } }
         }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { startDate: 'desc' }
     })
     
     const jobsWithParentRolls = await Promise.all(jobs.map(async (job) => {
@@ -108,6 +110,8 @@ export const productionService = {
 
             const createdRolls = []
 
+            const primaryParentId = parentRolls.length === 1 ? parentRolls[0].id : null
+
             for (const weight of input.printedRollWeights) {
               rollCounter++
               const newRoll = await tx.roll.create({
@@ -117,7 +121,8 @@ export const productionService = {
                   weight: weight,
                   remainingWeight: weight,
                   status: 'AVAILABLE',
-                  receivedDate: new Date()
+                  receivedDate: dateFromInput(input.date),
+                  parentRollId: primaryParentId
                 }
               })
               createdRolls.push(newRoll)
@@ -155,7 +160,7 @@ export const productionService = {
         notes: input.notes,
         parentRollIds: parentRolls.map(r => r.id),
         status: 'IN_PRODUCTION',
-        startDate: new Date(),
+        startDate: dateFromInput(input.date),
         printedRolls: {
           create: newRolls.map((newRoll) => ({
             rollId: newRoll.id,
@@ -203,7 +208,7 @@ export const productionService = {
     return this.getJobById(jobId)
   },
 
-  async completeJob(jobId: string) {
+  async completeJob(jobId: string, date?: string) {
     const job = await prisma.productionJob.findUnique({
       where: { id: jobId },
       include: {
@@ -325,11 +330,31 @@ export const productionService = {
         })
       }
 
+      // Set parentRollId on each printed roll based on printedRollMapping
+      for (const pr of job.printedRolls) {
+        const contributions = printedRollMapping[pr.id]
+        if (contributions) {
+          const parentIds = Object.keys(contributions)
+          if (parentIds.length === 1) {
+            await tx.roll.update({
+              where: { id: pr.rollId },
+              data: { parentRollId: parentIds[0] }
+            })
+          }
+        }
+      }
+
+      // Update printed roll createdAt to reflect the backdated completion date
+      await tx.printedRoll.updateMany({
+        where: { productionJobId: jobId },
+        data: { createdAt: dateFromInput(date) }
+      })
+
       await tx.productionJob.update({
         where: { id: jobId },
         data: { 
           status: 'COMPLETED', 
-          endDate: new Date(),
+          endDate: dateFromInput(date),
           printedRollMapping: Object.keys(printedRollMapping).length > 0 ? JSON.parse(JSON.stringify(printedRollMapping)) : undefined
         }
       })
@@ -532,6 +557,7 @@ export const productionService = {
             sourceModule: 'PRODUCTION',
             sourceId: job.id,
             reference: job.jobNumber,
+            date,
             lines: [
               { accountId: deferredCogsAccountId, debit: materialsAndConsumablesCost, credit: 0, memo: 'Raw materials & consumables' },
               { accountId: inventoryAccountId, debit: 0, credit: materialsAndConsumablesCost, memo: 'Materials & consumables consumed' }
@@ -544,6 +570,7 @@ export const productionService = {
               sourceModule: 'PRODUCTION',
               sourceId: job.id,
               reference: job.jobNumber,
+              date,
               lines: [
                 { accountId: productionCostsAccountId, debit: wasteCost, credit: 0, memo: 'Production waste' },
                 { accountId: inventoryAccountId, debit: 0, credit: wasteCost, memo: 'Waste consumed' }
@@ -557,6 +584,7 @@ export const productionService = {
               sourceModule: 'PRODUCTION',
               sourceId: job.id,
               reference: job.jobNumber,
+              date,
               lines: [
                 { accountId: deferredCogsAccountId, debit: overheadCost, credit: 0, memo: 'Overhead allocated' },
                 { accountId: productionCostsAccountId, debit: 0, credit: overheadCost, memo: 'Production overhead' }
@@ -572,7 +600,7 @@ export const productionService = {
         where: { id: jobId },
         data: {
           status: 'COMPLETED',
-          endDate: new Date(),
+          endDate: dateFromInput(date),
           materialCost,
           consumablesCost,
           overheadCost
@@ -754,7 +782,7 @@ export const productionService = {
           }
         }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { endDate: 'desc' }
     })
 
     const allParentRollIds = [...new Set(jobs.flatMap(j => j.parentRollIds || []))]
@@ -863,62 +891,10 @@ export const productionService = {
         },
         salesOrder: { include: { customer: true } }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { startDate: 'desc' }
     })
 
-    const result: any[] = []
-    for (const job of jobs) {
-      const mapping = (job as any).printedRollMapping as Record<string, any> || {}
-      let hasPrintedRolls = false
-
-      for (const pr of job.printedRolls) {
-        const entry = mapping[pr.id]
-        let contributedWeight = 0
-        let relevant = false
-
-        if (typeof entry === 'object' && entry !== null) {
-          contributedWeight = Number(entry[parentRollId]) || 0
-          relevant = contributedWeight > 0
-        } else {
-          const mappedParentId = typeof entry === 'string' ? entry : undefined
-          relevant = !mappedParentId || mappedParentId === parentRollId ||
-            (pr.isCombination && job.parentRollIds?.includes(parentRollId))
-          contributedWeight = relevant ? Number(pr.weightUsed) : 0
-        }
-
-        if (!relevant) continue
-        hasPrintedRolls = true
-        result.push({
-          id: pr.id,
-          rollNumber: pr.roll?.rollNumber || 'N/A',
-          weightUsed: Number(pr.weightUsed),
-          contributedWeight,
-          status: pr.status,
-          jobNumber: job.jobNumber,
-          customerName: job.customerName || pr.customer?.name || job.salesOrder?.customer?.name || 'N/A',
-          pickedUpAt: pr.pickedUpAt,
-          createdAt: pr.createdAt,
-          isCombination: pr.isCombination,
-          isPartialContribution: contributedWeight > 0 && contributedWeight < Number(pr.weightUsed)
-        })
-      }
-
-      const wasteForRoll = (job.rollWaste as Record<string, number>)?.[parentRollId]
-      if (wasteForRoll && wasteForRoll > 0) {
-        result.push({
-          isWaste: true,
-          wasteWeight: wasteForRoll,
-          jobNumber: job.jobNumber,
-          customerName: job.customerName || job.salesOrder?.customer?.name || 'N/A',
-          createdAt: hasPrintedRolls
-            ? job.printedRolls.length > 0
-              ? job.printedRolls[0].createdAt
-              : job.createdAt
-            : job.createdAt
-        })
-      }
-    }
-    return result
+    return jobs
   },
 
   async getRollTypes() {
@@ -943,7 +919,7 @@ export const productionService = {
     return Array.from(typeMap.values())
   },
 
-  async disposeRoll(rollId: string, reason: string, userId?: string) {
+  async disposeRoll(rollId: string, reason: string, userId?: string, date?: string) {
     const roll = await prisma.roll.findUnique({
       where: { id: rollId },
       include: { material: true, purchaseOrder: { include: { items: true } } }
@@ -971,7 +947,7 @@ export const productionService = {
         where: { id: rollId },
         data: {
           status: isPartiallyConsumed ? 'CONSUMED' : 'WASTED',
-          disposedAt: new Date(),
+          disposedAt: dateFromInput(date),
           disposedById: userId,
           disposalReason: reason
         }
@@ -986,6 +962,7 @@ export const productionService = {
         sourceId: rollId,
         reference: roll.rollNumber,
         postedById: userId,
+        date,
         lines: [
           { accountId: scrapAccount, debit: value, credit: 0, memo: `${reason} - ${roll.rollNumber}` },
           { accountId: inventoryAccount, debit: 0, credit: value, memo: `Roll removed from inventory` }
@@ -996,7 +973,7 @@ export const productionService = {
     return { success: true }
   },
 
-  async returnRoll(rollId: string, userId?: string) {
+  async returnRoll(rollId: string, userId?: string, date?: string) {
     const roll = await prisma.roll.findUnique({
       where: { id: rollId },
       include: { material: true, purchaseOrder: { include: { items: true } } }
@@ -1024,7 +1001,7 @@ export const productionService = {
         where: { id: rollId },
         data: {
           status: isPartiallyConsumed ? 'CONSUMED' : 'RETURNED',
-          disposedAt: new Date(),
+          disposedAt: dateFromInput(date),
           disposedById: userId,
           disposalReason: 'Returned to supplier'
         }
@@ -1039,6 +1016,7 @@ export const productionService = {
         sourceId: rollId,
         reference: roll.rollNumber,
         postedById: userId,
+        date,
         lines: [
           { accountId: apAccount, debit: value, credit: 0, memo: `Credit note - ${roll.rollNumber}` },
           { accountId: inventoryAccount, debit: 0, credit: value, memo: `Roll returned to supplier` }
@@ -1049,7 +1027,7 @@ export const productionService = {
     return { success: true, supplier: roll.purchaseOrder?.supplier || null }
   },
 
-  async customerReturnRoll(printedRollId: string, data: { qty: number; reason: string; condition: string; refundMethod?: string; userId?: string }) {
+  async customerReturnRoll(printedRollId: string, data: { qty: number; reason: string; condition: string; refundMethod?: string; userId?: string; date?: string }) {
     const printedRoll = await prisma.printedRoll.findUnique({
       where: { id: printedRollId },
       include: {
@@ -1095,7 +1073,7 @@ export const productionService = {
           status: 'RETURNED',
           returnedQty: data.qty,
           returnReason: data.reason,
-          returnedAt: new Date(),
+          returnedAt: dateFromInput(data.date),
           refundMethod: data.refundMethod || 'NONE',
           returnCondition: data.condition
         }
@@ -1120,6 +1098,7 @@ export const productionService = {
         sourceId: printedRollId,
         reference: newRollNumber,
         postedById: data.userId,
+        date: data.date,
         lines: [
           { accountId: inventoryAccount, debit: value, credit: 0, memo: `Returned goods added to inventory - ${newRollNumber}` },
           { accountId: otherIncomeAccount, debit: 0, credit: value, memo: `Other income - returned goods received without refund` }
@@ -1130,7 +1109,7 @@ export const productionService = {
         const scrapAccount = await financeService.getAccountIdByCode('5300')
         await tx.roll.update({
           where: { rollNumber: newRollNumber },
-          data: { status: 'WASTED', disposedAt: new Date(), disposedById: data.userId, disposalReason: `Customer return - ${data.reason}` }
+          data: { status: 'WASTED', disposedAt: dateFromInput(data.date), disposedById: data.userId, disposalReason: `Customer return - ${data.reason}` }
         })
         await financeService.postJournalEntry({
           description: `Scrapped returned printed roll - ${data.reason}`,
@@ -1138,6 +1117,7 @@ export const productionService = {
           sourceId: printedRollId,
           reference: newRollNumber,
           postedById: data.userId,
+          date: data.date,
           lines: [
             { accountId: scrapAccount, debit: value, credit: 0, memo: `Customer return scrap - ${newRollNumber}` },
             { accountId: inventoryAccount, debit: 0, credit: value, memo: `Returned roll scrapped` }
@@ -1147,7 +1127,7 @@ export const productionService = {
         const apAccount = await financeService.getAccountIdByCode('2000')
         await tx.roll.update({
           where: { rollNumber: newRollNumber },
-          data: { status: 'RETURNED', disposedAt: new Date(), disposedById: data.userId, disposalReason: `Customer return - returned to supplier` }
+          data: { status: 'RETURNED', disposedAt: dateFromInput(data.date), disposedById: data.userId, disposalReason: `Customer return - returned to supplier` }
         })
         await financeService.postJournalEntry({
           description: `Returned printed roll to supplier - ${data.reason}`,
@@ -1155,6 +1135,7 @@ export const productionService = {
           sourceId: printedRollId,
           reference: newRollNumber,
           postedById: data.userId,
+          date: data.date,
           lines: [
             { accountId: apAccount, debit: value, credit: 0, memo: `Credit note - ${newRollNumber}` },
             { accountId: inventoryAccount, debit: 0, credit: value, memo: `Roll returned to supplier from customer return` }
@@ -1166,7 +1147,7 @@ export const productionService = {
     return { success: true }
   },
 
-  async receiveReplacement(rollId: string, userId?: string) {
+  async receiveReplacement(rollId: string, userId?: string, date?: string) {
     const roll = await prisma.roll.findUnique({
       where: { id: rollId },
       include: { material: true }
@@ -1221,6 +1202,7 @@ export const productionService = {
         sourceId: rollId,
         reference: newRollNumber,
         postedById: userId,
+        date,
         lines: [
           { accountId: inventoryAccount, debit: value, credit: 0, memo: `Replacement - ${newRollNumber}` },
           { accountId: apAccount, debit: 0, credit: value, memo: `Replacement for returned roll ${roll.rollNumber}` }

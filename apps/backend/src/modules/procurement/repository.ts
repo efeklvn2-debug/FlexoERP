@@ -47,7 +47,7 @@ export const procurementRepository = {
         rolls: { include: { material: true } },
         items: { include: { material: true } }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: [{ receivedDate: 'desc' }, { createdAt: 'desc' }]
     })
     return pos.map(convertPO)
   },
@@ -214,7 +214,7 @@ export const procurementRepository = {
     const rolls = await prisma.roll.findMany({
       where,
       include: { material: true, purchaseOrder: true },
-      orderBy: { createdAt: 'desc' }
+      orderBy: [{ receivedDate: 'desc' }, { createdAt: 'desc' }]
     })
     return rolls.map(convertRoll)
   },
