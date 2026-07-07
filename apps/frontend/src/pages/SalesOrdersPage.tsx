@@ -1008,6 +1008,20 @@ export function SalesOrdersPage() {
     setLoadingRolls(false)
   }
 
+  const moveRollUp = (index: number) => {
+    if (index <= 0) return
+    const newRollIds = [...productionForm.rollIds]
+    ;[newRollIds[index - 1], newRollIds[index]] = [newRollIds[index], newRollIds[index - 1]]
+    setProductionForm({...productionForm, rollIds: newRollIds})
+  }
+
+  const moveRollDown = (index: number) => {
+    if (index >= productionForm.rollIds.length - 1) return
+    const newRollIds = [...productionForm.rollIds]
+    ;[newRollIds[index], newRollIds[index + 1]] = [newRollIds[index + 1], newRollIds[index]]
+    setProductionForm({...productionForm, rollIds: newRollIds})
+  }
+
   const openProductionModal = async (order: SalesOrder) => {
     setProductionOrder(order)
     setProductionForm({
@@ -2172,7 +2186,7 @@ export function SalesOrdersPage() {
                     <p className="text-sm text-amber-600">
                       No available rolls for "{productionForm.category}". Try a different category or add more inventory.
                     </p>
-                  ) : (
+                  ) : (<>
                     <div className="max-h-40 overflow-y-auto border border-slate-300 rounded-lg p-2 space-y-1">
                       {availableRolls.map(roll => {
                         const isChecked = productionForm.rollIds.includes(roll.id)
@@ -2219,7 +2233,36 @@ export function SalesOrdersPage() {
                         </div>
                       )})}
                     </div>
-                  )}
+                    {productionForm.rollIds.length > 1 && (
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Consumption Order <span className="text-xs text-slate-400 font-normal">(use ▲▼ to set which roll is consumed first)</span></label>
+                        <div className="border border-slate-300 rounded-lg p-2 space-y-1">
+                          {productionForm.rollIds.map((rollId, index) => {
+                            const roll = availableRolls.find(r => r.id === rollId)
+                            if (!roll) return null
+                            return (
+                              <div key={rollId} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded">
+                                <span className="text-xs font-medium text-slate-400 w-5">{index + 1}.</span>
+                                <span className="text-sm flex-1">{roll.rollNumber} ({Number(roll.remainingWeight).toFixed(1)}kg)</span>
+                                <button
+                                  type="button"
+                                  onClick={() => moveRollUp(index)}
+                                  disabled={index === 0}
+                                  className="px-1.5 py-0.5 text-xs border border-slate-300 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                >▲</button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveRollDown(index)}
+                                  disabled={index === productionForm.rollIds.length - 1}
+                                  className="px-1.5 py-0.5 text-xs border border-slate-300 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                >▼</button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>)}
                 </div>
 
                 <div>

@@ -158,7 +158,7 @@ export const productionService = {
         wasteWeight: input.wasteWeight ?? 0,
         rollWaste: input.rollWaste ?? {},
         notes: input.notes,
-        parentRollIds: parentRolls.map(r => r.id),
+        parentRollIds: input.rollIds,
         status: 'IN_PRODUCTION',
         startDate: dateFromInput(input.date),
         printedRolls: {
@@ -245,16 +245,11 @@ export const productionService = {
     const printedRollMapping: Record<string, Record<string, number>> = {}
 
     if (parentRollIds.length > 0) {
-      const parentRolls = await prisma.roll.findMany({
+      const fetchedParentRolls = await prisma.roll.findMany({
         where: { id: { in: parentRollIds } }
       })
-      parentRolls.sort((a, b) => {
-        const dateA = a.receivedDate ?? a.createdAt
-        const dateB = b.receivedDate ?? b.createdAt
-        const dateDiff = dateA.getTime() - dateB.getTime()
-        if (dateDiff !== 0) return dateDiff
-        return Number(a.remainingWeight) - Number(b.remainingWeight)
-      })
+      const parentRollsMap = new Map(fetchedParentRolls.map(r => [r.id, r]))
+      const parentRolls = parentRollIds.map(id => parentRollsMap.get(id)).filter(Boolean) as typeof fetchedParentRolls
 
       const rollWasteMap: Record<string, number> = (job.rollWaste as Record<string, number>) ?? {}
       const effectiveCapacities = parentRolls.map(r =>
@@ -816,24 +811,16 @@ export const productionService = {
             parentRollsDisplay.push(`${rn} (${Number(cw).toFixed(2)}kg of ${Number(tw).toFixed(2)}kg)`)
             parentRollContributions.push({ rollNumber: rn, totalWeight: tw, contributedWeight: Number(cw) })
           }
-        } else if (pr.isCombination) {
-          // Legacy combo — mapping stores only first parent roll; distribute weight across all
-          const parentIds = job.parentRollIds || []
-          const weightPerRoll = parentIds.length > 0 ? Number(pr.weightUsed) / parentIds.length : 0
-          for (const id of parentIds) {
-            const p = parentRollsMap.get(id)
-            if (p) {
-              parentRollsDisplay.push(`${p.rollNumber} (${p.weight}kg)`)
-              parentRollContributions.push({ rollNumber: p.rollNumber, totalWeight: p.weight, contributedWeight: weightPerRoll })
-            }
-          }
         } else if (typeof entry === 'string' && entry) {
-          // Legacy single — mapping stores the exact parent roll ID
+          // Legacy format — entry stores the exact parent roll ID as a string
           const p = parentRollsMap.get(entry)
           if (p) {
             parentRollsDisplay.push(`${p.rollNumber} (${p.weight}kg)`)
             parentRollContributions.push({ rollNumber: p.rollNumber, totalWeight: p.weight, contributedWeight: Number(pr.weightUsed) })
           }
+        } else if (entry != null && pr.isCombination) {
+          throw new AppError(500, 'INVALID_MAPPING',
+            `Printed roll ${pr.roll?.rollNumber || pr.id} is marked as combination but printedRollMapping is in an unrecognized format. Cannot determine parent roll contributions.`)
         } else {
           // No mapping — fallback to all job parent rolls
           for (const id of (job.parentRollIds || [])) {
