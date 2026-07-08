@@ -18,6 +18,7 @@ export const productionJobSchema = z.object({
   printedRollWeights: z.array(z.number().positive()).min(1).max(200),
   wasteWeight: z.number().optional(),
   rollWaste: z.record(z.string(), z.number().min(0)).optional(),
+  rollConsumption: z.record(z.string(), z.number().min(0)).optional(),
   notes: z.string().optional(),
   date: z.string().optional()
 })
@@ -157,6 +158,7 @@ export const productionService = {
         materialOverride: input.materialOverride,
         wasteWeight: input.wasteWeight ?? 0,
         rollWaste: input.rollWaste ?? {},
+        rollConsumption: input.rollConsumption ?? {},
         notes: input.notes,
         parentRollIds: input.rollIds,
         status: 'IN_PRODUCTION',
@@ -252,6 +254,7 @@ export const productionService = {
       const parentRolls = parentRollIds.map(id => parentRollsMap.get(id)).filter(Boolean) as typeof fetchedParentRolls
 
       const rollWasteMap: Record<string, number> = (job.rollWaste as Record<string, number>) ?? {}
+      const rollConsumption: Record<string, number> = (job.rollConsumption as Record<string, number>) ?? {}
       const effectiveCapacities = parentRolls.map(r =>
         Math.max(0, Number(r.remainingWeight) - (rollWasteMap[r.id] ?? 0))
       )
@@ -259,33 +262,45 @@ export const productionService = {
       let parentRollIndex = 0
       let remainingInCurrentRoll = effectiveCapacities[0] ?? 0
 
-      for (const printedRoll of job.printedRolls) {
+      for (const [pi, printedRoll] of job.printedRolls.entries()) {
         let weightNeeded = Number(printedRoll.weightUsed)
         let isCombo = false
         const contributions: Record<string, number> = {}
 
-        while (weightNeeded > remainingInCurrentRoll && parentRollIndex < parentRolls.length - 1) {
-          isCombo = true
+        while (weightNeeded > 0 && parentRollIndex < parentRolls.length) {
           const currentRoll = parentRolls[parentRollIndex]
-          contributions[currentRoll.id] = remainingInCurrentRoll
-          weightNeeded -= remainingInCurrentRoll
-          remainingInCurrentRoll = 0
-          parentRollIndex++
-          remainingInCurrentRoll = effectiveCapacities[parentRollIndex] ?? 0
-        }
 
-        const currentRoll = parentRolls[parentRollIndex]
-        if (currentRoll) {
-          contributions[currentRoll.id] = weightNeeded
-        }
+          let maxFromThisRoll = remainingInCurrentRoll
+          if (pi === 0) {
+            const consumption = rollConsumption[currentRoll.id]
+            if (consumption !== undefined) {
+              const alreadyTaken = contributions[currentRoll.id] || 0
+              maxFromThisRoll = Math.min(maxFromThisRoll, Math.max(0, consumption - alreadyTaken))
+              if (maxFromThisRoll <= 0) {
+                parentRollIndex++
+                remainingInCurrentRoll = effectiveCapacities[parentRollIndex] ?? 0
+                continue
+              }
+            }
+          }
 
-        if (remainingInCurrentRoll > 0) {
-          remainingInCurrentRoll -= weightNeeded
+          if (weightNeeded > maxFromThisRoll && parentRollIndex < parentRolls.length - 1) {
+            isCombo = true
+            contributions[currentRoll.id] = (contributions[currentRoll.id] || 0) + maxFromThisRoll
+            weightNeeded -= maxFromThisRoll
+            remainingInCurrentRoll -= maxFromThisRoll
+            parentRollIndex++
+            remainingInCurrentRoll = effectiveCapacities[parentRollIndex] ?? 0
+          } else {
+            contributions[currentRoll.id] = (contributions[currentRoll.id] || 0) + weightNeeded
+            remainingInCurrentRoll -= weightNeeded
+            weightNeeded = 0
+          }
         }
 
         printedRollMapping[printedRoll.id] = contributions
 
-        if (isCombo) {
+        if (isCombo || Object.keys(contributions).length > 1) {
           comboPrintedRollIds.push(printedRoll.id)
         }
       }

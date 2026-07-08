@@ -255,7 +255,8 @@ model ProductionJob {
    wasteWeight         Decimal? @db.Decimal(10, 2)
    notes               String?
    parentRollIds       String[] 
-   printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
+    printedRollMapping  Json?    // JSON array mapping printedRollId to parentRollId
+    rollConsumption     Json?    // { parentRollId: kg } — user-reported exact contribution for first printed roll
     rollWaste           Json?    // { parentRollId: wasteKg } — per-roll waste at job level
     materialOverride    String?  // Material subCategory override if different from order's original material
     

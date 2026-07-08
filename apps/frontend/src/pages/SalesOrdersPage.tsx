@@ -153,6 +153,7 @@ export function SalesOrdersPage() {
     rollIds: [] as string[],
     printedRollWeights: '',
     rollWaste: {} as Record<string, number>,
+    rollConsumption: {} as Record<string, number>,
     notes: ''
   })
 
@@ -1030,6 +1031,7 @@ export function SalesOrdersPage() {
       rollIds: [],
       printedRollWeights: '',
       rollWaste: {},
+      rollConsumption: {},
       notes: ''
     })
     await loadAvailableRolls()
@@ -1087,6 +1089,7 @@ export function SalesOrdersPage() {
         rollIds: productionForm.rollIds,
         printedRollWeights: weights,
         rollWaste: Object.keys(productionForm.rollWaste).length > 0 ? productionForm.rollWaste : undefined,
+        rollConsumption: Object.keys(productionForm.rollConsumption).some(k => productionForm.rollConsumption[k] > 0) ? productionForm.rollConsumption : undefined,
         notes: productionForm.notes || undefined
       })
       if (res.error) { setError(res.error.message); return }
@@ -2235,7 +2238,7 @@ export function SalesOrdersPage() {
                     </div>
                     {productionForm.rollIds.length > 1 && (
                       <div className="mt-3">
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Consumption Order <span className="text-xs text-slate-400 font-normal">(use ▲▼ to set which roll is consumed first)</span></label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Consumption Order <span className="text-xs text-slate-400 font-normal">(use ▲▼ to set which roll is consumed first; optionally set exact kg for the first printed roll)</span></label>
                         <div className="border border-slate-300 rounded-lg p-2 space-y-1">
                           {productionForm.rollIds.map((rollId, index) => {
                             const roll = availableRolls.find(r => r.id === rollId)
@@ -2243,7 +2246,30 @@ export function SalesOrdersPage() {
                             return (
                               <div key={rollId} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded">
                                 <span className="text-xs font-medium text-slate-400 w-5">{index + 1}.</span>
-                                <span className="text-sm flex-1">{roll.rollNumber} ({Number(roll.remainingWeight).toFixed(1)}kg)</span>
+                                <span className="text-sm w-40">{roll.rollNumber} ({Number(roll.remainingWeight).toFixed(1)}kg)</span>
+                                {index === 0 && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs text-slate-500">Take:</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={productionForm.rollConsumption[roll.id] ?? ''}
+                                      onFocus={e => e.target.select()}
+                                      onChange={e => {
+                                        const val = e.target.value === '' ? undefined : Math.max(0, parseFloat(e.target.value) || 0)
+                                        setProductionForm({
+                                          ...productionForm,
+                                          rollConsumption: { ...productionForm.rollConsumption, [roll.id]: val ?? 0 }
+                                        })
+                                      }}
+                                      className="w-16 px-1.5 py-0.5 text-xs border border-slate-300 rounded"
+                                      placeholder="kg"
+                                    />
+                                    <span className="text-xs text-slate-400">kg</span>
+                                  </div>
+                                )}
+                                {index > 0 && <div className="w-24" />}
                                 <button
                                   type="button"
                                   onClick={() => moveRollUp(index)}
