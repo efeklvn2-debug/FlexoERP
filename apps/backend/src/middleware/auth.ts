@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
+import crypto from 'crypto'
 import { Role, RolePermissions } from '@flexoprint/types'
 import { AppError } from './errorHandler'
 import { prisma } from '../database'
@@ -100,7 +101,13 @@ export function generateAccessToken(userId: string): string {
 }
 
 export function generateRefreshToken(userId: string): string {
-  return jwt.sign({ userId, type: 'refresh' }, JWT_SECRET, { expiresIn: '7d' })
+  const token = jwt.sign({ userId, type: 'refresh' }, JWT_SECRET, { expiresIn: '7d' })
+  return token + ':' + crypto.randomUUID()
+}
+
+export function extractJwtFromRefreshToken(token: string): string {
+  const idx = token.indexOf(':')
+  return idx === -1 ? token : token.slice(0, idx)
 }
 
 export function verifyToken(token: string): { userId: string } | null {

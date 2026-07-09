@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import { authRepository } from './repository'
 import { LoginInput, RegisterInput } from './validation'
 import { LoginResult, UserResponse, AuthTokens } from './types'
-import { generateAccessToken, generateRefreshToken, verifyToken } from '../../middleware/auth'
+import { generateAccessToken, generateRefreshToken, verifyToken, extractJwtFromRefreshToken } from '../../middleware/auth'
 import { Role } from '@flexoprint/types'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
@@ -57,7 +57,7 @@ export const authService = {
   },
 
   async refreshToken(refreshToken: string): Promise<AuthTokens> {
-    const payload = verifyToken(refreshToken)
+    const payload = verifyToken(extractJwtFromRefreshToken(refreshToken))
 
     if (!payload) {
       throw new AppError(401, 'INVALID_TOKEN', 'Invalid refresh token')

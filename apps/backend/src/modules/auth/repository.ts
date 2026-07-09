@@ -57,7 +57,11 @@ export const authRepository = {
     userId: string
     expiresAt: Date
   }): Promise<void> {
-    await prisma.refreshToken.create({ data })
+    await prisma.refreshToken.upsert({
+      where: { token: data.token },
+      create: data,
+      update: { expiresAt: data.expiresAt }
+    })
     logger.info({ userId: data.userId }, 'Refresh token created')
   },
 

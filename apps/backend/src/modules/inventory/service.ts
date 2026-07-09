@@ -85,24 +85,38 @@ export const inventoryService = {
     }
 
     logger.info({ materialId: id, newQuantity, reason }, 'Adjusting material stock')
-    
+
+    // Update Stock table via createStockMovement's built-in arithmetic
+    const stock = await inventoryRepository.getOrCreateStock(id, 'MAIN')
+    const currentQty = stock.quantity || 0
+    const difference = newQuantity - currentQty
+
+    if (difference !== 0) {
+      const isIncrease = difference > 0
+      await inventoryRepository.createStockMovement({
+        materialId: id,
+        stockId: stock.id,
+        type: isIncrease ? 'ADJUSTMENT' : 'OUT',
+        quantity: Math.abs(difference),
+        notes: `Stock adjusted: ${currentQty} → ${newQuantity}. Reason: ${reason}`
+      })
+    }
+
+    // Append audit trail to Material.notes
     const existingAny = existing as any
     const existingNotes = existingAny.notes || ''
-    const newNotes = existingNotes + `\n[${new Date().toISOString()}] Stock adjusted from ${existingAny.totalStock || 0} to ${newQuantity}. Reason: ${reason}`
-    
+    const newNotes = existingNotes + `\n[${new Date().toISOString()}] Stock adjusted from ${currentQty} to ${newQuantity}. Reason: ${reason}`
     await prisma.$executeRaw`
-      UPDATE "Material" 
-      SET "totalStock" = ${newQuantity}, "notes" = ${newNotes}, "updatedAt" = NOW()
+      UPDATE "Material"
+      SET "notes" = ${newNotes}, "updatedAt" = NOW()
       WHERE "id" = ${id}
     `
-    
-    // Fetch and return updated material
-    const updated = await prisma.material.findUnique({ where: { id } })
+
+    const updated = await inventoryRepository.findMaterialById(id)
     if (!updated) {
       throw new AppError(500, 'INTERNAL_ERROR', 'Failed to update material')
     }
-    
-    return updated as any as Material
+    return updated
   },
 
   async archiveMaterial(id: string): Promise<Material> {
