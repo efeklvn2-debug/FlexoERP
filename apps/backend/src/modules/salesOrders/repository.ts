@@ -141,6 +141,7 @@ export const salesOrderRepository = {
     totalAmount: Prisma.Decimal | number
     deliveryMethod: string
     shippingAddress?: string
+    expectedDeliveryDate?: Date
     depositRequired: Prisma.Decimal | number
     status?: string
     approvedAt?: Date
@@ -166,6 +167,7 @@ export const salesOrderRepository = {
         paymentStatus: data.paymentStatus || 'PENDING_PAYMENT' as any,
         approvedAt: data.approvedAt,
         completedAt: data.completedAt,
+        expectedDeliveryDate: data.expectedDeliveryDate,
         totalPaid: data.totalPaid ? new Prisma.Decimal(String(data.totalPaid)) : undefined,
         balancePaid: data.balancePaid ? new Prisma.Decimal(String(data.balancePaid)) : undefined
       },

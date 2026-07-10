@@ -22,6 +22,7 @@ export interface SalesOrderInput {
   unitPrice: number
   deliveryMethod?: DeliveryMethod
   shippingAddress?: string
+  expectedDeliveryDate?: string
 }
 
 export interface SalesOrderUpdateInput {
@@ -31,6 +32,7 @@ export interface SalesOrderUpdateInput {
    deliveryMethod?: DeliveryMethod
    shippingAddress?: string
    productionJobId?: string
+   expectedDeliveryDate?: string
 }
 
 export interface PaymentInput {

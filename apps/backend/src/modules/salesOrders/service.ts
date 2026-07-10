@@ -56,6 +56,7 @@ export const salesOrderService = {
       totalAmount,
       deliveryMethod: input.deliveryMethod || 'PICKUP',
       shippingAddress: input.shippingAddress,
+      expectedDeliveryDate: input.expectedDeliveryDate ? dateFromInput(input.expectedDeliveryDate) : undefined,
       depositRequired
     })
 
@@ -132,6 +133,7 @@ export const salesOrderService = {
     // Create the production job
     const productionJob = await productionService.createJob({
       salesOrderId: id,
+      customerId: order.customerId,
       customerName: order.customer?.name || '',
       machine: input.machine,
       materialOverride: input.materialOverride,

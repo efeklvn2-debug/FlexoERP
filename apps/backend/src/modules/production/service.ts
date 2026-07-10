@@ -10,6 +10,7 @@ import { dateFromInput } from '../../utils/dates'
 
 export const productionJobSchema = z.object({
   salesOrderId: z.string().optional(),
+  customerId: z.string().optional(),
   customerName: z.string().optional(),
   machine: z.string().min(1, 'Machine is required'),
   category: z.enum(['25microns', '27microns', '28microns', '30microns', 'Premium', 'SuPremium']).optional(),
@@ -153,6 +154,7 @@ export const productionService = {
       data: {
         jobNumber,
         salesOrderId: input.salesOrderId,
+        customerId: input.customerId,
         customerName: input.customerName,
         machine: input.machine,
         materialOverride: input.materialOverride,
@@ -246,6 +248,8 @@ export const productionService = {
     const parentRollUpdates: { id: string; newRemainingWeight: number; newStatus: string }[] = []
     const printedRollMapping: Record<string, Record<string, number>> = {}
 
+    const coreWeight = await settingsService.getConsumptionRates().then(r => r.coreWeight)
+
     if (parentRollIds.length > 0) {
       const fetchedParentRolls = await prisma.roll.findMany({
         where: { id: { in: parentRollIds } }
@@ -255,15 +259,16 @@ export const productionService = {
 
       const rollWasteMap: Record<string, number> = (job.rollWaste as Record<string, number>) ?? {}
       const rollConsumption: Record<string, number> = (job.rollConsumption as Record<string, number>) ?? {}
-      const effectiveCapacities = parentRolls.map(r =>
-        Math.max(0, Number(r.remainingWeight) - (rollWasteMap[r.id] ?? 0))
-      )
+      const effectiveCapacities = parentRolls.map(r => {
+        const toleranceCapacity = Number(r.remainingWeight) + Number(r.weight) * 0.10
+        return Math.max(0, toleranceCapacity - (rollWasteMap[r.id] ?? 0))
+      })
 
       let parentRollIndex = 0
       let remainingInCurrentRoll = effectiveCapacities[0] ?? 0
 
       for (const [pi, printedRoll] of job.printedRolls.entries()) {
-        let weightNeeded = Number(printedRoll.weightUsed)
+        let weightNeeded = Math.max(0, Number(printedRoll.weightUsed) - coreWeight)
         let isCombo = false
         const contributions: Record<string, number> = {}
 
@@ -274,8 +279,9 @@ export const productionService = {
           if (pi === 0) {
             const consumption = rollConsumption[currentRoll.id]
             if (consumption !== undefined) {
+              const netConsumption = Math.max(0, consumption - coreWeight)
               const alreadyTaken = contributions[currentRoll.id] || 0
-              maxFromThisRoll = Math.min(maxFromThisRoll, Math.max(0, consumption - alreadyTaken))
+              maxFromThisRoll = Math.min(maxFromThisRoll, Math.max(0, netConsumption - alreadyTaken))
               if (maxFromThisRoll <= 0) {
                 parentRollIndex++
                 remainingInCurrentRoll = effectiveCapacities[parentRollIndex] ?? 0
@@ -380,7 +386,7 @@ export const productionService = {
         )
       }
 
-      const totalPrintedWeight = job.printedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed), 0)
+      const totalPrintedWeight = job.printedRolls.reduce((sum, pr) => sum + Math.max(0, Number(pr.weightUsed) - coreWeight), 0)
 
       if (totalPrintedWeight > 0 && job.customerName) {
         const customer = await tx.customer.findFirst({
@@ -896,7 +902,59 @@ export const productionService = {
       orderBy: { startDate: 'desc' }
     })
 
-    return jobs
+    const result: any[] = []
+    for (const job of jobs) {
+      const mapping = (job as any).printedRollMapping as Record<string, any> || {}
+      let hasPrintedRolls = false
+
+      for (const pr of job.printedRolls) {
+        const entry = mapping[pr.id]
+        let contributedWeight = 0
+        let relevant = false
+
+        if (typeof entry === 'object' && entry !== null) {
+          contributedWeight = Number(entry[parentRollId]) || 0
+          relevant = contributedWeight > 0
+        } else {
+          const mappedParentId = typeof entry === 'string' ? entry : undefined
+          relevant = !mappedParentId || mappedParentId === parentRollId ||
+            (pr.isCombination && job.parentRollIds?.includes(parentRollId))
+          contributedWeight = relevant ? Number(pr.weightUsed) : 0
+        }
+
+        if (!relevant) continue
+        hasPrintedRolls = true
+        result.push({
+          id: pr.id,
+          rollNumber: pr.roll?.rollNumber || 'N/A',
+          weightUsed: Number(pr.weightUsed),
+          contributedWeight,
+          status: pr.status,
+          jobNumber: job.jobNumber,
+          customerName: job.customerName || pr.customer?.name || job.salesOrder?.customer?.name || 'N/A',
+          pickedUpAt: pr.pickedUpAt,
+          createdAt: pr.createdAt,
+          isCombination: pr.isCombination,
+          isPartialContribution: contributedWeight > 0 && contributedWeight < Number(pr.weightUsed)
+        })
+      }
+
+      const wasteForRoll = (job.rollWaste as Record<string, number>)?.[parentRollId]
+      if (wasteForRoll && wasteForRoll > 0) {
+        result.push({
+          isWaste: true,
+          wasteWeight: wasteForRoll,
+          jobNumber: job.jobNumber,
+          customerName: job.customerName || job.salesOrder?.customer?.name || 'N/A',
+          createdAt: hasPrintedRolls
+            ? job.printedRolls.length > 0
+              ? job.printedRolls[0].createdAt
+              : job.createdAt
+            : job.createdAt
+        })
+      }
+    }
+    return result
   },
 
   async getRollTypes() {

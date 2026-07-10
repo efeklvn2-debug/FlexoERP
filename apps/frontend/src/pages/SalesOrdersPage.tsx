@@ -769,7 +769,8 @@ export function SalesOrdersPage() {
         quantityOrdered,
         unitPrice: orderForm.unitPrice,
         deliveryMethod: orderForm.deliveryMethod,
-        shippingAddress: orderForm.shippingAddress || undefined
+        shippingAddress: orderForm.shippingAddress || undefined,
+        expectedDeliveryDate: orderForm.expectedDeliveryDate || undefined
       })
       console.log('Order response:', res)
       if (res.error) { 
@@ -1071,10 +1072,11 @@ export function SalesOrdersPage() {
     }
 
     const selectedRollsData = availableRolls.filter(r => productionForm.rollIds.includes(r.id))
-    const totalParentWeight = selectedRollsData.reduce((sum, r) => sum + Number(r.remainingWeight || 0), 0)
+    const totalEffectiveCapacity = selectedRollsData.reduce((sum, r) =>
+      sum + Math.max(0, Number(r.remainingWeight || 0) + Number(r.weight || 0) * 0.10), 0)
     const totalPrintedWeight = weights.reduce((sum, w) => sum + w, 0)
-    if (totalPrintedWeight > totalParentWeight) {
-      setError(`Cannot create job: Printed weight (${totalPrintedWeight.toFixed(2)}kg) exceeds available parent weight (${totalParentWeight.toFixed(2)}kg)`)
+    if (totalPrintedWeight > totalEffectiveCapacity) {
+      setError(`Cannot create job: Printed weight (${totalPrintedWeight.toFixed(2)}kg) exceeds 110% effective capacity (${totalEffectiveCapacity.toFixed(2)}kg)`)
       return
     }
 
@@ -2309,8 +2311,11 @@ export function SalesOrdersPage() {
                     const totalPrintedWeight = weights.reduce((sum, w) => sum + w, 0)
                     const totalWaste = Object.values(productionForm.rollWaste).reduce((sum, w) => sum + w, 0)
                     const selectedRollsData = availableRolls.filter(r => productionForm.rollIds.includes(r.id))
-                    const totalParentWeight = selectedRollsData.reduce((sum, r) => sum + Number(r.remainingWeight || 0), 0)
-                    const remaining = totalParentWeight - totalPrintedWeight - totalWaste
+                    const totalRemainingWeight = selectedRollsData.reduce((sum, r) => sum + Number(r.remainingWeight || 0), 0)
+                    const totalEffectiveCapacity = selectedRollsData.reduce((sum, r) =>
+                      sum + Math.max(0, Number(r.remainingWeight || 0) + Number(r.weight || 0) * 0.10), 0)
+                    const remaining = totalEffectiveCapacity - totalPrintedWeight - totalWaste
+                    const withinTolerance = remaining >= 0
                     return (
                       <div className="flex justify-between items-center mt-1">
                         {weights.length > 0 && (
@@ -2320,9 +2325,17 @@ export function SalesOrdersPage() {
                         )}
                         {selectedRollsData.length > 0 && (
                           <p className={`text-sm font-medium ${
-                            remaining < 0 ? 'text-red-600' : remaining < 10 ? 'text-yellow-600' : 'text-green-600'
+                            !withinTolerance
+                              ? 'text-red-600'
+                              : totalPrintedWeight <= totalRemainingWeight
+                                ? 'text-green-600'
+                                : 'text-yellow-600'
                           }`}>
-                            {remaining >= 0 ? `Remaining: ${remaining.toFixed(2)}kg` : `Exceeded by ${Math.abs(remaining).toFixed(2)}kg`}
+                            {totalPrintedWeight <= totalRemainingWeight
+                              ? `Remaining: ${(totalRemainingWeight - totalPrintedWeight - totalWaste).toFixed(2)}kg`
+                              : withinTolerance
+                                ? `Over by ${(totalPrintedWeight + totalWaste - totalRemainingWeight).toFixed(2)}kg (within 10% tolerance)`
+                                : `Exceeds tolerance by ${(totalPrintedWeight + totalWaste - totalEffectiveCapacity).toFixed(2)}kg`}
                           </p>
                         )}
                       </div>
@@ -2550,6 +2563,14 @@ export function SalesOrdersPage() {
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[showOrderDetails.status]}`}>
                       {ORDER_STATUS_LABELS[showOrderDetails.status]}
                     </span>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Expected Delivery</p>
+                    <p className="text-sm font-medium">{showOrderDetails.expectedDeliveryDate ? new Date(showOrderDetails.expectedDeliveryDate).toLocaleDateString() : 'Not set'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Delivery Method</p>
+                    <p className="text-sm font-medium">{showOrderDetails.deliveryMethod === 'SHIPPING' ? 'Shipping' : 'Pickup'}</p>
                   </div>
                 </div>
 

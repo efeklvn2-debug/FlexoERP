@@ -248,6 +248,8 @@ model ProductionJob {
    id                  String   @id @default(cuid())
    jobNumber           String   @unique
    customerName        String?
+   customerId          String?
+   customer            Customer? @relation("CustomerProductionJobs", fields: [customerId], references: [id])
    status              String   @default("PENDING")
    startDate           DateTime?
    endDate             DateTime?
@@ -275,6 +277,7 @@ model ProductionJob {
    @@index([jobNumber])
    @@index([status])
    @@index([salesOrderId])
+   @@index([customerId])
 }
 
 model PrintedRoll {
@@ -641,7 +644,8 @@ model Customer {
   salesOrders          SalesOrder[]
   paymentTransactions   PaymentTransaction[]
   invoices             Invoice[]
-  coreBuybacks          CoreBuyback[]
+   coreBuybacks          CoreBuyback[]
+   productionJobOrders   ProductionJob[] @relation("CustomerProductionJobs")
 }
 
 model SalesOrder {
@@ -661,7 +665,7 @@ model SalesOrder {
   // Delivery
   deliveryMethod        DeliveryMethod   @default(PICKUP)
   shippingAddress       String?
-  
+  expectedDeliveryDate  DateTime?
   // Payment Tracking
   depositRequired       Decimal          @default(0) @db.Decimal(15, 2)
   depositPaid          Decimal          @default(0) @db.Decimal(15, 2)

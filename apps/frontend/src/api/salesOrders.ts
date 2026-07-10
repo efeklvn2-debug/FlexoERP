@@ -46,6 +46,7 @@ export interface SalesOrder {
   totalAmount: number
   deliveryMethod: DeliveryMethod
   shippingAddress?: string
+  expectedDeliveryDate?: string
   depositRequired: number
   depositPaid: number
   balancePaid: number
@@ -210,6 +211,7 @@ export const salesOrderApi = {
     unitPrice: number
     deliveryMethod?: DeliveryMethod
     shippingAddress?: string
+    expectedDeliveryDate?: string
   }) => api.post<SalesOrder>('/sales-orders/orders', data),
   updateOrder: (id: string, data: any) => api.patch<SalesOrder>(`/sales-orders/orders/${id}`, data),
   approveOrder: (id: string, date?: string) => api.patch<SalesOrder>(`/sales-orders/orders/${id}/approve`, { date }),

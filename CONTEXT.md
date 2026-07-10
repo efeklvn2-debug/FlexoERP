@@ -128,3 +128,41 @@ Every pickup generates a separate invoice for the exact quantity picked up. No m
 - PO labels: ink→"Quantity(kg)", IPA/Butanol→"Quantity(Liters)"
 - Receive PO: dynamic content per material category
 - SettingsPage: archive/restore per row, "Show archived" toggle, opacity-50
+
+## Parent Roll Consumption Order (7 Jul 2026)
+
+### Logic
+- `ProductionJob.parentRollIds` array order defines the consumption sequence
+- `createJob()` stores `input.rollIds` directly (user's ▲▼ order from UI), NOT `parentRolls.map(r => r.id)` (which was DB-order)
+- `completeJob()` does NOT re-sort by date — preserves `parentRollIds` array order
+- Frontend: ▲▼ buttons in Start Production modal reorder `rollIds` before sending to API
+
+### Combo Roll Rules
+- Combo printed roll = weight comes from multiple parent rolls (FIFO across parent rolls in `parentRollIds` order)
+- **rollConsumption** (`Json?` on ProductionJob) = user-reported exact contribution for the FIRST printed roll only
+  - Value: `{ parentRollId: kg }` (e.g., `{ rollA_id: 10 }` means "10kg came from roll A")
+  - Only applies to the FIRST printed roll (subsequent rolls use standard FIFO)
+  - The reported amount contributes to that specific parent roll first; any remaining weight of the first printed roll comes from subsequent parents via FIFO
+  - This lets users report what actually happened in production (e.g., a partially-consumed roll was already on the machine)
+- `printedRollMapping` JSON = source of truth: `{ printedRollId: { parentRollId: weight } }`
+- Single-parent printed rolls get `Roll.parentRollId` set (direct traceability)
+- Combo printed rolls have `Roll.parentRollId = null` (use `printedRollMapping` instead)
+
+### mapping format resolution order (getPrintedRolls)
+1. If entry is object → modern format, parse `{ parentId: weight }` pairs
+2. If entry is string → legacy format, use string as parent roll ID
+3. If entry exists (`!= null`) AND `isCombination` → throw 500 (corrupt data)
+4. Otherwise → no mapping, list all parent rolls with 0 contribution (graceful fallback)
+
+### Key bugfixes
+- `createJob` line 161: changed `parentRolls.map(r => r.id)` → `input.rollIds` (preserves user order)
+- Legacy combo fallback (even distribution) removed — replaced with throw for truly unrecognized formats
+- `isCombination` check moved after string-format check to handle legacy data
+- `entry != null` guard on throw — only throw when entry actually exists, not when mapping is missing
+
+## Expected Delivery Date (10 Jul 2026)
+- `SalesOrder.expectedDeliveryDate` = customer-facing promise date (when does the customer want it)
+- Displayed in **Production table** as "Due Date" column + View Job modal (not in Sales Orders table — only in Order Details modal)
+- Backend already includes `salesOrder` relation in `getJobs()` response — no backend changes needed
+- Frontend: `ProductionJob.salesOrder` typing added to interface, "Due Date" column + sortable in production table
+- **Future: Dashboard card** — highlight overdue/soon-due jobs based on this date for production scheduling visibility

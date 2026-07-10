@@ -21,6 +21,10 @@ export interface ProductionJob {
   parentRolls?: { id: string; rollNumber: string; weight: number; remainingWeight: number }[]
   printedRollMapping?: Record<string, Record<string, number>>
   materialOverride?: string
+  salesOrder?: {
+    expectedDeliveryDate?: string
+    orderNumber?: string
+  }
 }
 
 export interface PrintedRoll {

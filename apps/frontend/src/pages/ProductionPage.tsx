@@ -31,7 +31,7 @@ export function ProductionPage() {
   const [filterMachine, setFilterMachine] = useState<string>('')
   const [filterDateFrom, setFilterDateFrom] = useState<string>('')
   const [filterDateTo, setFilterDateTo] = useState<string>('')
-  const [sortBy, setSortBy] = useState<'createdAt' | 'jobNumber' | 'customerName'>('createdAt')
+  const [sortBy, setSortBy] = useState<'createdAt' | 'jobNumber' | 'customerName' | 'dueDate'>('createdAt')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [searchTerm, setSearchTerm] = useState<string>('')
 
@@ -130,6 +130,10 @@ export function ProductionPage() {
         comparison = a.jobNumber.localeCompare(b.jobNumber)
       } else if (sortBy === 'customerName') {
         comparison = (a.customerName || '').localeCompare(b.customerName || '')
+      } else if (sortBy === 'dueDate') {
+        const dateA = a.salesOrder?.expectedDeliveryDate ? new Date(a.salesOrder.expectedDeliveryDate).getTime() : 0
+        const dateB = b.salesOrder?.expectedDeliveryDate ? new Date(b.salesOrder.expectedDeliveryDate).getTime() : 0
+        comparison = dateA - dateB
       }
       return sortOrder === 'desc' ? -comparison : comparison
     })
@@ -222,7 +226,8 @@ export function ProductionPage() {
                 onChange={e => setSortBy(e.target.value as any)}
                 className="px-2 py-1 text-sm border border-slate-300 rounded-lg"
               >
-                <option value="createdAt">Date</option>
+                <option value="createdAt">Created Date</option>
+                <option value="dueDate">Due Date</option>
                 <option value="jobNumber">Job #</option>
                 <option value="customerName">Customer</option>
               </select>
@@ -264,6 +269,7 @@ export function ProductionPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Machine</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Created</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Due Date</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Actions</th>
                 </tr>
               </thead>
@@ -275,6 +281,11 @@ export function ProductionPage() {
                     <td className="px-6 py-4 text-sm text-slate-600">{job.machine}</td>
                     <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[job.status] || 'bg-slate-100'}`}>{job.status}</span></td>
                     <td className="px-6 py-4 text-sm text-slate-500">{new Date(job.createdAt).toLocaleDateString()}</td>
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {job.salesOrder?.expectedDeliveryDate
+                        ? new Date(job.salesOrder.expectedDeliveryDate).toLocaleDateString()
+                        : '-'}
+                    </td>
                     <td className="px-6 py-4">
                       <button onClick={() => openViewModal(job)} className="text-blue-600 hover:text-blue-800 text-sm font-medium mr-3">View</button>
                       {job.status === 'IN_PRODUCTION' && (
@@ -327,6 +338,14 @@ export function ProductionPage() {
                       if (rw) return Object.values(rw).reduce((s, v) => s + v, 0).toFixed(2) + ' kg'
                       return (Number(selectedJob.wasteWeight || 0)).toFixed(2) + ' kg'
                     })()}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <span className="text-slate-500 block text-xs">Due Date</span>
+                  <span className="text-slate-900 font-medium">
+                    {selectedJob.salesOrder?.expectedDeliveryDate
+                      ? new Date(selectedJob.salesOrder.expectedDeliveryDate).toLocaleDateString()
+                      : '-'}
                   </span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg">
