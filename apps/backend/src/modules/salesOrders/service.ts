@@ -1520,14 +1520,14 @@ export const coreBuybackService = {
             paymentMethod: 'CASH' as any,
             amount: new Prisma.Decimal(String(totalValue)),
             referenceNumber: `CORE-${buyback.id.slice(-8)}`,
-            notes: `Core buyback: ${input.coresQuantity} cores (Γéª${totalValue.toLocaleString()})`,
+            notes: `Core buyback: ${input.coresQuantity} cores (₦${totalValue.toLocaleString()})`,
             receivedById: userId,
             salesOrderId: null
           }
         })
 
         await financeService.postJournalEntry({
-          description: `Core buyback - ${input.coresQuantity} cores (Γéª${totalValue.toLocaleString()})`,
+          description: `Core buyback - ${input.coresQuantity} cores (₦${totalValue.toLocaleString()})`,
           sourceModule: 'SALES',
           sourceId: buyback.id,
           reference: `CORE-${buyback.id.slice(-8)}`,
@@ -1571,7 +1571,7 @@ export const coreBuybackService = {
           paymentMethod: (PAYMENT_METHOD_MAP[input.paymentMethod] || input.paymentMethod) as any,
           amount: new Prisma.Decimal(String(paidAmount)),
           referenceNumber: `CORE-${buyback.id.slice(-8)}`,
-          notes: `Core buyback - ${input.sellerName}: ${input.coresQuantity} cores (Γéª${paidAmount.toLocaleString()})`,
+          notes: `Core buyback - ${input.sellerName}: ${input.coresQuantity} cores (₦${paidAmount.toLocaleString()})`,
           receivedById: userId,
           sellerName: input.sellerName,
           coresQuantity: input.coresQuantity
@@ -1579,7 +1579,7 @@ export const coreBuybackService = {
       })
 
       await financeService.postJournalEntry({
-        description: `Core buyback (walk-in) - ${input.sellerName}: ${input.coresQuantity} cores (Γéª${paidAmount.toLocaleString()})`,
+        description: `Core buyback (walk-in) - ${input.sellerName}: ${input.coresQuantity} cores (₦${paidAmount.toLocaleString()})`,
         sourceModule: 'SALES',
         sourceId: buyback.id,
         reference: `CORE-${buyback.id.slice(-8)}`,
