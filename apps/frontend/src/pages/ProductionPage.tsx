@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { productionApi, ProductionJob } from '../api/production'
+import type { Roll } from '../api/procurement'
 
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
@@ -22,6 +23,8 @@ export function ProductionPage() {
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null)
   const [showCompleteModal, setShowCompleteModal] = useState(false)
   const [completeJobId, setCompleteJobId] = useState<string | null>(null)
+  const [completeJobRolls, setCompleteJobRolls] = useState<Roll[]>([])
+  const [consumedRollIds, setConsumedRollIds] = useState<string[]>([])
   const [completeDate, setCompleteDate] = useState(new Date().toISOString().split('T')[0])
   const [showCompleteSuccess, setShowCompleteSuccess] = useState(false)
 
@@ -50,14 +53,20 @@ export function ProductionPage() {
   const handleCompleteJob = async (jobId: string) => {
     setCompleteJobId(jobId)
     setCompleteDate(new Date().toISOString().split('T')[0])
+    const job = filteredJobs.find(j => j.id === jobId)
+    const parentRolls = (job as any)?.parentRolls || []
+    setCompleteJobRolls(parentRolls)
+    setConsumedRollIds([])
     setShowCompleteModal(true)
   }
 
   const confirmCompleteJob = async () => {
     if (!completeJobId) return
-    const res = await productionApi.completeJob(completeJobId, completeDate || undefined)
+    const res = await productionApi.completeJob(completeJobId, completeDate || undefined, consumedRollIds.length > 0 ? consumedRollIds : undefined)
     setShowCompleteModal(false)
     setCompleteJobId(null)
+    setCompleteJobRolls([])
+    setConsumedRollIds([])
     if (!res.error) {
       loadData()
       setShowCompleteSuccess(true)
@@ -505,14 +514,44 @@ export function ProductionPage() {
         {/* Complete Job Modal */}
         {showCompleteModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
               <h2 className="text-xl font-bold mb-4">Complete Job</h2>
               <div className="mb-4">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Completion Date</label>
                 <DateInput value={completeDate} onChange={e => setCompleteDate(e.target.value)} max={new Date().toISOString().split('T')[0]} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
               </div>
+              {completeJobRolls.length > 0 && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Mark rolls as consumed</label>
+                  <div className="max-h-40 overflow-y-auto border border-slate-300 rounded-lg p-2 space-y-1">
+                    {completeJobRolls.map(roll => {
+                      const isConsumed = consumedRollIds.includes(roll.id)
+                      return (
+                        <label key={roll.id} className="flex items-center p-2 hover:bg-slate-50 rounded cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isConsumed}
+                            onChange={() => {
+                              if (isConsumed) {
+                                setConsumedRollIds(consumedRollIds.filter(id => id !== roll.id))
+                              } else {
+                                setConsumedRollIds([...consumedRollIds, roll.id])
+                              }
+                            }}
+                            className="mr-2"
+                          />
+                          <span className="text-sm">
+                            {roll.rollNumber} — {Number(roll.remainingWeight).toFixed(1)}kg
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">Check rolls that were fully consumed on the factory floor</p>
+                </div>
+              )}
               <div className="flex justify-end space-x-3">
-                <button type="button" onClick={() => { setShowCompleteModal(false); setCompleteJobId(null) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button type="button" onClick={() => { setShowCompleteModal(false); setCompleteJobId(null); setCompleteJobRolls([]); setConsumedRollIds([]) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
                 <button type="button" onClick={confirmCompleteJob} className="px-4 py-2 bg-green-600 text-white rounded-lg">Complete Job</button>
               </div>
             </div>

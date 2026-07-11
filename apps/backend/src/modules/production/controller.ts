@@ -129,12 +129,25 @@ export const productionController = {
   async completeJob(req: Request, res: Response) {
     try {
       const { id } = req.params
-      const { date } = req.body
-      const job = await productionService.completeJob(id, date)
+      const { date, consumedRollIds } = req.body
+      const job = await productionService.completeJob(id, date, consumedRollIds)
       res.json({ data: job })
     } catch (error: any) {
       logger.error(error, 'Error completing production job')
       res.status(error.statusCode || 500).json({ error: error.message || 'Failed to complete job' })
+    }
+  },
+
+  async markRollConsumed(req: Request, res: Response) {
+    try {
+      const { id } = req.params
+      const { date } = req.body
+      const userId = (req as any).user?.id
+      const result = await productionService.markRollConsumed(id, userId, date)
+      res.json(result)
+    } catch (error: any) {
+      logger.error(error, 'Error marking roll as consumed')
+      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to mark roll as consumed' })
     }
   },
 

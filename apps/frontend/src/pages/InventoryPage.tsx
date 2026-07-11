@@ -45,6 +45,9 @@ export function InventoryPage() {
   const [loadingPrintedFromRoll, setLoadingPrintedFromRoll] = useState(false)
   const [disposeRoll, setDisposeRoll] = useState<Roll | null>(null)
   const [disposeDate, setDisposeDate] = useState('')
+  const [consumeRoll, setConsumeRoll] = useState<Roll | null>(null)
+  const [consumeDate, setConsumeDate] = useState('')
+  const [consuming, setConsuming] = useState(false)
   const [returnRoll, setReturnRoll] = useState<Roll | null>(null)
   const [returnDate, setReturnDate] = useState('')
   const [disposalReason, setDisposalReason] = useState('Manufacturing defect')
@@ -579,6 +582,9 @@ export function InventoryPage() {
               </div>
               {selectedParentRoll.status === 'AVAILABLE' && (
                 <div className="flex gap-3 mb-6">
+                  <button onClick={() => { setConsumeRoll(selectedParentRoll); setConsumeDate(today) }} className="px-4 py-2 bg-slate-600 text-white text-sm rounded-lg hover:bg-slate-700">
+                    Mark Consumed
+                  </button>
                   <button onClick={() => { setDisposeRoll(selectedParentRoll); setDisposeDate(today); setDisposalReason('Manufacturing defect') }} className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">
                     Mark as Waste
                   </button>
@@ -658,6 +664,45 @@ export function InventoryPage() {
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Mark Consumed Confirmation Modal */}
+        {consumeRoll && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+              <h3 className="text-lg font-bold mb-2">Mark Roll as Consumed</h3>
+              <p className="text-sm text-slate-600 mb-4">
+                Mark roll <strong>{consumeRoll.rollNumber}</strong> ({Number(consumeRoll.remainingWeight).toFixed(2)} kg remaining) as fully consumed.
+                A core will be recovered to inventory.
+              </p>
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+                <DateInput value={consumeDate} onChange={e => setConsumeDate(e.target.value)} max={today} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg" />
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button onClick={() => setConsumeRoll(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-sm">Cancel</button>
+                <button
+                  onClick={async () => {
+                    setConsuming(true)
+                    try {
+                      await productionApi.markRollConsumed(consumeRoll.id, consumeDate || undefined)
+                      setConsumeRoll(null)
+                      setSelectedParentRoll(null)
+                      setPrintedFromRoll(null)
+                      loadData()
+                    } catch (e: any) {
+                      alert(e?.response?.data?.error || 'Failed to mark roll as consumed')
+                    }
+                    setConsuming(false)
+                  }}
+                  disabled={consuming}
+                  className="px-4 py-2 bg-slate-600 text-white rounded-lg text-sm hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {consuming ? 'Processing...' : 'Mark Consumed'}
+                </button>
+              </div>
             </div>
           </div>
         )}

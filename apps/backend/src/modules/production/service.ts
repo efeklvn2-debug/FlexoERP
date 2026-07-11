@@ -212,7 +212,7 @@ export const productionService = {
     return this.getJobById(jobId)
   },
 
-  async completeJob(jobId: string, date?: string) {
+  async completeJob(jobId: string, date?: string, consumedRollIds?: string[]) {
     const job = await prisma.productionJob.findUnique({
       where: { id: jobId },
       include: {
@@ -259,6 +259,7 @@ export const productionService = {
 
       const rollWasteMap: Record<string, number> = (job.rollWaste as Record<string, number>) ?? {}
       const rollConsumption: Record<string, number> = (job.rollConsumption as Record<string, number>) ?? {}
+      const actualDraw: Record<string, number> = {}
       const effectiveCapacities = parentRolls.map(r => {
         const toleranceCapacity = Number(r.remainingWeight) + Number(r.weight) * 0.10
         return Math.max(0, toleranceCapacity - (rollWasteMap[r.id] ?? 0))
@@ -293,12 +294,14 @@ export const productionService = {
           if (weightNeeded > maxFromThisRoll && parentRollIndex < parentRolls.length - 1) {
             isCombo = true
             contributions[currentRoll.id] = (contributions[currentRoll.id] || 0) + maxFromThisRoll
+            actualDraw[currentRoll.id] = (actualDraw[currentRoll.id] || 0) + maxFromThisRoll
             weightNeeded -= maxFromThisRoll
             remainingInCurrentRoll -= maxFromThisRoll
             parentRollIndex++
             remainingInCurrentRoll = effectiveCapacities[parentRollIndex] ?? 0
           } else {
             contributions[currentRoll.id] = (contributions[currentRoll.id] || 0) + weightNeeded
+            actualDraw[currentRoll.id] = (actualDraw[currentRoll.id] || 0) + weightNeeded
             remainingInCurrentRoll -= weightNeeded
             weightNeeded = 0
           }
@@ -311,19 +314,23 @@ export const productionService = {
         }
       }
 
+      const consumedSet = new Set(consumedRollIds || [])
       for (let i = 0; i < parentRolls.length; i++) {
         const roll = parentRolls[i]
-        let newRemainingWeight: number
+        const drawn = actualDraw[roll.id] || 0
+        const waste = rollWasteMap[roll.id] || 0
+        const originalPhysical = Number(roll.remainingWeight)
 
-        if (i < parentRollIndex) {
+        let newRemainingWeight = Math.max(0, originalPhysical - drawn - waste)
+        let newStatus: string
+
+        if (consumedSet.has(roll.id)) {
           newRemainingWeight = 0
-        } else if (i === parentRollIndex) {
-          newRemainingWeight = Math.max(0, remainingInCurrentRoll)
+          newStatus = 'CONSUMED'
         } else {
-          newRemainingWeight = effectiveCapacities[i]
+          newStatus = newRemainingWeight < 0.1 ? 'CONSUMED' : 'AVAILABLE'
         }
 
-        const newStatus = newRemainingWeight < 0.1 ? 'CONSUMED' : 'AVAILABLE'
         parentRollUpdates.push({ id: roll.id, newRemainingWeight, newStatus })
       }
     }
@@ -769,6 +776,60 @@ export const productionService = {
 
       return { success: true }
     })
+  },
+
+  async markRollConsumed(rollId: string, userId?: string, date?: string) {
+    const roll = await prisma.roll.findUnique({
+      where: { id: rollId },
+      include: { material: true, purchaseOrder: { include: { items: true } } }
+    })
+    if (!roll) throw new AppError(404, 'NOT_FOUND', 'Roll not found')
+    if (roll.status === 'CONSUMED') throw new AppError(400, 'INVALID', 'Roll already consumed')
+    if (roll.status === 'RETURNED' || roll.status === 'WASTED') {
+      throw new AppError(400, 'INVALID', 'Roll has already been disposed, returned, or wasted')
+    }
+
+    const costPrice = roll.material.costPrice
+      ? Number(roll.material.costPrice)
+      : roll.purchaseOrder?.items?.[0]?.unitPrice
+        ? Number(roll.purchaseOrder.items[0].unitPrice)
+        : null
+    if (costPrice === null) throw new AppError(400, 'INVALID', 'Set a cost price for this material first')
+
+    const value = Number(roll.remainingWeight) * costPrice
+
+    await prisma.$transaction(async (tx) => {
+      await tx.roll.update({
+        where: { id: rollId },
+        data: {
+          status: 'CONSUMED',
+          remainingWeight: 0,
+          disposedAt: date ? dateFromInput(date) : undefined,
+          disposedById: userId
+        }
+      })
+
+      await inventoryService.recordCoreChange(1, 'CORE_RECOVERY', roll.rollNumber, userId, tx)
+
+      if (value > 0) {
+        const scrapAccount = await financeService.getAccountIdByCode('5300')
+        const inventoryAccount = await financeService.getAccountIdByCode('1300')
+        await financeService.postJournalEntry({
+          description: `Roll ${roll.rollNumber} consumed - remaining ${Number(roll.remainingWeight).toFixed(2)}kg written off`,
+          sourceModule: 'ADJUSTMENT',
+          sourceId: rollId,
+          reference: roll.rollNumber,
+          postedById: userId,
+          date,
+          lines: [
+            { accountId: scrapAccount, debit: value, credit: 0, memo: `Remaining weight written off - ${roll.rollNumber}` },
+            { accountId: inventoryAccount, debit: 0, credit: value, memo: `Roll removed from inventory upon consumption` }
+          ]
+        }, tx)
+      }
+    })
+
+    return { success: true }
   },
 
   async getAvailableRolls(category?: string) {

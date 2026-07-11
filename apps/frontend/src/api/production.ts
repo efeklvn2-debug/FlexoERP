@@ -142,8 +142,8 @@ export const productionApi = {
     return api.put<ProductionJob>(`/production/${id}`, data)
   },
 
-  completeJob: async (id: string, date?: string) => {
-    return api.post<ProductionJob>(`/production/${id}/complete`, { date })
+  completeJob: async (id: string, date?: string, consumedRollIds?: string[]) => {
+    return api.post<ProductionJob>(`/production/${id}/complete`, { date, consumedRollIds })
   },
 
   deleteJob: async (id: string) => {
@@ -156,6 +156,10 @@ export const productionApi = {
 
   returnRoll: async (id: string, date?: string) => {
     return api.post(`/production/parent-roll/${id}/return`, { date })
+  },
+
+  markRollConsumed: async (id: string, date?: string) => {
+    return api.post(`/production/parent-roll/${id}/consume`, { date })
   },
 
   receiveReplacement: async (id: string, date?: string) => {

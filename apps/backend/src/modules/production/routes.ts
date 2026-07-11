@@ -19,6 +19,7 @@ productionRouter.delete('/:id', productionController.deleteJob)
 
 productionRouter.post('/parent-roll/:id/dispose', authenticate, loadUser, productionController.disposeRoll)
 productionRouter.post('/parent-roll/:id/return', authenticate, loadUser, productionController.returnRoll)
+productionRouter.post('/parent-roll/:id/consume', authenticate, loadUser, productionController.markRollConsumed)
 productionRouter.post('/parent-roll/:id/receive-replacement', authenticate, loadUser, productionController.receiveReplacement)
 productionRouter.post('/printed-roll/:id/customer-return', authenticate, loadUser, productionController.customerReturnRoll)
 productionRouter.post('/printed-rolls/archive', authenticate, loadUser, authorize(Role.ADMIN, Role.MANAGER), productionController.archiveOldPrintedRolls)
