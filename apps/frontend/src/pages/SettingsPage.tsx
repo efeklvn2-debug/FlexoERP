@@ -511,7 +511,7 @@ const loadSettings = async () => {
 
 <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Ink Consumption Rate (L per kg of printed roll)
+                  Ink Consumption Rate (kg per kg of printed roll)
                 </label>
                 <input
                   type="number"
@@ -521,7 +521,7 @@ const loadSettings = async () => {
                   onChange={e => setRates({ ...rates, inkConsumptionRate: parseFloat(e.target.value) || 0 })}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                 />
-                <p className="text-xs text-slate-500 mt-1">Liters of ink per kg of printed roll. Default: 0.2 L</p>
+                <p className="text-xs text-slate-500 mt-1">Kilograms of ink per kg of printed roll. Default: 0.2 kg</p>
               </div>
 
               <div>
