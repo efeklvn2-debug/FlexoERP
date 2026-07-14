@@ -341,82 +341,78 @@ export const salesOrderService = {
         // =====================================================
         // RECOGNIZE DEFERRED COGS (Move from 1330 to 5000)
         // =====================================================
-        try {
-          const cogsAccountId = await financeService.getAccountIdByCode('5000')
-          const deferredCogsAccountId = await financeService.getAccountIdByCode('1330')
+        const cogsAccountId = await financeService.getAccountIdByCode('5000')
+        const deferredCogsAccountId = await financeService.getAccountIdByCode('1330')
 
-          // Get the full production job to compute COGS
-          const productionJob = await tx.productionJob.findUnique({
-            where: { id: order.productionJobId! },
-            include: { printedRolls: true }
-          })
+        // Get the full production job to compute COGS
+        const productionJob = await tx.productionJob.findUnique({
+          where: { id: order.productionJobId! },
+          include: { printedRolls: true }
+        })
 
-          if (productionJob) {
-            const totalJobCost = Number(productionJob.materialCost || 0)
-              + Number((productionJob as any).consumablesCost || 0)
-              + Number(productionJob.overheadCost || 0)
+        if (productionJob) {
+          const totalJobCost = Number(productionJob.materialCost || 0)
+            + Number((productionJob as any).consumablesCost || 0)
+            + Number(productionJob.overheadCost || 0)
 
-            const totalPrintedWeight = productionJob.printedRolls.reduce((sum: number, pr: any) => sum + Number(pr.weightUsed || 0), 0)
-            let totalJobCostCalc = totalJobCost
-            if (!totalJobCostCalc && totalPrintedWeight > 0) {
-              totalJobCostCalc = 0
-              if (productionJob.parentRollIds && productionJob.parentRollIds.length > 0) {
-                const parentRolls = await tx.roll.findMany({
-                  where: { id: { in: productionJob.parentRollIds } },
-                  include: { material: true }
-                })
-                const parentMaterial = parentRolls[0]?.material
-                const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
-                totalJobCostCalc += totalPrintedWeight * costPerKg
-              }
-              const fbSettings = await tx.settings.findUnique({ where: { id: 'default' } })
-              if (fbSettings) {
-                const inkRate = Number(fbSettings.inkConsumptionRate) || 0.2
-                const ipaRate = Number(fbSettings.ipaConsumptionRate) || 0.1
-                const butanolRate = Number(fbSettings.butanolConsumptionRate) || 0.1
-                const consumableMaterials = await tx.material.findMany({ where: { category: 'INK_SOLVENTS', isActive: true } })
-                const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
-                const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
-                const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
-                const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
-                const inkMats = consumableMaterials.filter(m => m.subCategory !== 'IPA' && m.subCategory !== 'Butanol')
-                const avgInkCostPrice = inkMats.length > 0
-                  ? inkMats.reduce((sum, m) => sum + (Number(m.costPrice) || 0), 0) / inkMats.length
-                  : 0
-                totalJobCostCalc += totalPrintedWeight * inkRate * avgInkCostPrice
-                  + totalPrintedWeight * ipaRate * ipaCostPerLiter
-                  + totalPrintedWeight * butanolRate * butanolCostPerLiter
-                const overheadRate = Number(fbSettings.overheadRatePerKg) || 0
-                totalJobCostCalc += totalPrintedWeight * overheadRate
-              }
+          const totalPrintedWeight = productionJob.printedRolls.reduce((sum: number, pr: any) => sum + Number(pr.weightUsed || 0), 0)
+          let totalJobCostCalc = totalJobCost
+          if (!totalJobCostCalc && totalPrintedWeight > 0) {
+            totalJobCostCalc = 0
+            if (productionJob.parentRollIds && productionJob.parentRollIds.length > 0) {
+              const parentRolls = await tx.roll.findMany({
+                where: { id: { in: productionJob.parentRollIds } },
+                include: { material: true }
+              })
+              const parentMaterial = parentRolls[0]?.material
+              const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
+              totalJobCostCalc += totalPrintedWeight * costPerKg
             }
-
-            // Prorate COGS by actual selected weight vs total printed weight
-            const cogsRatio = totalPrintedWeight > 0
-              ? quantity / totalPrintedWeight
-              : 1
-            const cogsAmount = totalJobCostCalc > 0
-              ? Math.round((totalJobCostCalc * cogsRatio) * 100) / 100
-              : 0
-
-            if (cogsAmount > 0) {
-              await financeService.postJournalEntry({
-                description: `Recognize COGS - SO ${order.orderNumber}`,
-                sourceModule: 'SALES',
-                sourceId: order.id,
-                reference: order.orderNumber,
-                date,
-                lines: [
-                  { accountId: cogsAccountId, debit: cogsAmount, credit: 0, memo: 'COGS recognized on delivery' },
-                  { accountId: deferredCogsAccountId, debit: 0, credit: cogsAmount, memo: 'Deferred COGS cleared' }
-                ]
-              }, tx)
-
-              logger.info({ orderId: order.id, orderNumber: order.orderNumber, cogsAmount }, 'Deferred COGS recognized on pickup')
+            const fbSettings = await tx.settings.findUnique({ where: { id: 'default' } })
+            if (fbSettings) {
+              const inkRate = Number(fbSettings.inkConsumptionRate) || 0.2
+              const ipaRate = Number(fbSettings.ipaConsumptionRate) || 0.1
+              const butanolRate = Number(fbSettings.butanolConsumptionRate) || 0.1
+              const consumableMaterials = await tx.material.findMany({ where: { category: 'INK_SOLVENTS', isActive: true } })
+              const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
+              const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
+              const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
+              const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
+              const inkMats = consumableMaterials.filter(m => m.subCategory !== 'IPA' && m.subCategory !== 'Butanol')
+              const avgInkCostPrice = inkMats.length > 0
+                ? inkMats.reduce((sum, m) => sum + (Number(m.costPrice) || 0), 0) / inkMats.length
+                : 0
+              totalJobCostCalc += totalPrintedWeight * inkRate * avgInkCostPrice
+                + totalPrintedWeight * ipaRate * ipaCostPerLiter
+                + totalPrintedWeight * butanolRate * butanolCostPerLiter
+              const overheadRate = Number(fbSettings.overheadRatePerKg) || 0
+              totalJobCostCalc += totalPrintedWeight * overheadRate
             }
           }
-        } catch (financeErr) {
-          logger.error({ err: financeErr, orderId: order.id }, 'Failed to recognize Deferred COGS - continuing anyway')
+
+          // Prorate COGS by actual selected weight vs total printed weight
+          const cogsRatio = totalPrintedWeight > 0
+            ? quantity / totalPrintedWeight
+            : 1
+          const cogsAmount = totalJobCostCalc > 0
+            ? Math.round((totalJobCostCalc * cogsRatio) * 100) / 100
+            : 0
+
+          if (cogsAmount > 0) {
+            await financeService.postJournalEntry({
+              description: `Recognize COGS - SO ${order.orderNumber}`,
+              sourceModule: 'SALES',
+              sourceId: order.id,
+              reference: order.orderNumber,
+              date,
+              lines: [
+                { accountId: cogsAccountId, debit: cogsAmount, credit: 0, memo: 'COGS recognized on delivery' },
+                { accountId: deferredCogsAccountId, debit: 0, credit: cogsAmount, memo: 'Deferred COGS cleared' }
+              ]
+            }, tx)
+
+            logger.info({ orderId: order.id, orderNumber: order.orderNumber, cogsAmount }, 'Deferred COGS recognized on pickup')
+          }
         }
       }
 
@@ -456,84 +452,72 @@ export const salesOrderService = {
       })
 
       if (packingBags && packingBags > 0 && packingBagMaterial) {
-        try {
-          await inventoryService.recordPackingBagChange(
-            packingBagMaterial.id,
-            packingBags,
-            'SALE',
-            `Sales Order ${order.orderNumber}`,
-            userId
-          )
+        await inventoryService.recordPackingBagChange(
+          packingBagMaterial.id,
+          packingBags,
+          'SALE',
+          `Sales Order ${order.orderNumber}`,
+          userId
+        )
 
-          try {
-            const cogsId = await financeService.getAccountIdByCode('5000')
-            const packingBagInventoryId = await financeService.getAccountIdByCode('1510')
+        const cogsId = await financeService.getAccountIdByCode('5000')
+        const packingBagInventoryId = await financeService.getAccountIdByCode('1510')
 
-            await financeService.postJournalEntry({
-              description: `COGS - Packing Bags SO ${order.orderNumber}`,
-              sourceModule: 'SALES',
-              sourceId: order.id,
-              reference: order.orderNumber,
-              date,
-              lines: [
-                { accountId: cogsId, debit: bagCostAmount, credit: 0, memo: 'COGS - Packing Bags' },
-                { accountId: packingBagInventoryId, debit: 0, credit: bagCostAmount, memo: 'Packing Bag Inventory' }
-              ]
-            }, tx)
-          } catch (financeErr) {
-            logger.error({ err: financeErr }, 'Failed to post COGS journal for packing bags at pickup')
-          }
-        } catch (err) {
-          logger.error({ err, orderId: id }, 'Failed to record packing bag sale')
-        }
+        await financeService.postJournalEntry({
+          description: `COGS - Packing Bags SO ${order.orderNumber}`,
+          sourceModule: 'SALES',
+          sourceId: order.id,
+          reference: order.orderNumber,
+          date,
+          lines: [
+            { accountId: cogsId, debit: bagCostAmount, credit: 0, memo: 'COGS - Packing Bags' },
+            { accountId: packingBagInventoryId, debit: 0, credit: bagCostAmount, memo: 'Packing Bag Inventory' }
+          ]
+        }, tx)
       }
 
       // =====================================================
       // RECOGNIZE REVENUE (Dr AR, Cr Revenue + VAT)
       // =====================================================
-      try {
-        const settings = await tx.settings.findUnique({ where: { id: 'default' } })
-        const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
+      const settings = await tx.settings.findUnique({ where: { id: 'default' } })
+      const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
 
-        const deliveryValue = quantity * Number(order.unitPrice)
-        const bagValue = bagRevenueAmount
-        const totalRevenue = deliveryValue + bagValue
+      const deliveryValue = quantity * Number(order.unitPrice)
+      const bagValue = bagRevenueAmount
+      const totalRevenue = deliveryValue + bagValue
 
-        const { exclusive: deliveryExclusive, vat: deliveryVat } = decomposeInclusive(deliveryValue, vatRate)
-        const { exclusive: bagExclusive, vat: bagVat } = decomposeInclusive(bagValue, vatRate)
-        const totalVat = deliveryVat + bagVat
+      const { exclusive: deliveryExclusive, vat: deliveryVat } = decomposeInclusive(deliveryValue, vatRate)
+      const { exclusive: bagExclusive, vat: bagVat } = decomposeInclusive(bagValue, vatRate)
+      const totalVat = deliveryVat + bagVat
 
-        const arAccountId = await financeService.getAccountIdByCode('1200')
-        const salesRevenueId = await financeService.getAccountIdByCode('4000')
-        const packingBagRevenueId = await financeService.getAccountIdByCode('4100')
-        const vatOutputId = await financeService.getAccountIdByCode('2100')
+      const arAccountId = await financeService.getAccountIdByCode('1200')
+      const salesRevenueId = await financeService.getAccountIdByCode('4000')
+      const packingBagRevenueId = await financeService.getAccountIdByCode('4100')
+      const vatOutputId = await financeService.getAccountIdByCode('2100')
 
-        const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = [
-          { accountId: arAccountId, debit: totalRevenue, credit: 0, memo: 'Accounts receivable' }
-        ]
+      const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = [
+        { accountId: arAccountId, debit: totalRevenue, credit: 0, memo: 'Accounts receivable' }
+      ]
 
-        if (deliveryExclusive > 0) {
-          lines.push({ accountId: salesRevenueId, debit: 0, credit: deliveryExclusive, memo: 'Roll revenue (excl. VAT)' })
-        }
-        if (bagExclusive > 0) {
-          lines.push({ accountId: packingBagRevenueId, debit: 0, credit: bagExclusive, memo: 'Packing bags revenue (excl. VAT)' })
-        }
-        if (totalVat > 0) {
-          lines.push({ accountId: vatOutputId, debit: 0, credit: totalVat, memo: 'Output VAT' })
-        }
+      if (deliveryExclusive > 0) {
+        lines.push({ accountId: salesRevenueId, debit: 0, credit: deliveryExclusive, memo: 'Roll revenue (excl. VAT)' })
+      }
+      if (bagExclusive > 0) {
+        lines.push({ accountId: packingBagRevenueId, debit: 0, credit: bagExclusive, memo: 'Packing bags revenue (excl. VAT)' })
+      }
+      if (totalVat > 0) {
+        lines.push({ accountId: vatOutputId, debit: 0, credit: totalVat, memo: 'Output VAT' })
+      }
 
-        if (lines.length > 1) {
-          await financeService.postJournalEntry({
-            description: `Pickup & Revenue - SO ${order.orderNumber}`,
-            sourceModule: 'SALES',
-            sourceId: order.id,
-            reference: order.orderNumber,
-            date,
-            lines
-          }, tx)
-        }
-      } catch (financeErr) {
-        logger.error({ err: financeErr, orderId: id }, 'Failed to post revenue journal at pickup - continuing anyway')
+      if (lines.length > 1) {
+        await financeService.postJournalEntry({
+          description: `Pickup & Revenue - SO ${order.orderNumber}`,
+          sourceModule: 'SALES',
+          sourceId: order.id,
+          reference: order.orderNumber,
+          date,
+          lines
+        }, tx)
       }
 
       logger.info({ orderId: id, quantity, totalDelivered: newDelivered, fullyDelivered, packingBags, rollCount: selectedRolls.length }, 'Sales order pickup recorded')
@@ -686,32 +670,28 @@ export const salesOrderService = {
 
         // Post journal entry for advance payment application: Dr 2250, Cr 1200
         if (advancePaymentApplied > 0) {
+          const creditAccountCode = '2250'
+          let creditAccountId: string
           try {
-            const creditAccountCode = '2250'
-            let creditAccountId: string
-            try {
-              creditAccountId = await financeService.getAccountIdByCode(creditAccountCode)
-            } catch {
-              creditAccountId = await financeService.createAccount({
-                code: '2250', name: 'Advance Customer Payments',
-                type: 'LIABILITY', description: 'Prepayments against future invoices'
-              }).then(a => a.id)
-            }
-            const arAccountId = await financeService.getAccountIdByCode('1200')
-            await financeService.postJournalEntry({
-              description: `Advance payment applied - ${invoiceNumber}`,
-              sourceModule: 'SALES',
-              sourceId: order.id,
-              reference: invoiceNumber,
-              date: input.date,
-              lines: [
-                { accountId: creditAccountId, debit: advancePaymentApplied, credit: 0, memo: 'Advance payment applied to invoice' },
-                { accountId: arAccountId, debit: 0, credit: advancePaymentApplied, memo: `Applied to ${invoiceNumber}` }
-              ]
-            }, tx)
-          } catch (jeErr) {
-            logger.error({ err: jeErr, amount: advancePaymentApplied }, 'Failed to post advance payment journal entry - continuing')
+            creditAccountId = await financeService.getAccountIdByCode(creditAccountCode)
+          } catch {
+            creditAccountId = await financeService.createAccount({
+              code: '2250', name: 'Advance Customer Payments',
+              type: 'LIABILITY', description: 'Prepayments against future invoices'
+            }).then(a => a.id)
           }
+          const arAccountId = await financeService.getAccountIdByCode('1200')
+          await financeService.postJournalEntry({
+            description: `Advance payment applied - ${invoiceNumber}`,
+            sourceModule: 'SALES',
+            sourceId: order.id,
+            reference: invoiceNumber,
+            date: input.date,
+            lines: [
+              { accountId: creditAccountId, debit: advancePaymentApplied, credit: 0, memo: 'Advance payment applied to invoice' },
+              { accountId: arAccountId, debit: 0, credit: advancePaymentApplied, memo: `Applied to ${invoiceNumber}` }
+            ]
+          }, tx)
         }
 
         return createdInvoice
@@ -1283,31 +1263,18 @@ export const paymentService = {
       //   Standalone:             D/Cash-or-Bank, C/2250
       //   Payment within balance: D/Cash-or-Bank, C/1200
       //   Overpayment split:      D/Cash-or-Bank, C/1200 (revenue), C/2250 (excess)
-      try {
-        const isElectronicPayment = input.paymentMethod === 'Electronic'
-        const debitAccountCode = isElectronicPayment ? '1100' : '1000'
-        const debitAccountId = await financeService.getAccountIdByCode(debitAccountCode)
+      const isElectronicPayment = input.paymentMethod === 'Electronic'
+      const debitAccountCode = isElectronicPayment ? '1100' : '1000'
+      const debitAccountId = await financeService.getAccountIdByCode(debitAccountCode)
 
-        const journalLines: { accountId: string; debit: number; credit: number; memo?: string }[] = [
-          { accountId: debitAccountId, debit: input.amount, credit: 0, memo: isElectronicPayment ? 'Bank transfer' : 'Cash received' }
-        ]
+      const journalLines: { accountId: string; debit: number; credit: number; memo?: string }[] = [
+        { accountId: debitAccountId, debit: input.amount, credit: 0, memo: isElectronicPayment ? 'Bank transfer' : 'Cash received' }
+      ]
 
-        if (input.salesOrderId) {
-          const arAccountId = await financeService.getAccountIdByCode('1200')
-          journalLines.push({ accountId: arAccountId, debit: 0, credit: revenuePortion, memo: 'Customer payment' })
-          if (overpayment > 0) {
-            let advancePaymentAccountId: string
-            try {
-              advancePaymentAccountId = await financeService.getAccountIdByCode('2250')
-            } catch {
-              advancePaymentAccountId = await financeService.createAccount({
-                code: '2250', name: 'Advance Customer Payments',
-                type: 'LIABILITY', description: 'Prepayments against future invoices'
-              }).then(a => a.id)
-            }
-            journalLines.push({ accountId: advancePaymentAccountId, debit: 0, credit: overpayment, memo: 'Overpayment (advance credit)' })
-          }
-        } else {
+      if (input.salesOrderId) {
+        const arAccountId = await financeService.getAccountIdByCode('1200')
+        journalLines.push({ accountId: arAccountId, debit: 0, credit: revenuePortion, memo: 'Customer payment' })
+        if (overpayment > 0) {
           let advancePaymentAccountId: string
           try {
             advancePaymentAccountId = await financeService.getAccountIdByCode('2250')
@@ -1317,22 +1284,31 @@ export const paymentService = {
               type: 'LIABILITY', description: 'Prepayments against future invoices'
             }).then(a => a.id)
           }
-          journalLines.push({ accountId: advancePaymentAccountId, debit: 0, credit: input.amount, memo: 'Advance payment (no order)' })
+          journalLines.push({ accountId: advancePaymentAccountId, debit: 0, credit: overpayment, memo: 'Overpayment (advance credit)' })
         }
-
-        const customer = input.customerId ? await prisma.customer.findUnique({ where: { id: input.customerId }, select: { name: true } }) : null
-        const customerLabel = customer ? ` (${customer.name})` : ''
-        await financeService.postJournalEntry({
-          description: `${input.salesOrderId ? 'Payment received' : 'Advance payment received'}${customerLabel} - ${input.referenceNumber || `₦${input.amount.toLocaleString()}`}`,
-          sourceModule: 'PAYMENT',
-          sourceId: input.salesOrderId,
-          reference: input.referenceNumber,
-          date: input.date,
-          lines: journalLines
-        }, tx)
-      } catch (jeErr) {
-        logger.error({ err: jeErr, amount: input.amount }, 'Failed to post payment journal entry - continuing')
+      } else {
+        let advancePaymentAccountId: string
+        try {
+          advancePaymentAccountId = await financeService.getAccountIdByCode('2250')
+        } catch {
+          advancePaymentAccountId = await financeService.createAccount({
+            code: '2250', name: 'Advance Customer Payments',
+            type: 'LIABILITY', description: 'Prepayments against future invoices'
+          }).then(a => a.id)
+        }
+        journalLines.push({ accountId: advancePaymentAccountId, debit: 0, credit: input.amount, memo: 'Advance payment (no order)' })
       }
+
+      const customer = input.customerId ? await prisma.customer.findUnique({ where: { id: input.customerId }, select: { name: true } }) : null
+      const customerLabel = customer ? ` (${customer.name})` : ''
+      await financeService.postJournalEntry({
+        description: `${input.salesOrderId ? 'Payment received' : 'Advance payment received'}${customerLabel} - ${input.referenceNumber || `₦${input.amount.toLocaleString()}`}`,
+        sourceModule: 'PAYMENT',
+        sourceId: input.salesOrderId,
+        reference: input.referenceNumber,
+        date: input.date,
+        lines: journalLines
+      }, tx)
 
       return { payment: payment || overpaymentDeposit, overpayment }
     })

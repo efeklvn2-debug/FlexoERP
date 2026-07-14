@@ -3,6 +3,7 @@ import { salesOrderService, paymentService, invoiceService, coreBuybackService }
 import { generateInvoicePdf, generateReceiptPdf } from './pdf-service'
 import { receiptRepository } from './repository'
 import { logger } from '../../logger'
+import { sendError } from '../../middleware/errorHandler'
 
 console.log('[CONTROLLER] Loading salesOrderController...')
 
@@ -18,8 +19,7 @@ export const salesOrderController = {
       })
       res.json({ data: orders })
     } catch (error: any) {
-      logger.error(error, 'Error fetching sales orders')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch orders' })
+      sendError(res, error, 'salesOrders.getOrders')
     }
   },
 
@@ -29,8 +29,7 @@ export const salesOrderController = {
       const order = await salesOrderService.getOrderById(id)
       res.json({ data: order })
     } catch (error: any) {
-      logger.error(error, 'Error fetching sales order')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch order' })
+      sendError(res, error, 'salesOrders.getOrderById')
     }
   },
 
@@ -39,8 +38,7 @@ export const salesOrderController = {
       const order = await salesOrderService.createOrder(req.body, (req as any).user?.id)
       res.status(201).json({ data: order })
     } catch (error: any) {
-      logger.error(error, 'Error creating sales order')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create order' })
+      sendError(res, error, 'salesOrders.createOrder')
     }
   },
 
@@ -50,8 +48,7 @@ export const salesOrderController = {
       const order = await salesOrderService.updateOrder(id, req.body)
       res.json({ data: order })
     } catch (error: any) {
-      logger.error(error, 'Error updating sales order')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update order' })
+      sendError(res, error, 'salesOrders.updateOrder')
     }
   },
 
@@ -62,8 +59,7 @@ export const salesOrderController = {
       const order = await salesOrderService.approveOrder(id, (req as any).user?.id, date)
       res.json({ data: order })
     } catch (error: any) {
-      logger.error(error, 'Error approving sales order')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to approve order' })
+      sendError(res, error, 'salesOrders.approveOrder')
     }
   },
 
@@ -73,8 +69,7 @@ export const salesOrderController = {
       const result = await salesOrderService.startProduction(id, req.body, (req as any).user?.id)
       res.json({ data: result })
     } catch (error: any) {
-      logger.error(error, 'Error starting production')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to start production' })
+      sendError(res, error, 'salesOrders.startProduction')
     }
   },
 
@@ -85,8 +80,7 @@ export const salesOrderController = {
       const order = await salesOrderService.cancelOrder(id, (req as any).user?.id, date)
       res.json({ data: order })
     } catch (error: any) {
-      logger.error(error, 'Error cancelling sales order')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to cancel order' })
+      sendError(res, error, 'salesOrders.cancelOrder')
     }
   },
 
@@ -96,8 +90,7 @@ export const salesOrderController = {
       const order = await salesOrderService.markReadyForPickup(id)
       res.json({ data: order })
     } catch (error: any) {
-      logger.error(error, 'Error marking order ready')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.markReady')
     }
   },
 
@@ -108,8 +101,7 @@ export const salesOrderController = {
       const order = await salesOrderService.recordPickup(id, (req as any).user?.id, rollIds, packingBags, packingBagPrice, date)
       res.json({ data: order })
     } catch (error: any) {
-      logger.error(error, 'Error recording pickup')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.recordPickup')
     }
   },
 
@@ -118,8 +110,7 @@ export const salesOrderController = {
       const customers = await salesOrderService.getCustomers()
       res.json({ data: customers })
     } catch (error: any) {
-      logger.error(error, 'Error fetching customers')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch customers' })
+      sendError(res, error, 'salesOrders.getCustomers')
     }
   },
 
@@ -129,8 +120,7 @@ export const salesOrderController = {
       const customer = await salesOrderService.getCustomerById(customerId)
       res.json({ data: customer })
     } catch (error: any) {
-      logger.error(error, 'Error fetching customer')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch customer' })
+      sendError(res, error, 'salesOrders.getCustomerById')
     }
   },
 
@@ -139,8 +129,7 @@ export const salesOrderController = {
       const customer = await salesOrderService.createCustomer(req.body, (req as any).user?.id)
       res.status(201).json({ data: customer })
     } catch (error: any) {
-      logger.error(error, 'Error creating customer')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create customer' })
+      sendError(res, error, 'salesOrders.createCustomer')
     }
   },
 
@@ -150,8 +139,7 @@ export const salesOrderController = {
       const customer = await salesOrderService.updateCustomer(customerId, req.body)
       res.json({ data: customer })
     } catch (error: any) {
-      logger.error(error, 'Error updating customer')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update customer' })
+      sendError(res, error, 'salesOrders.updateCustomer')
     }
   },
 
@@ -161,8 +149,7 @@ export const salesOrderController = {
       const balance = await salesOrderService.getCustomerBalance(customerId)
       res.json({ data: balance })
     } catch (error: any) {
-      logger.error(error, 'Error fetching customer balance')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getCustomerBalance')
     }
   },
 
@@ -172,8 +159,7 @@ export const salesOrderController = {
       const aging = await salesOrderService.getCustomerAging(customerId)
       res.json({ data: aging })
     } catch (error: any) {
-      logger.error(error, 'Error fetching customer aging')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getCustomerAging')
     }
   },
 
@@ -182,8 +168,7 @@ export const salesOrderController = {
       const balances = await salesOrderService.getAllCustomerBalances()
       res.json({ data: balances })
     } catch (error: any) {
-      logger.error(error, 'Error fetching customer balances')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getAllCustomerBalances')
     }
   },
 
@@ -193,8 +178,7 @@ export const salesOrderController = {
       const transactions = await salesOrderService.getCustomerTransactions(customerId)
       res.json({ data: transactions })
     } catch (error: any) {
-      logger.error(error, 'Error fetching customer transactions')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getCustomerTransactions')
     }
   },
 
@@ -209,8 +193,7 @@ export const salesOrderController = {
       const result = await salesOrderService.adjustDeposit(customerId, amount, userId)
       res.json({ data: result })
     } catch (error: any) {
-      logger.error(error, 'Error adjusting deposit')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.adjustDeposit')
     }
   },
 
@@ -225,8 +208,7 @@ export const salesOrderController = {
       const receipt = await salesOrderService.generateReceipt(id, userId)
       res.json({ data: receipt })
     } catch (error: any) {
-      logger.error(error, 'Error generating receipt')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.generateReceipt')
     }
   },
 
@@ -238,8 +220,7 @@ export const salesOrderController = {
       res.setHeader('Content-Disposition', `attachment; filename="receipt-${id.slice(0, 8)}.pdf"`)
       res.send(pdfBuffer)
     } catch (error: any) {
-      logger.error(error, 'Error downloading receipt PDF')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.downloadReceiptPdf')
     }
   },
 }
@@ -250,8 +231,7 @@ export const paymentController = {
       const payment = await paymentService.recordPayment(req.body, (req as any).user?.id)
       res.status(201).json({ data: payment })
     } catch (error: any) {
-      logger.error(error, 'Error recording payment')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to record payment' })
+      sendError(res, error, 'salesOrders.recordPayment')
     }
   },
 
@@ -266,8 +246,7 @@ export const paymentController = {
       })
       res.json({ data: payments })
     } catch (error: any) {
-      logger.error(error, 'Error fetching payments')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getPayments')
     }
   },
 
@@ -277,8 +256,7 @@ export const paymentController = {
       const payments = await paymentService.getPaymentsBySalesOrder(salesOrderId)
       res.json({ data: payments })
     } catch (error: any) {
-      logger.error(error, 'Error fetching payments')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getPaymentsBySalesOrder')
     }
   },
 
@@ -288,8 +266,7 @@ export const paymentController = {
       const payments = await paymentService.getPaymentsByCustomer(customerId)
       res.json({ data: payments })
     } catch (error: any) {
-      logger.error(error, 'Error fetching payments')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getPaymentsByCustomer')
     }
   }
 }
@@ -300,8 +277,7 @@ export const invoiceController = {
       const invoice = await invoiceService.createInvoice(req.body, (req as any).user?.id)
       res.status(201).json({ data: invoice })
     } catch (error: any) {
-      logger.error(error, 'Error creating invoice')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create invoice' })
+      sendError(res, error, 'salesOrders.createInvoice')
     }
   },
 
@@ -312,8 +288,7 @@ export const invoiceController = {
       const invoice = await invoiceService.issueInvoice(id, date)
       res.json({ data: invoice })
     } catch (error: any) {
-      logger.error(error, 'Error issuing invoice')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.issueInvoice')
     }
   },
 
@@ -323,8 +298,7 @@ export const invoiceController = {
       const invoice = await invoiceService.getInvoiceById(id)
       res.json({ data: invoice })
     } catch (error: any) {
-      logger.error(error, 'Error fetching invoice')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getInvoice')
     }
   },
 
@@ -337,8 +311,7 @@ export const invoiceController = {
       })
       res.json({ data: invoices })
     } catch (error: any) {
-      logger.error(error, 'Error fetching invoices')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getInvoices')
     }
   },
 
@@ -349,8 +322,7 @@ export const invoiceController = {
       const payment = await invoiceService.addPayment(id, amount, date, reference, notes, paymentMethod)
       res.status(201).json({ data: payment })
     } catch (error: any) {
-      logger.error(error, 'Error recording payment')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.addPayment')
     }
   },
 
@@ -362,8 +334,7 @@ export const invoiceController = {
       res.setHeader('Content-Disposition', `attachment; filename="invoice-${id.slice(0, 8)}.pdf"`)
       res.send(pdfBuffer)
     } catch (error: any) {
-      logger.error(error, 'Error generating invoice PDF')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to generate PDF' })
+      sendError(res, error, 'salesOrders.downloadInvoicePdf')
     }
   }
 }
@@ -374,8 +345,7 @@ export const coreBuybackController = {
       const buyback = await coreBuybackService.recordCoreBuyback(req.body, (req as any).user?.id)
       res.status(201).json({ data: buyback })
     } catch (error: any) {
-      logger.error(error, 'Error recording core buyback')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.recordCoreBuyback')
     }
   },
 
@@ -389,8 +359,7 @@ export const coreBuybackController = {
       })
       res.json({ data: buybacks })
     } catch (error: any) {
-      logger.error(error, 'Error fetching core buybacks')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.getCoreBuybacks')
     }
   },
 
@@ -413,8 +382,7 @@ export const coreBuybackController = {
 
       res.status(201).json({ data: result })
     } catch (error: any) {
-      logger.error(error, 'Error selling packing bags')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed' })
+      sendError(res, error, 'salesOrders.sellPackingBags')
     }
   },
 }

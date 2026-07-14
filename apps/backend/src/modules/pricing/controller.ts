@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { pricingService, priceListSchema } from './service'
 import { logger } from '../../logger'
+import { sendError } from '../../middleware/errorHandler'
 
 export const pricingController = {
   async getMaterialsWithPrices(req: Request, res: Response) {
@@ -9,8 +10,7 @@ export const pricingController = {
       const materials = await pricingService.getMaterialsWithPrices(includeInactive)
       res.json({ data: materials })
     } catch (error: any) {
-      logger.error(error, 'Error fetching materials with prices')
-      res.status(500).json({ error: 'Failed to fetch materials' })
+      sendError(res, error, 'pricing.getMaterialsWithPrices')
     }
   },
 
@@ -19,8 +19,7 @@ export const pricingController = {
       const priceLists = await pricingService.getPriceLists()
       res.json({ data: priceLists })
     } catch (error: any) {
-      logger.error(error, 'Error fetching price lists')
-      res.status(500).json({ error: 'Failed to fetch price lists' })
+      sendError(res, error, 'pricing.getPriceLists')
     }
   },
 
@@ -34,8 +33,7 @@ export const pricingController = {
       const priceList = await pricingService.createPriceList(parseResult.data)
       res.status(201).json({ data: priceList })
     } catch (error: any) {
-      logger.error(error, 'Error creating price list')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create price list' })
+      sendError(res, error, 'pricing.createPriceList')
     }
   },
 
@@ -50,8 +48,7 @@ export const pricingController = {
       const priceList = await pricingService.updatePriceList(id, parseResult.data)
       res.json({ data: priceList })
     } catch (error: any) {
-      logger.error(error, 'Error updating price list')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update price list' })
+      sendError(res, error, 'pricing.updatePriceList')
     }
   },
 
@@ -61,8 +58,7 @@ export const pricingController = {
       await pricingService.deletePriceList(id)
       res.json({ success: true })
     } catch (error: any) {
-      logger.error(error, 'Error deleting price list')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete price list' })
+      sendError(res, error, 'pricing.deletePriceList')
     }
   }
 }

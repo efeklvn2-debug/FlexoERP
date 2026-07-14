@@ -76,9 +76,14 @@ export interface PayablesSummary {
 
 export interface ProfitSnapshot {
   revenueThisMonth: number
+  revenueBreakdown: {
+    salesRevenue: number
+    packingRevenue: number
+    otherIncome: number
+  }
   materialCostThisMonth: number
   expensesThisMonth: number
-  estimatedProfit: number
+  netProfit: number
 }
 
 export interface FinanceDashboard {
@@ -201,7 +206,10 @@ export const financeApi = {
   recognizeDeferredCogs: (orderId: string) => api.post<{ success: boolean; amount: number }>(`/finance/deferred-cogs/${orderId}/recognize`, {}),
 
   // Reports
-  getDashboard: () => api.get<FinanceDashboard>('/finance/dashboard'),
+  getDashboard: (month?: string) => {
+    const query = month ? `?month=${month}` : ''
+    return api.get<FinanceDashboard>(`/finance/dashboard${query}`)
+  },
   getVatSummary: (dateFrom?: string, dateTo?: string) => {
     const query = new URLSearchParams()
     if (dateFrom) query.append('dateFrom', dateFrom)

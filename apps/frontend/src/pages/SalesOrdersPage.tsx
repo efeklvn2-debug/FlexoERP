@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNotification } from '../contexts/NotificationContext'
 import { useNavigate } from 'react-router-dom'
 import { salesOrderApi, SalesOrder, PaymentTransaction, Invoice, CustomerBalance, Receipt, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, InvoiceStatus, DeliveryMethod, Customer } from '../api/salesOrders'
 import { pricingApi } from '../api/pricing'
@@ -64,6 +65,7 @@ interface MaterialType {
 
 export function SalesOrdersPage() {
   const navigate = useNavigate()
+  const notify = useNotification()
   const [activeTab, setActiveTab] = useState<Tab>('orders')
   const [orders, setOrders] = useState<SalesOrder[]>([])
   const [payments, setPayments] = useState<PaymentTransaction[]>([])
@@ -86,8 +88,6 @@ export function SalesOrdersPage() {
   const [materials, setMaterials] = useState<MaterialType[]>([])
   const [allMaterials, setAllMaterials] = useState<MaterialType[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
 
   const [rollWeight, setRollWeight] = useState(15)
 
@@ -182,7 +182,6 @@ export function SalesOrdersPage() {
 
   const loadData = async () => {
     setLoading(true)
-    setError('')
     try {
       console.log('Loading data...')
       const [ordersRes, customersRes, materialsRes] = await Promise.all([
@@ -228,7 +227,7 @@ export function SalesOrdersPage() {
       loadCustomerBalances()
     } catch (err: any) {
       console.error('Load data error:', err)
-      setError(err.message || 'Failed to load orders')
+      notify.error(err.message || 'Failed to load orders')
     }
     setLoading(false)
   }
@@ -572,7 +571,7 @@ export function SalesOrdersPage() {
       setTimeout(() => { win.focus(); win.print() }, 500)
     } catch (err: any) {
       console.error('Failed to print invoice:', err)
-      setError(err.message || 'Failed to print invoice')
+      notify.error(err.message || 'Failed to print invoice')
     } finally {
       setGeneratingInvoice(null)
     }
@@ -585,7 +584,7 @@ export function SalesOrdersPage() {
       await salesOrderApi.downloadInvoicePdf(invoice.id)
     } catch (err: any) {
       console.error('Failed to download invoice:', err)
-      setError(err.message || 'Failed to download invoice')
+      notify.error(err.message || 'Failed to download invoice')
     } finally {
       setGeneratingInvoice(null)
     }
@@ -741,11 +740,10 @@ export function SalesOrdersPage() {
 
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    if (!orderForm.customerId) { setError('Customer is required'); return }
-    if (!orderForm.materialTypeId) { setError('Material type is required'); return }
-    if (!orderForm.quantity || orderForm.quantity <= 0) { setError('Quantity is required'); return }
-    if (!orderForm.unitPrice || orderForm.unitPrice <= 0) { setError('Unit price is required'); return }
+    if (!orderForm.customerId) { notify.error('Customer is required'); return }
+    if (!orderForm.materialTypeId) { notify.error('Material type is required'); return }
+    if (!orderForm.quantity || orderForm.quantity <= 0) { notify.error('Quantity is required'); return }
+    if (!orderForm.unitPrice || orderForm.unitPrice <= 0) { notify.error('Unit price is required'); return }
 
     const quantityOrdered = orderForm.quantityType === 'rolls' 
       ? orderForm.quantity * rollWeight 
@@ -774,15 +772,16 @@ export function SalesOrdersPage() {
       })
       console.log('Order response:', res)
       if (res.error) { 
-        setError(res.error.message); 
+        notify.error(res.error.message); 
         return 
       }
+      notify.success('Order created successfully')
       setShowOrderModal(false)
       setOrderForm({ customerId: '', materialTypeId: '', quantityType: 'rolls', quantity: 0, unitPrice: 0, deliveryMethod: 'PICKUP', shippingAddress: '', expectedDeliveryDate: '', notes: '' })
       loadData()
     } catch (err: any) {
       console.error('Create order error:', err)
-      setError(err.message || 'Failed to create order')
+      notify.error(err.message || 'Failed to create order')
     }
   }
 
@@ -802,9 +801,8 @@ export function SalesOrdersPage() {
 
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    if (!paymentForm.amount || paymentForm.amount <= 0) { setError('Amount is required'); return }
-    if (!paymentForm.customerId) { setError('Customer is required'); return }
+    if (!paymentForm.amount || paymentForm.amount <= 0) { notify.error('Amount is required'); return }
+    if (!paymentForm.customerId) { notify.error('Customer is required'); return }
 
     const isPayment = paymentModalMode === 'payment' && paymentForm.salesOrderId
 
@@ -819,13 +817,12 @@ export function SalesOrdersPage() {
         notes: paymentForm.notes || undefined,
         date: paymentForm.date || undefined
       })
-      if (res.error) { setError(res.error.message); return }
+      if (res.error) { notify.error(res.error.message); return }
       const overpayment = (res.data as any)?.overpayment || 0
       const msg = isPayment
         ? `Payment of ₦${paymentForm.amount.toLocaleString()} recorded` + (overpayment > 0 ? `. ₦${overpayment.toLocaleString()} overpaid — applied as advance deposit.` : '')
         : `Deposit of ₦${paymentForm.amount.toLocaleString()} recorded`
-      setSuccess(msg)
-      setTimeout(() => setSuccess(''), 5000)
+      notify.success(msg)
       setShowPaymentModal(false)
       setShowInvoiceModal(false)
       setPaymentForm({ salesOrderId: '', customerId: '', paymentMethod: 'Cash', amount: 0, referenceNumber: '', notes: '', date: new Date().toISOString().split('T')[0] })
@@ -833,16 +830,15 @@ export function SalesOrdersPage() {
       loadPayments()
       loadInvoices()
     } catch (err: any) {
-      setError(err.message || 'Failed to record payment')
+      notify.error(err.message || 'Failed to record payment')
     }
   }
 
   const handlePackingBagSale = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    if (!packingBagForm.customerId) { setError('Customer is required'); return }
-    if (packingBagForm.quantity <= 0) { setError('Quantity must be greater than 0'); return }
-    if (packingBagForm.unitPrice <= 0) { setError('Unit price must be greater than 0'); return }
+    if (!packingBagForm.customerId) { notify.error('Customer is required'); return }
+    if (packingBagForm.quantity <= 0) { notify.error('Quantity must be greater than 0'); return }
+    if (packingBagForm.unitPrice <= 0) { notify.error('Unit price must be greater than 0'); return }
 
     if (packingBagDeposit > 0) {
       setShowDepositConfirm(true)
@@ -866,16 +862,16 @@ export function SalesOrdersPage() {
       })
       
       if (res.error) { 
-        setError(res.error.message); 
+        notify.error(res.error.message); 
         return 
       }
       
       const data = res.data as any
-      let msg = `Packing bag sale recorded!\nQuantity: ${packingBagForm.quantity} bags\nTotal: ₦${(packingBagForm.quantity * packingBagForm.unitPrice).toLocaleString()}`
+      let msg = `Packing bag sale recorded: ${packingBagForm.quantity} bags, ₦${(packingBagForm.quantity * packingBagForm.unitPrice).toLocaleString()}`
       if (data.depositApplied > 0) {
-        msg += `\nDeposit applied: ₦${data.depositApplied.toLocaleString()}`
+        msg += ` (₦${data.depositApplied.toLocaleString()} deposit applied)`
       }
-      alert(msg)
+      notify.success(msg)
       
       setPackingBagForm({
         customerId: '',
@@ -889,15 +885,14 @@ export function SalesOrdersPage() {
       
       loadData()
     } catch (err: any) {
-      setError(err.message || 'Failed to record packing bag sale')
+      notify.error(err.message || 'Failed to record packing bag sale')
     }
   }
 
   const handleRecordCoreBuyback = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    if (!coreBuybackForm.coresQuantity || coreBuybackForm.coresQuantity <= 0) { setError('Core quantity is required'); return }
-    if (!coreBuybackForm.customerId && !coreBuybackForm.sellerName) { setError('Customer or seller name is required'); return }
+    if (!coreBuybackForm.coresQuantity || coreBuybackForm.coresQuantity <= 0) { notify.error('Core quantity is required'); return }
+    if (!coreBuybackForm.customerId && !coreBuybackForm.sellerName) { notify.error('Customer or seller name is required'); return }
 
     console.log('Recording core buyback:', coreBuybackForm)
 
@@ -911,7 +906,8 @@ export function SalesOrdersPage() {
         notes: coreBuybackForm.notes || undefined
       })
       console.log('Core buyback response:', res)
-      if (res.error) { setError(res.error.message); return }
+      if (res.error) { notify.error(res.error.message); return }
+      notify.success('Core buyback recorded')
       setShowCoreBuybackModal(false)
       const stored = localStorage.getItem('appSettings')
       let defaultRate = 150
@@ -921,7 +917,7 @@ export function SalesOrdersPage() {
       loadData()
     } catch (err: any) {
       console.error('Core buyback error:', err)
-      setError(err.message || 'Failed to record core buyback')
+      notify.error(err.message || 'Failed to record core buyback')
     }
   }
 
@@ -938,7 +934,8 @@ export function SalesOrdersPage() {
         case 'ready': res = await salesOrderApi.markReady(orderId); break
         case 'pickup': res = await salesOrderApi.recordPickup(orderId); break
       }
-      if (res?.error) { setError(res.error.message); return }
+      if (res?.error) { notify.error(res.error.message); return }
+      notify.success(`${action === 'approve' ? 'Order approved' : action === 'cancel' ? 'Order cancelled' : action === 'ready' ? 'Order marked ready' : 'Pickup recorded'} successfully`)
       loadData()
       if (showOrderDetails?.id === orderId) {
         const updated = await salesOrderApi.getOrderById(orderId)
@@ -946,7 +943,7 @@ export function SalesOrdersPage() {
         if (order) setShowOrderDetails(order)
       }
     } catch (err: any) {
-      setError(err.message || `Failed to ${action} order`)
+      notify.error(err.message || `Failed to ${action} order`)
     }
   }
 
@@ -956,7 +953,8 @@ export function SalesOrdersPage() {
         salesOrderApi.createInvoice({ salesOrderId: orderId }),
         settingsApi.getSettings()
       ])
-      if (res.error) { setError(res.error.message); return }
+      if (res.error) { notify.error(res.error.message); return }
+      notify.success('Invoice created')
       const invoice = (res.data as any)?.data || res.data
       if (invoice) {
         const settingsData = (settingsRes.data as any)?.data ?? settingsRes.data
@@ -975,7 +973,7 @@ export function SalesOrdersPage() {
         }
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to create invoice')
+      notify.error(err.message || 'Failed to create invoice')
     }
   }
 
@@ -988,7 +986,7 @@ export function SalesOrdersPage() {
         setShowProductionJobModal(true)
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load production job')
+      notify.error(err.message || 'Failed to load production job')
     }
   }
 
@@ -1059,15 +1057,15 @@ export function SalesOrdersPage() {
 
   const handleStartProduction = async () => {
     if (!productionOrder) return
-    if (!productionForm.machine) { setError('Machine is required'); return }
-    if (productionForm.rollIds.length === 0) { setError('Select at least one parent roll'); return }
+    if (!productionForm.machine) { notify.error('Machine is required'); return }
+    if (productionForm.rollIds.length === 0) { notify.error('Select at least one parent roll'); return }
 
     const weights = productionForm.printedRollWeights.split(/[\s,]+/)
       .map(w => parseFloat(w))
       .filter(w => !isNaN(w) && w > 0)
 
     if (weights.length === 0 || weights.length > 35) {
-      setError('Enter 1-35 roll weights (space or comma-separated)')
+      notify.error('Enter 1-35 roll weights (space or comma-separated)')
       return
     }
 
@@ -1076,7 +1074,7 @@ export function SalesOrdersPage() {
       sum + Math.max(0, Number(r.remainingWeight || 0) + Number(r.weight || 0) * 0.10), 0)
     const totalPrintedWeight = weights.reduce((sum, w) => sum + w, 0)
     if (totalPrintedWeight > totalEffectiveCapacity) {
-      setError(`Cannot create job: Printed weight (${totalPrintedWeight.toFixed(2)}kg) exceeds 110% effective capacity (${totalEffectiveCapacity.toFixed(2)}kg)`)
+      notify.error(`Cannot create job: Printed weight (${totalPrintedWeight.toFixed(2)}kg) exceeds 110% effective capacity (${totalEffectiveCapacity.toFixed(2)}kg)`)
       return
     }
 
@@ -1094,7 +1092,8 @@ export function SalesOrdersPage() {
         rollConsumption: Object.keys(productionForm.rollConsumption).some(k => productionForm.rollConsumption[k] > 0) ? productionForm.rollConsumption : undefined,
         notes: productionForm.notes || undefined
       })
-      if (res.error) { setError(res.error.message); return }
+      if (res.error) { notify.error(res.error.message); return }
+      notify.success('Production started')
       setShowProductionModal(false)
       setProductionOrder(null)
       loadData()
@@ -1104,13 +1103,13 @@ export function SalesOrdersPage() {
         if (order) setShowOrderDetails(order)
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to start production')
+      notify.error(err.message || 'Failed to start production')
     }
   }
 
   const handleRecordPickup = async () => {
     if (!productionOrder) return
-    if (selectedRollIds.length === 0) { setError('Select at least one roll to pick up'); return }
+    if (selectedRollIds.length === 0) { notify.error('Select at least one roll to pick up'); return }
 
     try {
       const res = await salesOrderApi.recordPickup(
@@ -1120,7 +1119,8 @@ export function SalesOrdersPage() {
         pickupForm.packingBags > 0 && pickupForm.packingBagPrice > 0 ? pickupForm.packingBagPrice : undefined,
         pickupForm.date || undefined
       )
-      if (res.error) { setShowPickupModal(false); setProductionOrder(null); setPickupRolls([]); setSelectedRollIds([]); setError(res.error.message); return }
+      if (res.error) { setShowPickupModal(false); setProductionOrder(null); setPickupRolls([]); setSelectedRollIds([]); notify.error(res.error.message); return }
+      notify.success('Pickup recorded')
       setShowPickupModal(false)
       setProductionOrder(null)
       setPickupRolls([])
@@ -1135,7 +1135,7 @@ export function SalesOrdersPage() {
       setShowPickupModal(false); setProductionOrder(null)
       setPickupRolls([])
       setSelectedRollIds([])
-      setError(err.message || 'Failed to record pickup')
+      notify.error(err.message || 'Failed to record pickup')
     }
   }
 
@@ -1239,9 +1239,6 @@ export function SalesOrdersPage() {
             </button>
           ))}
         </div>
-
-        {success && <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-green-700 mb-3">{success}</div>}
-        {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
 
         {loading ? (
           <div className="text-center py-12">Loading...</div>

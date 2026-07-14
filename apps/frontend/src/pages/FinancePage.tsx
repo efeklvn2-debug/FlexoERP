@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNotification } from '../contexts/NotificationContext'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
 import { financeApi, Account, JournalEntry, AccountBalance, FinanceDashboard, VatSummary, ProfitSummary, DeferredCogsSummary, GeneralLedger } from '../api/finance'
@@ -25,6 +26,7 @@ type TabType = 'dashboard' | 'accounts' | 'journal' | 'balances' | 'vat' | 'prof
 type ExpensePeriod = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-month' | 'last-month' | 'last-3-months' | ''
 
 export function FinancePage() {
+  const notify = useNotification()
   const [activeTab, setActiveTab] = useState<TabType>('dashboard')
   const [loading, setLoading] = useState(true)
   const [dashboard, setDashboard] = useState<FinanceDashboard | null>(null)
@@ -34,8 +36,9 @@ export function FinancePage() {
   const [vatSummary, setVatSummary] = useState<VatSummary | null>(null)
   const [profitSummary, setProfitSummary] = useState<ProfitSummary | null>(null)
   const [deferredCogs, setDeferredCogs] = useState<DeferredCogsSummary | null>(null)
+  const [dashboardPeriod, setDashboardPeriod] = useState('')
+  const [obeBalance, setObeBalance] = useState<number | null>(null)
   const [accountTypeFilter, setAccountTypeFilter] = useState('')
-  const [error, setError] = useState<string | null>(null)
   const [reversing, setReversing] = useState<string | null>(null)
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null)
   const [ledgerModal, setLedgerModal] = useState<{ accountId: string; code: string; name: string } | null>(null)
@@ -85,20 +88,74 @@ export function FinancePage() {
     notes: ''
   })
 
+  const [showJournalModal, setShowJournalModal] = useState(false)
+  const [savingJournal, setSavingJournal] = useState(false)
+  const [journalForm, setJournalForm] = useState({
+    description: '',
+    date: new Date().toISOString().split('T')[0],
+    reference: ''
+  })
+  const [journalLines, setJournalLines] = useState<{ accountId: string; debit: number; credit: number; memo: string }[]>([
+    { accountId: '', debit: 0, credit: 0, memo: '' },
+    { accountId: '', debit: 0, credit: 0, memo: '' }
+  ])
+
+  const [showAddAccountModal, setShowAddAccountModal] = useState(false)
+  const [savingAccount, setSavingAccount] = useState(false)
+  const [accountForm, setAccountForm] = useState<{ code: string; name: string; type: Account['type'] | ''; description: string }>({
+    code: '', name: '', type: '', description: ''
+  })
+
   const userStr = localStorage.getItem('user')
   const user = userStr ? JSON.parse(userStr) : null
   const canReverse = user?.role === 'ADMIN' || user?.role === 'MANAGER'
 
-  const loadDashboard = async () => {
-    const res = await financeApi.getDashboard()
-    if ((res.data as any)?.data) setDashboard((res.data as any).data)
-    else setError(res.error?.message || 'Failed to load dashboard')
+  const drillToJournal = (day?: Date) => {
+    const d = day || new Date()
+    setJournalDateFrom(d.toISOString().split('T')[0])
+    setJournalDateTo(d.toISOString().split('T')[0])
+    setJournalSourceModule('')
+    setActiveTab('journal')
+  }
+
+  const formatMonth = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
+  const prevMonth = () => {
+    const d = new Date()
+    d.setMonth(d.getMonth() - 1)
+    return formatMonth(d)
+  }
+
+  const loadDashboard = async (month?: string) => {
+    try {
+      const [dashboardRes, deferredRes, vatRes, accountsRes] = await Promise.all([
+        financeApi.getDashboard(month),
+        financeApi.getDeferredCogsSummary(),
+        financeApi.getVatSummary(),
+        financeApi.getAccounts()
+      ])
+      if ((dashboardRes.data as any)?.data) setDashboard((dashboardRes.data as any).data)
+      else notify.error(dashboardRes.error?.message || 'Failed to load dashboard')
+      if ((deferredRes.data as any)?.data) setDeferredCogs((deferredRes.data as any).data)
+      if ((vatRes.data as any)?.data) setVatSummary((vatRes.data as any).data)
+      if ((accountsRes.data as any)?.data) {
+        const accs = (accountsRes.data as any).data
+        setAccounts(accs)
+        const obeAcct = accs.find((a: Account) => a.code === '3000')
+        if (obeAcct) {
+          const balRes = await financeApi.getAccountBalance(obeAcct.id)
+          if ((balRes.data as any)?.data) setObeBalance(Number((balRes.data as any).data.balance))
+        }
+      }
+    } catch (err: any) {
+      notify.error(err?.message || 'Failed to load dashboard')
+    }
   }
 
   const loadAccounts = async () => {
     const res = await financeApi.getAccounts()
     if (res.data) setAccounts((res.data as any).data || [])
-    else setError(res.error?.message || 'Failed to load accounts')
+    else notify.error(res.error?.message || 'Failed to load accounts')
   }
 
   const loadJournal = async (dateFrom?: string, dateTo?: string, sourceModule?: string) => {
@@ -109,13 +166,13 @@ export function FinancePage() {
       limit: 1000
     })
     if (res.data) setJournalEntries((res.data as any).data || [])
-    else setError(res.error?.message || 'Failed to load journal')
+    else notify.error(res.error?.message || 'Failed to load journal')
   }
 
   const loadBalances = async () => {
     const res = await financeApi.getAllBalances()
     if (res.data) setBalances((res.data as any).data || [])
-    else setError(res.error?.message || 'Failed to load balances')
+    else notify.error(res.error?.message || 'Failed to load balances')
   }
 
   const handleViewLedger = async (accountId: string, code: string, name: string) => {
@@ -127,26 +184,26 @@ export function FinancePage() {
       const data = (res.data as any).data
       data.transactions = [...data.transactions].reverse()
       setLedgerData(data)
-    } else setError(res.error?.message || 'Failed to load ledger')
+    } else notify.error(res.error?.message || 'Failed to load ledger')
     setLoadingLedger(false)
   }
 
   const loadVat = async () => {
     const res = await financeApi.getVatSummary()
     if ((res.data as any)?.data) setVatSummary((res.data as any).data)
-    else setError(res.error?.message || 'Failed to load VAT')
+    else notify.error(res.error?.message || 'Failed to load VAT')
   }
 
   const loadProfit = async () => {
     const res = await financeApi.getProfitSummary()
     if ((res.data as any)?.data) setProfitSummary((res.data as any).data as any)
-    else setError(res.error?.message || 'Failed to load profit')
+    else notify.error(res.error?.message || 'Failed to load profit')
   }
 
   const loadDeferredCogs = async () => {
     const res = await financeApi.getDeferredCogsSummary()
     if ((res.data as any)?.data) setDeferredCogs((res.data as any).data)
-    else setError(res.error?.message || 'Failed to load Deferred COGS')
+    else notify.error(res.error?.message || 'Failed to load Deferred COGS')
   }
 
   const applyExpensePeriod = (period: ExpensePeriod) => {
@@ -209,7 +266,7 @@ export function FinancePage() {
       sourceModule: 'EXPENSE'
     })
     if (res.data) setExpenses((res.data as any).data || [])
-    else setError(res.error?.message || 'Failed to load expenses')
+    else notify.error(res.error?.message || 'Failed to load expenses')
   }
 
   const loadIncomes = async (dateFrom?: string, dateTo?: string) => {
@@ -219,7 +276,7 @@ export function FinancePage() {
       sourceModule: 'INCOME'
     })
     if (res.data) setIncomes((res.data as any).data || [])
-    else setError(res.error?.message || 'Failed to load incomes')
+    else notify.error(res.error?.message || 'Failed to load incomes')
   }
 
   const applyIncomePeriod = (period: ExpensePeriod) => {
@@ -278,11 +335,10 @@ export function FinancePage() {
   const handleRecordExpense = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!expenseForm.accountId || expenseForm.amount <= 0 || !expenseForm.description) {
-      setError('Account, amount, and description are required')
+      notify.error('Account, amount, and description are required')
       return
     }
     setSavingExpense(true)
-    setError(null)
 
     try {
       const allAccountsRes = await financeApi.getAccounts()
@@ -291,7 +347,7 @@ export function FinancePage() {
       const cashAccount = allAccounts.find((a: Account) => a.code === cashAccountCode)
 
       if (!cashAccount) {
-        setError(`Account ${cashAccountCode} (Cash/Bank) not found`)
+        notify.error(`Account ${cashAccountCode} (Cash/Bank) not found`)
         setSavingExpense(false)
         return
       }
@@ -315,6 +371,7 @@ export function FinancePage() {
       })
 
       if (res.data) {
+        notify.success('Journal entry posted')
         setShowExpenseModal(false)
         setExpenseForm({
           accountId: '',
@@ -327,10 +384,10 @@ export function FinancePage() {
         })
         loadExpenses(expenseDateFrom || undefined, expenseDateTo || undefined)
       } else {
-        setError(res.error?.message || 'Failed to record expense')
+        notify.error(res.error?.message || 'Failed to record expense')
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to record expense')
+      notify.error(err.message || 'Failed to record expense')
     }
     setSavingExpense(false)
   }
@@ -338,11 +395,10 @@ export function FinancePage() {
   const handleRecordIncome = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!incomeForm.accountId || incomeForm.amount <= 0 || !incomeForm.description) {
-      setError('Account, amount, and description are required')
+      notify.error('Account, amount, and description are required')
       return
     }
     setSavingIncome(true)
-    setError(null)
 
     try {
       const allAccountsRes = await financeApi.getAccounts()
@@ -351,7 +407,7 @@ export function FinancePage() {
       const cashAccount = allAccounts.find((a: Account) => a.code === cashAccountCode)
 
       if (!cashAccount) {
-        setError(`Account ${cashAccountCode} (Cash/Bank) not found`)
+        notify.error(`Account ${cashAccountCode} (Cash/Bank) not found`)
         setSavingIncome(false)
         return
       }
@@ -375,6 +431,7 @@ export function FinancePage() {
       })
 
       if (res.data) {
+        notify.success('Journal entry posted')
         setShowIncomeModal(false)
         setIncomeForm({
           accountId: '',
@@ -387,12 +444,79 @@ export function FinancePage() {
         })
         loadIncomes(incomeDateFrom || undefined, incomeDateTo || undefined)
       } else {
-        setError(res.error?.message || 'Failed to record income')
+        notify.error(res.error?.message || 'Failed to record income')
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to record income')
+      notify.error(err.message || 'Failed to record income')
     }
     setSavingIncome(false)
+  }
+
+  const handlePostJournalEntry = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!journalForm.description) {
+      notify.error('Description is required')
+      return
+    }
+    if (journalLines.length < 2) {
+      notify.error('At least 2 lines are required')
+      return
+    }
+    for (const [i, line] of journalLines.entries()) {
+      if (!line.accountId) {
+        notify.error(`Account is required on line ${i + 1}`)
+        return
+      }
+      if (line.debit < 0 || line.credit < 0) {
+        notify.error(`Negative amounts not allowed on line ${i + 1}`)
+        return
+      }
+    }
+    const totalDebit = journalLines.reduce((s, l) => s + l.debit, 0)
+    const totalCredit = journalLines.reduce((s, l) => s + l.credit, 0)
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      notify.error(`Total debits (${totalDebit.toFixed(2)}) must equal total credits (${totalCredit.toFixed(2)})`)
+      return
+    }
+
+    setSavingJournal(true)
+    try {
+      const ref = journalForm.reference || (() => {
+        const now = new Date()
+        const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+        const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
+        return `ADJ-${ymd}-${suffix}`
+      })()
+
+      const res = await financeApi.postJournalEntry({
+        description: journalForm.description,
+        sourceModule: 'ADJUSTMENT',
+        reference: ref,
+        date: journalForm.date,
+        lines: journalLines.map(l => ({
+          accountId: l.accountId,
+          debit: l.debit,
+          credit: l.credit,
+          memo: l.memo || journalForm.description
+        }))
+      })
+
+      if (res.data) {
+        notify.success('Journal entry posted')
+        setShowJournalModal(false)
+        setJournalForm({ description: '', date: new Date().toISOString().split('T')[0], reference: '' })
+        setJournalLines([
+          { accountId: '', debit: 0, credit: 0, memo: '' },
+          { accountId: '', debit: 0, credit: 0, memo: '' }
+        ])
+        await loadJournal(journalDateFrom || undefined, journalDateTo || undefined, journalSourceModule || undefined)
+      } else {
+        notify.error(res.error?.message || 'Failed to post journal entry')
+      }
+    } catch (err: any) {
+      notify.error(err.message || 'Failed to post journal entry')
+    }
+    setSavingJournal(false)
   }
 
   const handleReverse = async (entryId: string, entryNumber: string) => {
@@ -400,19 +524,19 @@ export function FinancePage() {
     setReversing(entryId)
     const res = await financeApi.reverseJournalEntry(entryId)
     if (res.data) {
+      notify.success('Journal entry reversed')
       await loadJournal(journalDateFrom || undefined, journalDateTo || undefined, journalSourceModule || undefined)
     } else {
-      setError(res.error?.message || 'Failed to reverse journal entry')
+      notify.error(res.error?.message || 'Failed to reverse journal entry')
     }
     setReversing(null)
   }
 
   useEffect(() => {
     setLoading(true)
-    setError(null)
     
     const loaders: Record<TabType, () => Promise<void>> = {
-      dashboard: loadDashboard,
+      dashboard: () => loadDashboard(dashboardPeriod || undefined),
       expenses: async () => {
         await Promise.all([
           loadExpenses(expenseDateFrom || undefined, expenseDateTo || undefined),
@@ -426,7 +550,9 @@ export function FinancePage() {
         ])
       },
       accounts: loadAccounts,
-      journal: loadJournal,
+      journal: async () => {
+        await Promise.all([loadJournal(), loadAccounts()])
+      },
       balances: loadBalances,
       vat: loadVat,
       profit: loadProfit,
@@ -501,12 +627,6 @@ export function FinancePage() {
           </nav>
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-            {error}
-          </div>
-        )}
-
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -516,33 +636,92 @@ export function FinancePage() {
             {/* Dashboard Tab */}
             {activeTab === 'dashboard' && dashboard && (
               <div className="space-y-6">
+                {/* OBE Warning Banner */}
+                {obeBalance !== null && Math.abs(obeBalance) > 0.01 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                    <svg className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-amber-800">Opening Balance Equity (3000) has a balance</p>
+                      <p className="text-xs text-amber-700 mt-1">
+                        Account 3000 has a balance of {formatCurrency(obeBalance)}.
+                        This should be zeroed out via retained earnings once all opening balances are verified.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Period Selector */}
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-slate-500">
+                    As of {new Date().toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </p>
+                  <div className="flex gap-2">
+                    {[
+                      { key: '', label: 'This Month' },
+                      { key: prevMonth(), label: 'Last Month' },
+                    ].map(p => (
+                      <button key={p.key}
+                        onClick={() => { setDashboardPeriod(p.key); loadDashboard(p.key || undefined) }}
+                        className={`px-3 py-1.5 text-sm rounded-lg border ${
+                          dashboardPeriod === p.key
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Cash Position */}
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => setActiveTab('balances')}>
                   <h2 className="text-lg font-semibold text-slate-900 mb-4">Cash Position</h2>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="bg-slate-50 rounded-lg p-4">
-                      <p className="text-sm text-slate-500">Opening Balance</p>
+                      <p className="text-sm text-slate-500">Cash at Start of Day</p>
                       <p className="text-xl font-bold text-slate-900">{formatCurrency(dashboard?.cashPosition?.openingBalance ?? 0)}</p>
                     </div>
-                    <div className="bg-green-50 rounded-lg p-4">
+                    <div className="bg-green-50 rounded-lg p-4 cursor-pointer hover:bg-green-100"
+                      onClick={(e) => { e.stopPropagation(); drillToJournal() }}>
                       <p className="text-sm text-green-600">Money In Today</p>
                       <p className="text-xl font-bold text-green-700">+{formatCurrency(dashboard?.cashPosition?.moneyInToday ?? 0)}</p>
                     </div>
-                    <div className="bg-red-50 rounded-lg p-4">
+                    <div className="bg-red-50 rounded-lg p-4 cursor-pointer hover:bg-red-100"
+                      onClick={(e) => { e.stopPropagation(); drillToJournal() }}>
                       <p className="text-sm text-red-600">Money Out Today</p>
                       <p className="text-xl font-bold text-red-700">-{formatCurrency(dashboard?.cashPosition?.moneyOutToday ?? 0)}</p>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-4">
-                      <p className="text-sm text-blue-600">Closing Balance</p>
+                      <p className="text-sm text-blue-600">Cash at End of Day</p>
                       <p className="text-xl font-bold text-blue-700">{formatCurrency(dashboard?.cashPosition?.closingBalance ?? 0)}</p>
                     </div>
                   </div>
+                  {(() => {
+                    const netToday = Number(dashboard?.cashPosition?.moneyInToday ?? 0) - Number(dashboard?.cashPosition?.moneyOutToday ?? 0)
+                    return (
+                      <div className="mt-3 text-xs text-slate-500 flex items-center gap-2">
+                        <span>Net today: {netToday >= 0 ? (
+                          <span className="text-green-600 font-medium">+{formatCurrency(netToday)}</span>
+                        ) : (
+                          <span className="text-red-600 font-medium">{formatCurrency(netToday)}</span>
+                        )}</span>
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 {/* Receivables & Payables */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                    <h2 className="text-lg font-semibold text-slate-900 mb-4">Receivables</h2>
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md transition-shadow"
+                    onClick={() => setActiveTab('balances')}>
+                    <h2 className="text-lg font-semibold text-slate-900 mb-1">Receivables</h2>
+                    <p className="text-xs text-slate-400 mb-3">
+                      As of {new Date().toLocaleDateString('en-NG', { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </p>
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600">Total Owed</span>
@@ -550,17 +729,29 @@ export function FinancePage() {
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600">Overdue</span>
-                        <span className="text-lg font-semibold text-red-600">{formatCurrency(dashboard?.receivables?.overdueAmount ?? 0)}</span>
+                        {dashboard?.receivables?.overdueAmount != null ? (
+                          <span className="text-lg font-semibold text-red-600">{formatCurrency(dashboard.receivables.overdueAmount)}</span>
+                        ) : (
+                          <span className="text-sm text-slate-400 italic">—</span>
+                        )}
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600">Customers</span>
-                        <span className="text-lg font-medium text-slate-700">{dashboard?.receivables?.customerCount ?? 0}</span>
+                        {dashboard?.receivables?.customerCount != null && dashboard.receivables.customerCount > 0 ? (
+                          <span className="text-lg font-medium text-slate-700">{dashboard.receivables.customerCount}</span>
+                        ) : (
+                          <span className="text-sm text-slate-400 italic">—</span>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                    <h2 className="text-lg font-semibold text-slate-900 mb-4">Payables</h2>
+                  <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md transition-shadow"
+                    onClick={() => setActiveTab('balances')}>
+                    <h2 className="text-lg font-semibold text-slate-900 mb-1">Payables</h2>
+                    <p className="text-xs text-slate-400 mb-3">
+                      As of {new Date().toLocaleDateString('en-NG', { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </p>
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600">Total Payable</span>
@@ -568,7 +759,11 @@ export function FinancePage() {
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-slate-600">Suppliers</span>
-                        <span className="text-lg font-medium text-slate-700">{dashboard?.payables?.supplierCount ?? 0}</span>
+                        {dashboard?.payables?.supplierCount != null && dashboard.payables.supplierCount > 0 ? (
+                          <span className="text-lg font-medium text-slate-700">{dashboard.payables.supplierCount}</span>
+                        ) : (
+                          <span className="text-sm text-slate-400 italic">—</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -576,23 +771,105 @@ export function FinancePage() {
 
                 {/* Profit Snapshot */}
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Profit Snapshot (This Month)</h2>
+                  <h2 className="text-lg font-semibold text-slate-900 mb-4">
+                    Profit Snapshot {dashboardPeriod ? `(${dashboardPeriod})` : '(This Month)'}
+                  </h2>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-green-50 rounded-lg p-4">
+                    <div className="bg-green-50 rounded-lg p-4 cursor-pointer hover:bg-green-100"
+                      onClick={() => setActiveTab('profit')}>
                       <p className="text-sm text-green-600">Revenue</p>
                       <p className="text-lg font-bold text-green-700">{formatCurrency(dashboard?.profitSnapshot?.revenueThisMonth ?? 0)}</p>
                     </div>
-                    <div className="bg-orange-50 rounded-lg p-4">
+                    <div className="bg-orange-50 rounded-lg p-4 cursor-pointer hover:bg-orange-100"
+                      onClick={() => setActiveTab('deferred-cogs')}>
                       <p className="text-sm text-orange-600">Material Cost</p>
                       <p className="text-lg font-bold text-orange-700">{formatCurrency(dashboard?.profitSnapshot?.materialCostThisMonth ?? 0)}</p>
                     </div>
-                    <div className="bg-red-50 rounded-lg p-4">
+                    <div className="bg-red-50 rounded-lg p-4 cursor-pointer hover:bg-red-100"
+                      onClick={() => setActiveTab('expenses')}>
                       <p className="text-sm text-red-600">Expenses</p>
                       <p className="text-lg font-bold text-red-700">{formatCurrency(dashboard?.profitSnapshot?.expensesThisMonth ?? 0)}</p>
                     </div>
+                    <div className="bg-blue-50 rounded-lg p-4 cursor-pointer hover:bg-blue-100"
+                      onClick={() => setActiveTab('profit')}>
+                      <p className="text-sm text-blue-600">Net Profit</p>
+                      <p className={`text-lg font-bold ${(dashboard?.profitSnapshot?.netProfit ?? 0) >= 0 ? 'text-blue-700' : 'text-red-700'}`}>
+                        {formatCurrency(dashboard?.profitSnapshot?.netProfit ?? 0)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Revenue Breakdown */}
+                  <details className="mt-3 text-xs text-slate-500">
+                    <summary className="cursor-pointer hover:text-slate-700">Revenue breakdown</summary>
+                    <div className="mt-2 space-y-1 pl-2 border-l-2 border-green-200">
+                      <div className="flex justify-between">
+                        <span>Roll Sales</span>
+                        <span className="font-medium text-green-700">{formatCurrency(dashboard?.profitSnapshot?.revenueBreakdown?.salesRevenue ?? 0)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Packing Bags</span>
+                        <span className="font-medium text-green-700">{formatCurrency(dashboard?.profitSnapshot?.revenueBreakdown?.packingRevenue ?? 0)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Other Income</span>
+                        <span className="font-medium text-green-700">{formatCurrency(dashboard?.profitSnapshot?.revenueBreakdown?.otherIncome ?? 0)}</span>
+                      </div>
+                    </div>
+                  </details>
+
+                  {/* Waterfall bar */}
+                  {(() => {
+                    const rev = Number(dashboard?.profitSnapshot?.revenueThisMonth ?? 0)
+                    const cogs = Number(dashboard?.profitSnapshot?.materialCostThisMonth ?? 0)
+                    const exp = Number(dashboard?.profitSnapshot?.expensesThisMonth ?? 0)
+                    const profit = Number(dashboard?.profitSnapshot?.netProfit ?? 0)
+                    if (rev === 0) return <div className="mt-3 h-2 w-full bg-slate-200 rounded-full" />
+                    return (
+                      <div className="mt-3 h-2 w-full bg-slate-100 rounded-full overflow-hidden flex">
+                        <div className="bg-green-400 transition-all" style={{ width: '100%' }} />
+                        <div className="bg-red-400 transition-all" style={{ width: `${Math.min(100, (cogs / rev) * 100)}%` }} />
+                        <div className="bg-orange-400 transition-all" style={{ width: `${Math.min(100, (exp / rev) * 100)}%` }} />
+                        <div className={`${profit >= 0 ? 'bg-blue-400' : 'bg-red-600'} transition-all`}
+                          style={{ width: `${Math.min(100, Math.max(0, (profit / rev) * 100))}%` }} />
+                      </div>
+                    )
+                  })()}
+                </div>
+
+                {/* Deferred COGS Card */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => setActiveTab('deferred-cogs')}>
+                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Deferred COGS</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-yellow-50 rounded-lg p-4">
+                      <p className="text-sm text-yellow-600">Total Deferred</p>
+                      <p className="text-xl font-bold text-yellow-700">{formatCurrency(deferredCogs?.totalDeferred ?? 0)}</p>
+                    </div>
                     <div className="bg-blue-50 rounded-lg p-4">
-                      <p className="text-sm text-blue-600">Estimated Profit</p>
-                      <p className="text-lg font-bold text-blue-700">{formatCurrency(dashboard?.profitSnapshot?.estimatedProfit ?? 0)}</p>
+                      <p className="text-sm text-blue-600">Pending Deliveries</p>
+                      <p className="text-xl font-bold text-blue-700">{deferredCogs?.pendingCount ?? 0}</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4">
+                      <p className="text-sm text-red-600">Overdue (&gt;7 days)</p>
+                      <p className="text-xl font-bold text-red-700">{deferredCogs?.overdueCount ?? 0}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* VAT Mini-Card */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => setActiveTab('vat')}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-500">VAT Payable (YTD)</h2>
+                      <p className="text-2xl font-bold text-slate-900 mt-1">
+                        {formatCurrency(vatSummary?.vatPayable ?? 0)}
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-slate-500 space-y-0.5">
+                      <div>Output: <span className="font-medium text-purple-700">{formatCurrency(vatSummary?.outputVat ?? 0)}</span></div>
+                      <div>Input: <span className="font-medium text-blue-700">{formatCurrency(vatSummary?.inputVat ?? 0)}</span></div>
                     </div>
                   </div>
                 </div>
@@ -785,24 +1062,32 @@ export function FinancePage() {
             {activeTab === 'accounts' && accounts && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 border-b border-slate-200">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-slate-700">Filter by type:</label>
-                    <select value={accountTypeFilter} onChange={e => setAccountTypeFilter(e.target.value)}
-                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm">
-                      <option value="">All</option>
-                      <option value="ASSET">ASSET</option>
-                      <option value="LIABILITY">LIABILITY</option>
-                      <option value="EQUITY">EQUITY</option>
-                      <option value="REVENUE">REVENUE</option>
-                      <option value="EXPENSE">EXPENSE</option>
-                      <option value="COGS">COGS</option>
-                    </select>
-                    <span className="text-sm text-slate-500">
-                      {accountTypeFilter
-                        ? `${accounts.filter(a => a.type === accountTypeFilter).length} accounts`
-                        : `${accounts.length} accounts`
-                      }
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium text-slate-700">Filter by type:</label>
+                      <select value={accountTypeFilter} onChange={e => setAccountTypeFilter(e.target.value)}
+                        className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm">
+                        <option value="">All</option>
+                        <option value="ASSET">ASSET</option>
+                        <option value="LIABILITY">LIABILITY</option>
+                        <option value="EQUITY">EQUITY</option>
+                        <option value="REVENUE">REVENUE</option>
+                        <option value="EXPENSE">EXPENSE</option>
+                        <option value="COGS">COGS</option>
+                      </select>
+                      <span className="text-sm text-slate-500">
+                        {accountTypeFilter
+                          ? `${accounts.filter(a => a.type === accountTypeFilter).length} accounts`
+                          : `${accounts.length} accounts`
+                        }
+                      </span>
+                    </div>
+                    <button onClick={() => {
+                      setAccountForm({ code: '', name: '', type: '', description: '' })
+                      setShowAddAccountModal(true)
+                    }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors">
+                      + Add Account
+                    </button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
@@ -861,6 +1146,7 @@ export function FinancePage() {
                           setSeedMessage(null)
                           const res = await financeApi.seedAccounts()
                           if (res.data) {
+                            notify.success('Default accounts seeded')
                             const msg = (res.data as any)?.data?.message || 'Chart of accounts seeded'
                             setSeedMessage(msg)
                             const accountsRes = await financeApi.getAccounts()
@@ -1000,11 +1286,10 @@ export function FinancePage() {
                     onClick={async () => {
                       const itemsToPost = openingBalances.filter(i => i.amount > 0 && i.code !== '3000')
                       if (itemsToPost.length === 0) {
-                        setError('Enter at least one amount to post')
+                        notify.error('Enter at least one amount to post')
                         return
                       }
                       setPostingOpening(true)
-                      setError(null)
                       try {
                         const res = await financeApi.postOpeningBalances({
                           date: openingDate,
@@ -1018,10 +1303,10 @@ export function FinancePage() {
                           setSeedMessage(msg)
                           setOpeningBalances(items => items.map(i => ({ ...i, amount: 0 })))
                         } else {
-                          setError(res.error?.message || 'Failed to post opening balances')
+                          notify.error(res.error?.message || 'Failed to post opening balances')
                         }
                       } catch (err: any) {
-                        setError(err.message || 'Failed to post opening balances')
+                        notify.error(err.message || 'Failed to post opening balances')
                       }
                       setPostingOpening(false)
                     }}
@@ -1076,6 +1361,11 @@ export function FinancePage() {
                         Reset
                       </button>
                     )}
+                    <div className="ml-auto">
+                      <button onClick={() => setShowJournalModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors">
+                        + Post Journal Entry
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
@@ -1458,6 +1748,168 @@ export function FinancePage() {
                 <button type="button" onClick={() => setShowIncomeModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
                 <button type="submit" disabled={savingIncome} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
                   {savingIncome ? 'Saving...' : 'Record Income'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Journal Modal */}
+      {showJournalModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">Post Journal Entry</h2>
+            <form onSubmit={handlePostJournalEntry} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description <span className="text-red-500">*</span></label>
+                <input type="text" value={journalForm.description} onChange={e => setJournalForm({...journalForm, description: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required placeholder="e.g. Closing OBE to Retained Earnings" />
+              </div>
+
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                  <DateInput value={journalForm.date} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setJournalForm({...journalForm, date: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Reference (optional)</label>
+                  <input type="text" value={journalForm.reference} onChange={e => setJournalForm({...journalForm, reference: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" placeholder="Auto-generated if empty" />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-slate-700">Journal Lines</label>
+                  <button type="button" onClick={() => setJournalLines([...journalLines, { accountId: '', debit: 0, credit: 0, memo: '' }])} className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                    + Add Line
+                  </button>
+                </div>
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase w-2/5">Account</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase w-1/6">Debit</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 uppercase w-1/6">Credit</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase w-1/5">Memo</th>
+                        <th className="px-3 py-2 w-10" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {journalLines.map((line, i) => (
+                        <tr key={i} className="hover:bg-slate-50">
+                          <td className="px-3 py-2">
+                            <select value={line.accountId} onChange={e => { const lines = [...journalLines]; lines[i].accountId = e.target.value; setJournalLines(lines) }} className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm bg-white" required>
+                              <option value="">Select account</option>
+                              {accounts.map(a => (
+                                <option key={a.id} value={a.id}>{a.code} - {a.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-3 py-2">
+                            <input type="number" min="0" step="0.01" value={line.debit || ''} onChange={e => { const lines = [...journalLines]; lines[i].debit = parseFloat(e.target.value) || 0; if (lines[i].debit > 0) lines[i].credit = 0; setJournalLines(lines) }} className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm text-right" placeholder="0" />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input type="number" min="0" step="0.01" value={line.credit || ''} onChange={e => { const lines = [...journalLines]; lines[i].credit = parseFloat(e.target.value) || 0; if (lines[i].credit > 0) lines[i].debit = 0; setJournalLines(lines) }} className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm text-right" placeholder="0" />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input type="text" value={line.memo} onChange={e => { const lines = [...journalLines]; lines[i].memo = e.target.value; setJournalLines(lines) }} className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm" placeholder="Memo (optional)" />
+                          </td>
+                          <td className="px-3 py-2">
+                            {journalLines.length > 2 && (
+                              <button type="button" onClick={() => setJournalLines(journalLines.filter((_, idx) => idx !== i))} className="text-red-500 hover:text-red-700 p-1" title="Remove line">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-slate-50">
+                      <tr>
+                        <td className="px-3 py-2 text-sm font-medium text-slate-700">Totals</td>
+                        <td className="px-3 py-2 text-sm font-bold text-right text-slate-900">{journalLines.reduce((s, l) => s + l.debit, 0).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-sm font-bold text-right text-slate-900">{journalLines.reduce((s, l) => s + l.credit, 0).toFixed(2)}</td>
+                        <td colSpan={2} />
+                      </tr>
+                      {Math.abs(journalLines.reduce((s, l) => s + l.debit, 0) - journalLines.reduce((s, l) => s + l.credit, 0)) > 0.01 && (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-1.5 text-xs text-red-600 font-medium">
+                            Debits and credits must balance
+                          </td>
+                        </tr>
+                      )}
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button type="button" onClick={() => setShowJournalModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button type="submit" disabled={savingJournal} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                  {savingJournal ? 'Posting...' : 'Post Journal Entry'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Account Modal */}
+      {showAddAccountModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">Add Account</h2>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              if (!accountForm.code || !accountForm.name || !accountForm.type) {
+                notify.error('Code, name, and type are required')
+                return
+              }
+              setSavingAccount(true)
+              try {
+                const res = await financeApi.createAccount({ ...accountForm, type: accountForm.type as Account['type'] })
+                if (res.data) {
+                  notify.success(`Account ${accountForm.code} created`)
+                  setShowAddAccountModal(false)
+                  const accsRes = await financeApi.getAccounts()
+                  if (accsRes.data) setAccounts((accsRes.data as any).data || [])
+                } else {
+                  notify.error(res.error?.message || 'Failed to create account')
+                }
+              } catch (err: any) {
+                notify.error(err.message || 'Failed to create account')
+              }
+              setSavingAccount(false)
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Code <span className="text-red-500">*</span></label>
+                <input type="text" value={accountForm.code} onChange={e => setAccountForm({...accountForm, code: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required placeholder="e.g. 5200" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Name <span className="text-red-500">*</span></label>
+                <input type="text" value={accountForm.name} onChange={e => setAccountForm({...accountForm, name: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required placeholder="e.g. Inventory Adjustments" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Type <span className="text-red-500">*</span></label>
+                <select value={accountForm.type} onChange={e => setAccountForm({...accountForm, type: e.target.value as Account['type'] | ''})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" required>
+                  <option value="">Select type</option>
+                  <option value="ASSET">ASSET</option>
+                  <option value="LIABILITY">LIABILITY</option>
+                  <option value="EQUITY">EQUITY</option>
+                  <option value="REVENUE">REVENUE</option>
+                  <option value="EXPENSE">EXPENSE</option>
+                  <option value="COGS">COGS</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                <textarea value={accountForm.description} onChange={e => setAccountForm({...accountForm, description: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" rows={2} placeholder="Optional description" />
+              </div>
+              <div className="flex justify-end space-x-3 pt-4">
+                <button type="button" onClick={() => setShowAddAccountModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                <button type="submit" disabled={savingAccount} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                  {savingAccount ? 'Creating...' : 'Create Account'}
                 </button>
               </div>
             </form>

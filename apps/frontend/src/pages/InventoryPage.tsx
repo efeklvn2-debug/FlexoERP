@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useNotification } from '../contexts/NotificationContext'
 import { useSearchParams } from 'react-router-dom'
 import { inventoryApi, MaterialWithStock, MaterialCategory, MovementType } from '../api/inventory'
 import { procurementApi, Roll } from '../api/procurement'
@@ -27,7 +28,7 @@ export function InventoryPage() {
   const [initialStockMovements, setInitialStockMovements] = useState<any[]>([])
   const [subCategories, setSubCategories] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const notify = useNotification()
   const [showInitializeModal, setShowInitializeModal] = useState(false)
   
   const userStr = localStorage.getItem('user')
@@ -103,7 +104,6 @@ export function InventoryPage() {
 
   const loadData = async () => {
     setLoading(true)
-    setError('')
     try {
       if (activeTab === 'plain-rolls') {
         const res = await procurementApi.getRolls()
@@ -119,7 +119,7 @@ export function InventoryPage() {
         setInitialStockMovements(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load data')
+      notify.error(err.message || 'Failed to load data')
     }
     setLoading(false)
   }
@@ -221,7 +221,6 @@ export function InventoryPage() {
           </div>
         </div>
 
-        {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
         {loading ? <div className="text-center py-12">Loading...</div> : (
           <>
             {activeTab === 'plain-rolls' && (
@@ -308,7 +307,7 @@ export function InventoryPage() {
                           })))
                           setShowInitializeModal(true)
                         } catch (err: any) {
-                          setError(err.message || 'Failed to load materials')
+                          notify.error(err.message || 'Failed to load materials')
                         }
                       }}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
@@ -418,7 +417,7 @@ export function InventoryPage() {
                   onClick={async () => {
                     const itemsToUpdate = initialStockItems.filter(i => i.newStock !== i.currentStock)
                     if (itemsToUpdate.length === 0) {
-                      setError('No changes to save')
+                      notify.error('No changes to save')
                       return
                     }
                     setSaving(true)
@@ -428,13 +427,14 @@ export function InventoryPage() {
                         new Date().toISOString().split('T')[0]
                       )
                       if (res.error) {
-                        setError(res.error.message)
+                        notify.error(res.error.message)
                       } else {
+                        notify.success('Stock initialized successfully')
                         setShowInitializeModal(false)
                         loadData()
                       }
                     } catch (err: any) {
-                      setError(err.message || 'Failed to initialize stock')
+                      notify.error(err.message || 'Failed to initialize stock')
                     }
                     setSaving(false)
                   }}
@@ -515,15 +515,14 @@ export function InventoryPage() {
                   <button
                     onClick={async () => {
                       if (!adjustValue || Number(adjustValue) <= 0) {
-                        setError('Please enter a valid quantity')
+                        notify.error('Please enter a valid quantity')
                         return
                       }
                       if (!adjustReason) {
-                        setError('Please select a reason')
+                        notify.error('Please select a reason')
                         return
                       }
                       setAdjusting(true)
-                      setError('')
                       try {
                         const qty = Number(adjustValue)
                         const newQty = adjustType === 'ADD' 
@@ -531,13 +530,14 @@ export function InventoryPage() {
                           : Math.max(0, Number(adjustMaterial.totalStock || 0) - qty)
                         
                         await inventoryApi.adjustStock(adjustMaterial.id, newQty, adjustReason)
+                        notify.success('Stock adjusted successfully')
                         setAdjustMaterial(null)
                         setAdjustValue('')
                         setAdjustType('ADD')
                         setAdjustReason('')
                         loadData()
                       } catch (err: any) {
-                        setError(err.message || 'Failed to adjust stock')
+                        notify.error(err.message || 'Failed to adjust stock')
                       }
                       setAdjusting(false)
                     }}
@@ -599,11 +599,12 @@ export function InventoryPage() {
                     if (!confirm('Receive replacement for this returned roll?')) return
                     try {
                       await productionApi.receiveReplacement(selectedParentRoll.id)
+                      notify.success('Replacement received')
                       setSelectedParentRoll(null)
                       setPrintedFromRoll(null)
                       loadData()
                     } catch (e: any) {
-                      alert(e?.response?.data?.error || 'Failed to receive replacement')
+                      notify.error(e?.response?.data?.error || 'Failed to receive replacement')
                     }
                   }} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700">
                     Receive Replacement
@@ -688,12 +689,13 @@ export function InventoryPage() {
                     setConsuming(true)
                     try {
                       await productionApi.markRollConsumed(consumeRoll.id, consumeDate || undefined)
+                      notify.success('Roll marked as consumed')
                       setConsumeRoll(null)
                       setSelectedParentRoll(null)
                       setPrintedFromRoll(null)
                       loadData()
                     } catch (e: any) {
-                      alert(e?.response?.data?.error || 'Failed to mark roll as consumed')
+                      notify.error(e?.response?.data?.error || 'Failed to mark roll as consumed')
                     }
                     setConsuming(false)
                   }}
@@ -735,12 +737,13 @@ export function InventoryPage() {
                     setDisposing(true)
                     try {
                       await productionApi.disposeRoll(disposeRoll.id, disposalReason, disposeDate || undefined)
+                      notify.success('Roll disposed')
                       setDisposeRoll(null)
                       setSelectedParentRoll(null)
                       setPrintedFromRoll(null)
                       loadData()
                     } catch (e: any) {
-                      alert(e?.response?.data?.error || 'Failed to dispose roll')
+                      notify.error(e?.response?.data?.error || 'Failed to dispose roll')
                     }
                     setDisposing(false)
                   }}
@@ -778,7 +781,7 @@ export function InventoryPage() {
                       setPrintedFromRoll(null)
                       loadData()
                     } catch (e: any) {
-                      alert(e?.response?.data?.error || 'Failed to return roll')
+                      notify.error(e?.response?.data?.error || 'Failed to return roll')
                     }
                     setDisposing(false)
                   }}
@@ -978,23 +981,21 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
   includeArchived?: boolean
   onToggleArchived?: () => void
 }) {
+  const notify = useNotification()
   const [selectedRoll, setSelectedRoll] = useState<PrintedRollDisplay | null>(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [returnForm, setReturnForm] = useState({ qty: 0, reason: '', condition: 'SCRAP', refundMethod: 'CREDIT_NOTE', date: '' })
   const [returnLoading, setReturnLoading] = useState(false)
-  const [returnError, setReturnError] = useState('')
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
   const [archiveLoading, setArchiveLoading] = useState(false)
-  const [archiveError, setArchiveError] = useState('')
   const [archiveResult, setArchiveResult] = useState<number | null>(null)
 
   const handleCustomerReturn = async () => {
     if (!selectedRoll) return
-    if (!returnForm.qty || returnForm.qty <= 0) { setReturnError('Qty must be positive'); return }
-    if (!returnForm.reason) { setReturnError('Reason is required'); return }
+    if (!returnForm.qty || returnForm.qty <= 0) { notify.error('Qty must be positive'); return }
+    if (!returnForm.reason) { notify.error('Reason is required'); return }
     setReturnLoading(true)
-    setReturnError('')
     try {
       await productionApi.customerReturnRoll(selectedRoll.id, returnForm)
       setShowReturnModal(false)
@@ -1002,14 +1003,13 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
       setSelectedRoll(null)
       onRefresh?.()
     } catch (err: any) {
-      setReturnError(err.response?.data?.error || err.message || 'Failed to process return')
+      notify.error(err.response?.data?.error || err.message || 'Failed to process return')
     }
     setReturnLoading(false)
   }
 
   const handleArchive = async () => {
     setArchiveLoading(true)
-    setArchiveError('')
     try {
       const res = await productionApi.archiveOldPrintedRolls()
       const count = (res.data as any)?.archived ?? 0
@@ -1017,7 +1017,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
       setShowArchiveConfirm(false)
       onRefresh?.()
     } catch (err: any) {
-      setArchiveError(err.response?.data?.error || err.message || 'Failed to archive')
+      notify.error(err.response?.data?.error || err.message || 'Failed to archive')
     }
     setArchiveLoading(false)
   }
@@ -1091,9 +1091,6 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             )}
             {archiveResult !== null && (
               <span className="text-xs text-green-600 font-medium">{archiveResult} roll{archiveResult !== 1 ? 's' : ''} archived</span>
-            )}
-            {archiveError && (
-              <span className="text-xs text-red-600 font-medium">{archiveError}</span>
             )}
             <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
               <input type="checkbox" checked={includeArchived} onChange={onToggleArchived} className="rounded border-slate-300" />
@@ -1238,8 +1235,6 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             <h2 className="text-xl font-bold text-slate-900 mb-4">Customer Return</h2>
             <p className="text-sm text-slate-600 mb-4">Roll: {selectedRoll.rollNumber} ({Number(selectedRoll.weight).toFixed(2)} kg)</p>
 
-            {returnError && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm mb-4">{returnError}</div>}
-
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
@@ -1277,7 +1272,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             </div>
 
             <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-200">
-              <button type="button" onClick={() => { setShowReturnModal(false); setReturnError('') }} className="px-4 py-2 border border-slate-300 rounded-lg" disabled={returnLoading}>Cancel</button>
+              <button type="button" onClick={() => setShowReturnModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg" disabled={returnLoading}>Cancel</button>
               <button type="button" onClick={handleCustomerReturn} disabled={returnLoading} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
                 {returnLoading ? 'Processing...' : 'Submit Return'}
               </button>
@@ -1293,9 +1288,8 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             <p className="text-sm text-slate-600 mb-4">
               This will archive printed rolls that were picked up over 90 days ago. Archived rolls will be hidden from the main inventory list unless "Show archived" is checked.
             </p>
-            {archiveError && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm mb-4">{archiveError}</div>}
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => { setShowArchiveConfirm(false); setArchiveError('') }} className="px-4 py-2 border border-slate-300 rounded-lg" disabled={archiveLoading}>Cancel</button>
+              <button type="button" onClick={() => setShowArchiveConfirm(false)} className="px-4 py-2 border border-slate-300 rounded-lg" disabled={archiveLoading}>Cancel</button>
               <button type="button" onClick={handleArchive} disabled={archiveLoading} className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
                 {archiveLoading ? 'Archiving...' : 'Proceed'}
               </button>

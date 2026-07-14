@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import { checkDatabaseConnection } from '../../database'
 import { logger } from '../../logger'
+import { sendError } from '../../middleware/errorHandler'
 
 const startTime = Date.now()
 

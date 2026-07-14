@@ -3,10 +3,12 @@ import { settingsApi, ConsumptionRates, InvoiceSettings } from '../api/settings'
 import { pricingApi, MaterialWithPrice } from '../api/pricing'
 import { inventoryApi, MaterialCategory } from '../api/inventory'
 import { Layout } from '../components/Layout'
+import { useNotification } from '../contexts/NotificationContext'
 
 type SettingsTab = 'consumption' | 'core-deposits' | 'products' | 'overhead' | 'vat' | 'invoice' | 'ink-colors'
 
 export function SettingsPage() {
+  const notify = useNotification()
   const [activeTab, setActiveTab] = useState<SettingsTab>('products')
   const [rates, setRates] = useState<ConsumptionRates>({
     coreWeight: 0.7,
@@ -23,8 +25,6 @@ export function SettingsPage() {
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
 
   // Products & Pricing state
   const [materials, setMaterials] = useState<MaterialWithPrice[]>([])
@@ -112,7 +112,7 @@ export function SettingsPage() {
         })
       }
     } catch (err) {
-      console.error('Failed to load overhead rate:', err)
+      notify.error('Failed to load overhead rate')
     }
   }
 
@@ -137,7 +137,7 @@ const loadSettings = async () => {
         console.log('rates state updated, inkConsumptionRate:', inkRate)
       }
     } catch (err: any) {
-      console.error('Failed to load settings:', err)
+      notify.error('Failed to load settings')
     } finally {
       setLoading(false)
     }
@@ -150,7 +150,7 @@ const loadSettings = async () => {
       const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
       setMaterials(data)
     } catch (err: any) {
-      console.error('Failed to load materials:', err)
+      notify.error('Failed to load materials')
     }
   }
 
@@ -160,15 +160,13 @@ const loadSettings = async () => {
       const data = Array.isArray(res.data) ? res.data : (res.data as any)?.data || []
       setInkColors(data)
     } catch (err: any) {
-      console.error('Failed to load ink colors:', err)
+      notify.error('Failed to load ink colors')
     }
   }
 
   const handleSaveRates = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
-    setError('')
-    setSuccess('')
 
     console.log('Saving rates:', rates)
 
@@ -177,10 +175,9 @@ const loadSettings = async () => {
     console.log('Save response data:', res.data)
     
     if (res.error) {
-      setError(res.error.message)
+      notify.error(res.error.message)
     } else {
-      setSuccess('Settings saved successfully')
-      setTimeout(() => setSuccess(''), 3000)
+      notify.success('Settings saved successfully')
       // Update localStorage so other pages (core buyback modal) see the new rate
       const stored = localStorage.getItem('appSettings')
       if (stored) {
@@ -199,7 +196,6 @@ const loadSettings = async () => {
   const handleSaveMaterial = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
-    setError('')
 
     try {
       const res = await inventoryApi.createMaterial({
@@ -213,16 +209,15 @@ const loadSettings = async () => {
       })
       
       if (res.error) {
-        setError(res.error.message)
+        notify.error(res.error.message)
       } else {
         setShowMaterialModal(false)
         setMaterialForm({ name: '', code: '', category: 'PLAIN_ROLLS', costPrice: 0, packSize: 1 })
         loadMaterials()
-        setSuccess('Material created successfully')
-        setTimeout(() => setSuccess(''), 3000)
+        notify.success('Material created successfully')
       }
     } catch (err: any) {
-      setError(err.message)
+      notify.error(err.message)
     }
     setSaving(false)
   }
@@ -230,7 +225,6 @@ const loadSettings = async () => {
   const handleSavePrice = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
-    setError('')
 
     try {
       // Save cost price using inventoryApi
@@ -254,10 +248,9 @@ const loadSettings = async () => {
       
       setShowPriceModal(false)
       loadMaterials()
-      setSuccess('Prices updated successfully')
-      setTimeout(() => setSuccess(''), 3000)
+      notify.success('Prices updated successfully')
     } catch (err: any) {
-      setError(err.message)
+      notify.error(err.message)
     }
     setSaving(false)
   }
@@ -277,10 +270,9 @@ const loadSettings = async () => {
     try {
       await inventoryApi.archiveMaterial(material.id)
       loadMaterials()
-      setSuccess(`${material.name} archived`)
-      setTimeout(() => setSuccess(''), 3000)
+      notify.success(`${material.name} archived`)
     } catch (err: any) {
-      setError(err.message)
+      notify.error(err.message)
     }
     setSaving(false)
     setArchiveConfirm(null)
@@ -291,10 +283,9 @@ const loadSettings = async () => {
     try {
       await inventoryApi.restoreMaterial(material.id)
       loadMaterials()
-      setSuccess(`${material.name} restored`)
-      setTimeout(() => setSuccess(''), 3000)
+      notify.success(`${material.name} restored`)
     } catch (err: any) {
-      setError(err.message)
+      notify.error(err.message)
     }
     setSaving(false)
   }
@@ -373,9 +364,6 @@ const loadSettings = async () => {
             Ink Colors
           </button>
         </div>
-
-        {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
-        {success && <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-green-600">{success}</div>}
 
         {activeTab === 'products' && (
           <div className="space-y-4">
@@ -614,14 +602,12 @@ const loadSettings = async () => {
               onSubmit={async (e) => {
                 e.preventDefault()
                 setSaving(true)
-                setError('')
-                setSuccess('')
                 try {
                   const res = await settingsApi.updateVatSettings({ vatRate, businessTin, businessAddress })
-                  if (res.error) { setError(res.error.message || 'Failed to update'); return }
-                  setSuccess('VAT settings updated successfully')
+                  if (res.error) { notify.error(res.error.message || 'Failed to update'); return }
+                  notify.success('VAT settings updated successfully')
                 } catch (err: any) {
-                  setError(err.message || 'Failed to update')
+                  notify.error(err.message || 'Failed to update')
                 } finally {
                   setSaving(false)
                 }
@@ -856,15 +842,13 @@ const loadSettings = async () => {
               <button
                 onClick={async () => {
                   setSaving(true)
-                  setError('')
-                  setSuccess('')
                   try {
                     const res = await settingsApi.updateInvoiceSettings(invoiceSettings)
-                    if (res.error) { setError(res.error.message || 'Failed to update'); return }
+                    if (res.error) { notify.error(res.error.message || 'Failed to update'); return }
                     localStorage.setItem('appSettings', JSON.stringify(invoiceSettings))
-                    setSuccess('Invoice & receipt settings updated successfully')
+                    notify.success('Invoice & receipt settings updated successfully')
                   } catch (err: any) {
-                    setError(err.message || 'Failed to update')
+                    notify.error(err.message || 'Failed to update')
                   } finally {
                     setSaving(false)
                   }
@@ -889,19 +873,16 @@ const loadSettings = async () => {
               onSubmit={async (e) => {
                 e.preventDefault()
                 setSaving(true)
-                setError('')
-                setSuccess('')
                 try {
                   const res = await settingsApi.updateOverheadRate(overheadRate)
                   if (res.error) {
-                    setError(res.error.message)
+                    notify.error(res.error.message)
                   } else {
-                    setSuccess(`Overhead rate updated. Applied: ${new Date().toISOString().slice(0, 7)}`)
-                    setTimeout(() => setSuccess(''), 5000)
+                    notify.success(`Overhead rate updated. Applied: ${new Date().toISOString().slice(0, 7)}`)
                     await loadOverheadRate()
                   }
                 } catch (err: any) {
-                  setError(err.message)
+                  notify.error(err.message)
                 }
                 setSaving(false)
               }}
@@ -1009,8 +990,7 @@ const loadSettings = async () => {
                           <button
                             onClick={async () => {
                               await settingsApi.restoreInkColor(ic.id)
-                              setSuccess(`${ic.name} restored`)
-                              setTimeout(() => setSuccess(''), 3000)
+                              notify.success(`${ic.name} restored`)
                               loadInkColors()
                             }}
                             className="text-green-600 hover:text-green-700 text-sm font-medium"
@@ -1049,16 +1029,14 @@ const loadSettings = async () => {
               <form onSubmit={async (e) => {
                 e.preventDefault()
                 setSaving(true)
-                setError('')
                 try {
                   const res = await settingsApi.createInkColor(inkColorForm)
-                  if (res.error) { setError(res.error.message); return }
+                  if (res.error) { notify.error(res.error.message); return }
                   setShowAddInkColorModal(false)
-                  setSuccess(`Ink color "${inkColorForm.name}" added`)
-                  setTimeout(() => setSuccess(''), 3000)
+                  notify.success(`Ink color "${inkColorForm.name}" added`)
                   loadInkColors()
                 } catch (err: any) {
-                  setError(err.message)
+                  notify.error(err.message)
                 }
                 setSaving(false)
               }} className="space-y-4">
@@ -1111,11 +1089,10 @@ const loadSettings = async () => {
                   setSaving(true)
                   try {
                     await settingsApi.archiveInkColor(archiveInkConfirm.id)
-                    setSuccess(`${archiveInkConfirm.name} archived`)
-                    setTimeout(() => setSuccess(''), 3000)
+                    notify.success(`${archiveInkConfirm.name} archived`)
                     loadInkColors()
                   } catch (err: any) {
-                    setError(err.message)
+                    notify.error(err.message)
                   }
                   setSaving(false)
                   setArchiveInkConfirm(null)

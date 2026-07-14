@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { transactionService } from './service'
 import { logger } from '../../logger'
+import { sendError } from '../../middleware/errorHandler'
 
 export const transactionController = {
   async getTransactions(req: Request, res: Response) {
@@ -14,8 +15,7 @@ export const transactionController = {
       })
       res.json({ data: transactions })
     } catch (error: any) {
-      logger.error(error, 'Error fetching transactions')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch transactions' })
+      sendError(res, error, 'transactions.getTransactions')
     }
   },
 
@@ -28,8 +28,7 @@ export const transactionController = {
       }
       res.json({ data: transaction })
     } catch (error: any) {
-      logger.error(error, 'Error fetching transaction')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch transaction' })
+      sendError(res, error, 'transactions.getTransactionById')
     }
   },
 
@@ -38,8 +37,7 @@ export const transactionController = {
       const transaction = await transactionService.createTransaction(req.body)
       res.status(201).json({ data: transaction })
     } catch (error: any) {
-      logger.error(error, 'Error creating transaction')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create transaction' })
+      sendError(res, error, 'transactions.createTransaction')
     }
   },
 
@@ -49,8 +47,7 @@ export const transactionController = {
       const result = await transactionService.deleteTransaction(id)
       res.json(result)
     } catch (error: any) {
-      logger.error(error, 'Error deleting transaction')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete transaction' })
+      sendError(res, error, 'transactions.deleteTransaction')
     }
   },
 
@@ -63,8 +60,7 @@ export const transactionController = {
       const rolls = await transactionService.getCustomerAvailableRolls(customerId as string)
       res.json({ data: rolls })
     } catch (error: any) {
-      logger.error(error, 'Error fetching available rolls')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch available rolls' })
+      sendError(res, error, 'transactions.getAvailableRolls')
     }
   }
 }

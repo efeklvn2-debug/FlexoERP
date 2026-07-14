@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { financeService } from './service'
 import { logger } from '../../logger'
+import { sendError } from '../../middleware/errorHandler'
 
 export const financeController = {
   async getAccounts(req: Request, res: Response) {
@@ -8,8 +9,7 @@ export const financeController = {
       const accounts = await financeService.getAccounts()
       res.json({ data: accounts })
     } catch (error: any) {
-      logger.error(error, 'Error fetching accounts')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch accounts' })
+      sendError(res, error, 'finance.getAccounts')
     }
   },
 
@@ -18,8 +18,7 @@ export const financeController = {
       const accounts = await financeService.getRootAccounts()
       res.json({ data: accounts })
     } catch (error: any) {
-      logger.error(error, 'Error fetching root accounts')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch accounts' })
+      sendError(res, error, 'finance.getRootAccounts')
     }
   },
 
@@ -29,8 +28,7 @@ export const financeController = {
       const account = await financeService.getAccountById(id)
       res.json({ data: account })
     } catch (error: any) {
-      logger.error(error, 'Error fetching account')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch account' })
+      sendError(res, error, 'finance.getAccountById')
     }
   },
 
@@ -39,8 +37,7 @@ export const financeController = {
       const account = await financeService.createAccount(req.body)
       res.status(201).json({ data: account })
     } catch (error: any) {
-      logger.error(error, 'Error creating account')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create account' })
+      sendError(res, error, 'finance.createAccount')
     }
   },
 
@@ -52,8 +49,7 @@ export const financeController = {
       })
       res.status(201).json({ data: entry })
     } catch (error: any) {
-      logger.error(error, 'Error posting journal entry')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to post journal entry' })
+      sendError(res, error, 'finance.postJournalEntry')
     }
   },
 
@@ -70,8 +66,7 @@ export const financeController = {
       })
       res.json({ data: entries })
     } catch (error: any) {
-      logger.error(error, 'Error fetching journal entries')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch entries' })
+      sendError(res, error, 'finance.getJournalEntries')
     }
   },
 
@@ -81,8 +76,7 @@ export const financeController = {
       const entry = await financeService.getJournalEntryById(id)
       res.json({ data: entry })
     } catch (error: any) {
-      logger.error(error, 'Error fetching journal entry')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch entry' })
+      sendError(res, error, 'finance.getJournalEntryById')
     }
   },
 
@@ -93,8 +87,7 @@ export const financeController = {
       const balance = await financeService.getAccountBalance(id, asOfDate as string)
       res.json({ data: balance })
     } catch (error: any) {
-      logger.error(error, 'Error fetching account balance')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch balance' })
+      sendError(res, error, 'finance.getAccountBalance')
     }
   },
 
@@ -104,8 +97,7 @@ export const financeController = {
       const balances = await financeService.getAllAccountBalances(asOfDate as string)
       res.json({ data: balances })
     } catch (error: any) {
-      logger.error(error, 'Error fetching account balances')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch balances' })
+      sendError(res, error, 'finance.getAllAccountBalances')
     }
   },
 
@@ -115,18 +107,17 @@ export const financeController = {
       const trialBalance = await financeService.getTrialBalance(asOfDate as string)
       res.json({ data: trialBalance })
     } catch (error: any) {
-      logger.error(error, 'Error fetching trial balance')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch trial balance' })
+      sendError(res, error, 'finance.getTrialBalance')
     }
   },
 
   async getFinanceDashboard(req: Request, res: Response) {
     try {
-      const dashboard = await financeService.getFinanceDashboard()
+      const { month } = req.query
+      const dashboard = await financeService.getFinanceDashboard(month as string)
       res.json({ data: dashboard })
     } catch (error: any) {
-      logger.error(error, 'Error fetching finance dashboard')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch dashboard' })
+      sendError(res, error, 'finance.getFinanceDashboard')
     }
   },
 
@@ -136,8 +127,7 @@ export const financeController = {
       const summary = await financeService.getVatSummary(dateFrom as string, dateTo as string)
       res.json({ data: summary })
     } catch (error: any) {
-      logger.error(error, 'Error fetching VAT summary')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch VAT summary' })
+      sendError(res, error, 'finance.getVatSummary')
     }
   },
 
@@ -147,8 +137,7 @@ export const financeController = {
       const summary = await financeService.getProfitSummary(month as string)
       res.json({ data: summary })
     } catch (error: any) {
-      logger.error(error, 'Error fetching profit summary')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch profit summary' })
+      sendError(res, error, 'finance.getProfitSummary')
     }
   },
 
@@ -159,8 +148,7 @@ export const financeController = {
       const ledger = await financeService.getGeneralLedger(id, dateFrom as string, dateTo as string)
       res.json({ data: ledger })
     } catch (error: any) {
-      logger.error(error, 'Error fetching general ledger')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch ledger' })
+      sendError(res, error, 'finance.getGeneralLedger')
     }
   },
 
@@ -169,8 +157,7 @@ export const financeController = {
       const result = await financeService.seedDefaultAccounts()
       res.json({ data: result })
     } catch (error: any) {
-      logger.error(error, 'Error seeding accounts')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to seed accounts' })
+      sendError(res, error, 'finance.seedAccounts')
     }
   },
 
@@ -179,8 +166,7 @@ export const financeController = {
       const summary = await financeService.getDeferredCogsSummary()
       res.json({ data: summary })
     } catch (error: any) {
-      logger.error(error, 'Error getting Deferred COGS summary')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get Deferred COGS summary' })
+      sendError(res, error, 'finance.getDeferredCogsSummary')
     }
   },
 
@@ -191,8 +177,7 @@ export const financeController = {
       const result = await financeService.recognizeDeferredCogs(id, userId)
       res.json({ data: result })
     } catch (error: any) {
-      logger.error(error, 'Error recognizing Deferred COGS')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to recognize Deferred COGS' })
+      sendError(res, error, 'finance.recognizeDeferredCogs')
     }
   },
 
@@ -203,8 +188,7 @@ export const financeController = {
       const entry = await financeService.reverseJournalEntry(id, userId)
       res.status(201).json({ data: entry })
     } catch (error: any) {
-      logger.error(error, 'Error reversing journal entry')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to reverse journal entry' })
+      sendError(res, error, 'finance.reverseJournalEntry')
     }
   },
 
@@ -221,8 +205,7 @@ export const financeController = {
       const result = await financeService.postOpeningBalances({ date, lines }, userId)
       res.status(201).json({ data: result })
     } catch (error: any) {
-      logger.error(error, 'Error posting opening balances')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to post opening balances' })
+      sendError(res, error, 'finance.postOpeningBalances')
     }
   }
 }

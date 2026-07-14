@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useNotification } from '../contexts/NotificationContext'
 import { procurementApi, PurchaseOrder, SupplierInvoice, SupplierInvoiceStatus } from '../api/procurement'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
@@ -35,6 +36,7 @@ const CATEGORY_LABELS: Record<ItemCategory, string> = {
 }
 
 export function ProcurementPage() {
+  const notify = useNotification()
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [materials, setMaterials] = useState<MaterialWithStock[]>([])
   const [subCategories, setSubCategories] = useState<Record<string, string[]>>({})
@@ -42,7 +44,6 @@ export function ProcurementPage() {
   const [newSupplier, setNewSupplier] = useState('')
   const [showSupplierModal, setShowSupplierModal] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [showPOModal, setShowPOModal] = useState(false)
   const [showReceiveModal, setShowReceiveModal] = useState(false)
   const [receiveDate, setReceiveDate] = useState(new Date().toISOString().split('T')[0])
@@ -133,7 +134,6 @@ export function ProcurementPage() {
 
   const loadData = async () => {
     setLoading(true)
-    setError('')
     try {
       const [poRes, matRes, supRes, invRes, subCatRes] = await Promise.all([
         procurementApi.getPOs(),
@@ -149,7 +149,7 @@ export function ProcurementPage() {
       const invoices = Array.isArray(invRes.data) ? invRes.data : (invRes.data as any)?.data || []
       setSupplierInvoices(invoices)
       setInvoicedPOIds(new Set(invoices.map((inv: SupplierInvoice) => inv.poId)))
-    } catch (err: any) { setError(err.message) }
+    } catch (err: any) { notify.error(err.message) }
     setLoading(false)
   }
 
@@ -157,7 +157,7 @@ export function ProcurementPage() {
     try {
       const res = await procurementApi.getSupplierInvoices()
       setSupplierInvoices(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
-    } catch (err: any) { setError(err.message) }
+    } catch (err: any) { notify.error(err.message) }
   }
 
   const handleAddSupplier = async () => {
@@ -179,11 +179,11 @@ export function ProcurementPage() {
 
   const handleCreatePO = async () => {
     if (!poForm.supplier.trim()) {
-      setError('Supplier is required')
+      notify.error('Supplier is required')
       return
     }
     if (poLineItems.length === 0) {
-      setError('Add at least one line item')
+      notify.error('Add at least one line item')
       return
     }
     const itemsToSubmit = poLineItems.map(item => ({
@@ -195,13 +195,14 @@ export function ProcurementPage() {
     }))
     const res = await procurementApi.createPO({ ...poForm, items: itemsToSubmit })
     if (!res.error) {
+      notify.success('Purchase order created')
       setShowPOModal(false)
       setPoForm({ supplier: '', expectedDate: '', notes: '' })
       setPoLineItems([])
       setCurrentItem({ category: '', subCategory: '', materialId: '', quantity: 1, totalWeight: 0, unitPrice: 0, rollWeights: '' })
       loadData()
     } else {
-      setError(res.error.message)
+      notify.error(res.error.message)
     }
   }
 
@@ -210,28 +211,29 @@ export function ProcurementPage() {
     
     const res = await procurementApi.receivePO(selectedPO.id, receiveDate || undefined)
     if (!res.error) {
+      notify.success('Purchase order received')
       setShowReceiveModal(false)
       setSelectedPO(null)
       loadData()
     } else {
-      setError(res.error.message)
+      notify.error(res.error.message)
     }
   }
 
   const handleAddItem = () => {
     if (!currentItem.materialId || currentItem.unitPrice <= 0) {
-      setError('Please fill in all required item fields')
+      notify.error('Please fill in all required item fields')
       return
     }
 
     if (currentItem.category === 'PLAIN_ROLLS') {
       const weights = currentItem.rollWeights.split(/[\s,]+/).map(w => parseFloat(w.trim())).filter(w => !isNaN(w) && w > 0)
       if (weights.length === 0 || weights.length > 35) {
-        setError('Enter 1-35 roll weights (space or comma-separated, kg)')
+        notify.error('Enter 1-35 roll weights (space or comma-separated, kg)')
         return
       }
       if (poLineItems.length >= 60) {
-        setError('Maximum 60 line items allowed')
+        notify.error('Maximum 60 line items allowed')
         return
       }
       const totalWeight = weights.reduce((sum, w) => sum + w, 0)
@@ -247,7 +249,7 @@ export function ProcurementPage() {
       }])
     } else if (currentItem.category === 'INK_SOLVENTS') {
       if (poLineItems.length >= 60) {
-        setError('Maximum 60 line items allowed')
+        notify.error('Maximum 60 line items allowed')
         return
       }
       const material = materials.find(m => m.id === currentItem.materialId)
@@ -264,7 +266,7 @@ export function ProcurementPage() {
       }])
     } else if (currentItem.category === 'PACKAGING') {
       if (poLineItems.length >= 60) {
-        setError('Maximum 60 line items allowed')
+        notify.error('Maximum 60 line items allowed')
         return
       }
       const material = materials.find(m => m.id === currentItem.materialId)
@@ -281,7 +283,6 @@ export function ProcurementPage() {
     }
 
     setCurrentItem({ category: '', subCategory: '', materialId: '', quantity: 1, totalWeight: 0, unitPrice: 0, rollWeights: '' })
-    setError('')
   }
 
   const handleCategoryChange = (category: ItemCategory) => {
@@ -317,9 +318,10 @@ export function ProcurementPage() {
     if (!confirm('Are you sure you want to delete this PO?')) return
     const res = await procurementApi.deletePO(poId)
     if (!res.error) {
+      notify.success('Purchase order cancelled')
       loadData()
     } else {
-      setError(res.error.message)
+      notify.error(res.error.message)
     }
   }
 
@@ -336,8 +338,8 @@ export function ProcurementPage() {
   }
 
   const handleCreateInvoice = async () => {
-    if (!invForm.poId) { setError('Select a purchase order'); return }
-    if (invForm.amount <= 0) { setError('Amount must be greater than 0'); return }
+    if (!invForm.poId) { notify.error('Select a purchase order'); return }
+    if (invForm.amount <= 0) { notify.error('Amount must be greater than 0'); return }
     try {
       const res = await procurementApi.createSupplierInvoice({
         poId: invForm.poId,
@@ -345,12 +347,13 @@ export function ProcurementPage() {
         amount: invForm.amount,
         invoiceNumber: invForm.invoiceNumber || undefined
       })
-      if (res.error) { setError(res.error.message); return }
+      if (res.error) { notify.error(res.error.message); return }
+      notify.success('Supplier invoice recorded')
       setShowInvModal(false)
       setPoForInv(null)
       setInvoicedPOIds(prev => new Set(prev).add(invForm.poId))
       loadData()
-    } catch (err: any) { setError(err.message) }
+    } catch (err: any) { notify.error(err.message) }
   }
 
   const openPaymentModal = (inv: SupplierInvoice) => {
@@ -368,7 +371,7 @@ export function ProcurementPage() {
 
   const handleRecordPayment = async () => {
     if (!selectedInvoice) return
-    if (payForm.amount <= 0) { setError('Payment amount must be greater than 0'); return }
+    if (payForm.amount <= 0) { notify.error('Payment amount must be greater than 0'); return }
     try {
       const res = await procurementApi.addPayment(selectedInvoice.id, {
         amount: payForm.amount,
@@ -377,11 +380,12 @@ export function ProcurementPage() {
         reference: payForm.reference || undefined,
         notes: payForm.notes || undefined
       })
-      if (res.error) { setError(res.error.message); return }
+      if (res.error) { notify.error(res.error.message); return }
+      notify.success('Supplier payment recorded')
       setShowPayModal(false)
       setSelectedInvoice(null)
       loadSupplierInvoices()
-    } catch (err: any) { setError(err.message) }
+    } catch (err: any) { notify.error(err.message) }
   }
 
   const openViewPOModal = (po: PurchaseOrder) => {
@@ -430,7 +434,7 @@ export function ProcurementPage() {
 
   const handleEditAddItem = () => {
     if (!editCurrentItem.materialId || editCurrentItem.unitPrice <= 0) {
-      setError('Please fill in all required item fields')
+      notify.error('Please fill in all required item fields')
       return
     }
 
@@ -438,7 +442,7 @@ export function ProcurementPage() {
       if (editCurrentItem.category === 'PLAIN_ROLLS') {
         const weights = editCurrentItem.rollWeights.split(/[\s,]+/).map(w => parseFloat(w.trim())).filter(w => !isNaN(w) && w > 0)
         if (weights.length === 0 || weights.length > 35) {
-          setError('Enter 1-35 roll weights (space or comma-separated, kg)')
+          notify.error('Enter 1-35 roll weights (space or comma-separated, kg)')
           return null
         }
         const material = materials.find(m => m.id === editCurrentItem.materialId)
@@ -488,14 +492,13 @@ export function ProcurementPage() {
       setEditingLineItemIndex(null)
     } else {
       if (editLineItems.length >= 60) {
-        setError('Maximum 60 line items allowed')
+        notify.error('Maximum 60 line items allowed')
         return
       }
       setEditLineItems([...editLineItems, item])
     }
 
     setEditCurrentItem({ category: '', subCategory: '', materialId: '', quantity: 1, totalWeight: 0, unitPrice: 0, rollWeights: '' })
-    setError('')
   }
 
   const cancelEditLineItem = () => {
@@ -537,10 +540,10 @@ export function ProcurementPage() {
       }))
     })
     if (res.error) {
-      setError(res.error.message)
+      notify.error(res.error.message)
       return
     }
-
+    notify.success('Purchase order updated')
     setShowEditPOModal(false)
     loadData()
   }
@@ -577,8 +580,6 @@ export function ProcurementPage() {
             Supplier Invoices
           </button>
         </div>
-
-        {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
 
         {loading ? (
           <div className="text-center py-12">Loading...</div>

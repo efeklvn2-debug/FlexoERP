@@ -342,40 +342,45 @@ export const inventoryService = {
     const movements: StockMovement[] = []
     let updated = 0
     let totalInventoryValue = 0
+    let journalEntry: any = undefined
 
-    for (const item of materials) {
-      const material = await inventoryRepository.findMaterialById(item.materialId)
-      if (!material) continue
+    await prisma.$transaction(async (tx) => {
+      for (const item of materials) {
+        const material = await inventoryRepository.findMaterialById(item.materialId)
+        if (!material) continue
 
-      const stock = await inventoryRepository.getOrCreateStock(item.materialId, 'MAIN')
-      const currentQty = stock.quantity || 0
-      const difference = item.quantity - currentQty
+        const stock = await inventoryRepository.getOrCreateStock(item.materialId, 'MAIN', tx)
+        const currentQty = stock.quantity || 0
+        const difference = item.quantity - currentQty
 
-      if (difference !== 0) {
-        await inventoryRepository.updateStockQuantity(stock.id, difference)
+        if (difference !== 0) {
+          await tx.stock.update({
+            where: { id: stock.id },
+            data: { quantity: { increment: difference } }
+          })
 
-        const movement = await inventoryRepository.createStockMovement({
-          materialId: item.materialId,
-          stockId: stock.id,
-          type: 'INITIAL',
-          quantity: Math.abs(difference),
-          reference: `INIT-${new Date().toISOString().split('T')[0]}`,
-          notes: `Initial stock: ${difference > 0 ? 'Added' : 'Reduced'} ${Math.abs(difference)} ${material.unitOfMeasure} (was ${currentQty}, now ${item.quantity})`,
-          createdById: userId
-        })
+          const movement = await inventoryRepository.createStockMovement({
+            materialId: item.materialId,
+            stockId: stock.id,
+            type: 'INITIAL',
+            quantity: Math.abs(difference),
+            reference: `INIT-${new Date().toISOString().split('T')[0]}`,
+            notes: `Initial stock: ${difference > 0 ? 'Added' : 'Reduced'} ${Math.abs(difference)} ${material.unitOfMeasure} (was ${currentQty}, now ${item.quantity})`,
+            createdById: userId
+          }, tx)
 
-        movements.push(movement)
-        updated++
+          movements.push(movement)
+          updated++
 
-        if (material.costPrice) {
-          totalInventoryValue += Number(material.costPrice) * item.quantity
+          if (material.costPrice) {
+            totalInventoryValue += Number(material.costPrice) * item.quantity
+          }
         }
       }
-    }
 
-    let journalEntry: any = undefined
-    if (totalInventoryValue > 0) {
-      try {
+      if (totalInventoryValue > 0) {
+        const inventoryAccountId = await financeService.getAccountIdByCode('1300')
+        const equityAccountId = await financeService.getAccountIdByCode('3000')
         journalEntry = await financeService.postJournalEntry({
           description: `Initial stock valuation — ${updated} material(s)`,
           sourceModule: 'OPENING',
@@ -383,15 +388,13 @@ export const inventoryService = {
           postedById: userId,
           date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
           lines: [
-            { accountId: await financeService.getAccountIdByCode('1300'), debit: totalInventoryValue, credit: 0, memo: 'Initial stock at cost' },
-            { accountId: await financeService.getAccountIdByCode('3000'), debit: 0, credit: totalInventoryValue, memo: 'Opening balance equity — inventory initialization' }
+            { accountId: inventoryAccountId, debit: totalInventoryValue, credit: 0, memo: 'Initial stock at cost' },
+            { accountId: equityAccountId, debit: 0, credit: totalInventoryValue, memo: 'Opening balance equity — inventory initialization' }
           ]
-        })
+        }, tx)
         logger.info({ totalInventoryValue, materialsCount: updated }, 'Journal entry posted for stock initialization')
-      } catch (err) {
-        logger.error({ err, totalInventoryValue }, 'Failed to post journal entry for stock initialization')
       }
-    }
+    })
 
     logger.info({ count: updated, date, totalInventoryValue }, 'Stock initialized')
 

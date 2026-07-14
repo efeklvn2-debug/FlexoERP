@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { productionService, productionJobSchema } from './service'
 import { logger } from '../../logger'
+import { sendError } from '../../middleware/errorHandler'
 
 export const productionController = {
   async getJobs(req: Request, res: Response) {
@@ -9,8 +10,7 @@ export const productionController = {
       const jobs = await productionService.getJobs(status as string)
       res.json({ data: jobs })
     } catch (error) {
-      logger.error(error, 'Error fetching production jobs')
-      res.status(500).json({ error: 'Failed to fetch jobs' })
+      sendError(res, error, 'production.getJobs')
     }
   },
 
@@ -20,8 +20,7 @@ export const productionController = {
       const rolls = await productionService.getAvailableRolls(category as string)
       res.json({ data: rolls })
     } catch (error) {
-      logger.error(error, 'Error fetching available rolls')
-      res.status(500).json({ error: 'Failed to fetch rolls' })
+      sendError(res, error, 'production.getAvailableRolls')
     }
   },
 
@@ -31,8 +30,7 @@ export const productionController = {
       const rolls = await productionService.getPrintedRolls(status as string, includeArchived === 'true')
       res.json({ data: rolls })
     } catch (error) {
-      logger.error(error, 'Error fetching printed rolls')
-      res.status(500).json({ error: 'Failed to fetch printed rolls' })
+      sendError(res, error, 'production.getPrintedRolls')
     }
   },
 
@@ -41,8 +39,7 @@ export const productionController = {
       const result = await productionService.archiveOldPrintedRolls((req as any).user?.id)
       res.json(result)
     } catch (error: any) {
-      logger.error(error, 'Error archiving printed rolls')
-      res.status(500).json({ error: error.message || 'Failed to archive printed rolls' })
+      sendError(res, error, 'production.archiveOldPrintedRolls')
     }
   },
 
@@ -52,8 +49,7 @@ export const productionController = {
       const rolls = await productionService.getPrintedRollsByParentRoll(parentRollId)
       res.json({ data: rolls })
     } catch (error) {
-      logger.error(error, 'Error fetching printed rolls by parent roll')
-      res.status(500).json({ error: 'Failed to fetch printed rolls' })
+      sendError(res, error, 'production.getPrintedRollsByParentRoll')
     }
   },
 
@@ -62,8 +58,7 @@ export const productionController = {
       const rollTypes = await productionService.getRollTypes()
       res.json({ data: rollTypes })
     } catch (error) {
-      logger.error(error, 'Error fetching roll types')
-      res.status(500).json({ error: 'Failed to fetch roll types' })
+      sendError(res, error, 'production.getRollTypes')
     }
   },
 
@@ -73,8 +68,7 @@ export const productionController = {
       const job = await productionService.getJobById(id)
       res.json({ data: job })
     } catch (error: any) {
-      logger.error(error, 'Error fetching production job')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to fetch job' })
+      sendError(res, error, 'production.getJobById')
     }
   },
 
@@ -88,8 +82,7 @@ export const productionController = {
       const job = await productionService.createJob(parseResult.data)
       res.status(201).json({ data: job })
     } catch (error: any) {
-      logger.error(error, 'Error creating production job')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create job' })
+      sendError(res, error, 'production.createJob')
     }
   },
 
@@ -104,8 +97,7 @@ export const productionController = {
       const job = await productionService.updateJob(id, parseResult.data)
       res.json({ data: job })
     } catch (error: any) {
-      logger.error(error, 'Error updating production job')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update job' })
+      sendError(res, error, 'production.updateJob')
     }
   },
 
@@ -121,8 +113,7 @@ export const productionController = {
       const job = await productionService.addPrintedRolls(id, weights)
       res.json({ data: job })
     } catch (error: any) {
-      logger.error(error, 'Error adding printed rolls')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to add printed rolls' })
+      sendError(res, error, 'production.addPrintedRolls')
     }
   },
 
@@ -133,8 +124,7 @@ export const productionController = {
       const job = await productionService.completeJob(id, date, consumedRollIds)
       res.json({ data: job })
     } catch (error: any) {
-      logger.error(error, 'Error completing production job')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to complete job' })
+      sendError(res, error, 'production.completeJob')
     }
   },
 
@@ -146,8 +136,7 @@ export const productionController = {
       const result = await productionService.markRollConsumed(id, userId, date)
       res.json(result)
     } catch (error: any) {
-      logger.error(error, 'Error marking roll as consumed')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to mark roll as consumed' })
+      sendError(res, error, 'production.markRollConsumed')
     }
   },
 
@@ -157,8 +146,7 @@ export const productionController = {
       await productionService.deleteJob(id)
       res.json({ success: true })
     } catch (error: any) {
-      logger.error(error, 'Error deleting production job')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete job' })
+      sendError(res, error, 'production.deleteJob')
     }
   },
 
@@ -170,8 +158,7 @@ export const productionController = {
       const result = await productionService.disposeRoll(id, reason, (req as any).user?.id, date)
       res.json(result)
     } catch (error: any) {
-      logger.error(error, 'Error disposing roll')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to dispose roll' })
+      sendError(res, error, 'production.disposeRoll')
     }
   },
 
@@ -182,8 +169,7 @@ export const productionController = {
       const result = await productionService.returnRoll(id, (req as any).user?.id, date)
       res.json(result)
     } catch (error: any) {
-      logger.error(error, 'Error returning roll')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to return roll' })
+      sendError(res, error, 'production.returnRoll')
     }
   },
 
@@ -198,8 +184,7 @@ export const productionController = {
       const result = await productionService.customerReturnRoll(id, { qty, reason, condition, refundMethod, userId: (req as any).user?.id, date })
       res.json(result)
     } catch (error: any) {
-      logger.error(error, 'Error processing customer return')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to process customer return' })
+      sendError(res, error, 'production.customerReturnRoll')
     }
   },
 
@@ -210,8 +195,7 @@ export const productionController = {
       const result = await productionService.receiveReplacement(id, (req as any).user?.id, date)
       res.json(result)
     } catch (error: any) {
-      logger.error(error, 'Error receiving replacement')
-      res.status(error.statusCode || 500).json({ error: error.message || 'Failed to receive replacement' })
+      sendError(res, error, 'production.receiveReplacement')
     }
   }
 }

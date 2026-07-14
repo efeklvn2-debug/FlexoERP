@@ -56,6 +56,18 @@ export function errorHandler(
   })
 }
 
+export function sendError(res: Response, error: any, logLabel?: string) {
+  if (logLabel) logger.error(error, logLabel)
+  if (error instanceof AppError) {
+    return res.status(error.statusCode).json({
+      error: { code: error.code, message: error.message, details: error.details }
+    })
+  }
+  return res.status(500).json({
+    error: { code: 'INTERNAL_ERROR', message: error.message || 'An unexpected error occurred' }
+  })
+}
+
 export function notFoundHandler(req: Request, res: Response) {
   res.status(404).json({
     error: {

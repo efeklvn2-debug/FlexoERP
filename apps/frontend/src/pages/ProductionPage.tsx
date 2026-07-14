@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { productionApi, ProductionJob } from '../api/production'
 import type { Roll } from '../api/procurement'
+import { useNotification } from '../contexts/NotificationContext'
 
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
@@ -16,9 +17,9 @@ const MACHINES = ['MC1', 'MC2', 'MC3', 'MC4', 'MC5'] as const
 
 export function ProductionPage() {
   const navigate = useNavigate()
+  const notify = useNotification()
   const [jobs, setJobs] = useState<ProductionJob[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [showViewModal, setShowViewModal] = useState(false)
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null)
   const [showCompleteModal, setShowCompleteModal] = useState(false)
@@ -42,11 +43,10 @@ export function ProductionPage() {
 
   const loadData = async () => {
     setLoading(true)
-    setError('')
     try {
       const jobsRes = await productionApi.getJobs()
       setJobs(Array.isArray(jobsRes.data) ? jobsRes.data : (jobsRes.data as any)?.data || [])
-    } catch (err: any) { setError(err.message) }
+    } catch (err: any) { notify.error(err.message) }
     setLoading(false)
   }
 
@@ -68,10 +68,11 @@ export function ProductionPage() {
     setCompleteJobRolls([])
     setConsumedRollIds([])
     if (!res.error) {
+      notify.success('Job completed successfully')
       loadData()
       setShowCompleteSuccess(true)
     } else {
-      setError(res.error.message)
+      notify.error(res.error.message)
     }
   }
 
@@ -79,9 +80,10 @@ export function ProductionPage() {
     if (!confirm('Delete this job?')) return
     const res = await productionApi.deleteJob(jobId)
     if (!res.error) {
+      notify.success('Job deleted')
       loadData()
     } else {
-      setError(res.error.message)
+      notify.error(res.error.message)
     }
   }
 
@@ -160,8 +162,6 @@ export function ProductionPage() {
           </div>
           
         </div>
-
-        {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
 
         {/* Filters */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">

@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react'
 import { salesOrderApi, Customer, CustomerBalance } from '../api/salesOrders'
 import { settingsApi } from '../api/settings'
 import { Layout } from '../components/Layout'
+import { useNotification } from '../contexts/NotificationContext'
 
 const DEFAULT_COLORS = ['RoyalBlue', 'VioletBlue', 'SkyBlue']
 
 export function CustomersPage() {
+  const notify = useNotification()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [search, setSearch] = useState('')
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
@@ -61,27 +62,25 @@ export function CustomersPage() {
 
   const loadCustomers = async () => {
     setLoading(true)
-    setError('')
     try {
       const res = await salesOrderApi.getCustomers()
       setCustomers(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
     } catch (err: any) {
-      setError(err.message || 'Failed to load customers')
+      notify.error(err.message || 'Failed to load customers')
     }
     setLoading(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
 
     if (!form.name.trim()) {
-      setError('Name is required')
+      notify.error('Name is required')
       return
     }
 
     if (form.colors.length === 0) {
-      setError('Please select at least one ink color')
+      notify.error('Please select at least one ink color')
       return
     }
 
@@ -112,9 +111,10 @@ export function CustomersPage() {
       })
     }
     if (res.error) {
-      setError(res.error.message)
+      notify.error(res.error.message)
       return
     }
+    notify.success(editingCustomer ? 'Customer updated successfully' : 'Customer created successfully')
     setShowModal(false)
     setForm({ name: '', code: '', email: '', phone: '', address: '', colors: [] })
     setEditingCustomer(null)
@@ -153,8 +153,6 @@ export function CustomersPage() {
             Add Customer
           </button>
         </div>
-
-        {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">{error}</div>}
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200">
           <div className="p-4 border-b border-slate-200 flex items-center gap-3">
@@ -330,6 +328,7 @@ export function CustomersPage() {
                             setDepositError('')
                             const res = await salesOrderApi.adjustDeposit(editingCustomer.id, amount)
                             if (res.error) { setDepositError(res.error.message); return }
+                            notify.success('Deposit adjusted successfully')
                             setDepositModalCustomer(null)
                             setDepositAmount('')
                             loadBalances()

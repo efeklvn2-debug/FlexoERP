@@ -62,9 +62,14 @@ export interface FinanceDashboard {
   }
   profitSnapshot: {
     revenueThisMonth: number
+    revenueBreakdown: {
+      salesRevenue: number
+      packingRevenue: number
+      otherIncome: number
+    }
     materialCostThisMonth: number
     expensesThisMonth: number
-    estimatedProfit: number
+    netProfit: number
   }
 }
 

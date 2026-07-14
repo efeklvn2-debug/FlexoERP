@@ -166,3 +166,58 @@ Every pickup generates a separate invoice for the exact quantity picked up. No m
 - Backend already includes `salesOrder` relation in `getJobs()` response — no backend changes needed
 - Frontend: `ProductionJob.salesOrder` typing added to interface, "Due Date" column + sortable in production table
 - **Future: Dashboard card** — highlight overdue/soon-due jobs based on this date for production scheduling visibility
+
+## DashboardPage (14 Jul 2026) — Main Operations Dashboard
+
+### Data sources (5 parallel calls)
+- `financeApi.getDashboard(month)` → only used for `dashboard.cashPosition.moneyInToday/Out` (Cash card)
+- `salesOrderApi.getOrders()` → orders for Pending Pickups, Items Sold, New Orders, Recent Orders panel
+- `productionApi.getJobs()` → Active Jobs count, period output (kg), Production Waste
+- `inventoryApi.getMaterials()` → Low Stock alerts, Materials count  
+- `salesOrderApi.getCustomers()` → Active Customers count
+
+### KPI cards (4-column grid, un-gated)
+1. **Pending Pickups** — count of `READY` orders, total kg to pick up. Clickable → `/sales-orders`
+2. **Items Sold ({period})** — rolls kg (invoices `quantityDelivered`) + Packs (invoices `packingBagsQuantity` + uninvoiced orders). Uses `issuedAt` as business date. Clickable → `/sales-orders`
+3. **New Orders ({period})** — count of orders `createdAt` in period, with pending/approved breakdown. Clickable → `/sales-orders`
+4. **Low Stock Items** — materials where `totalStock < minStock`. Critical = ≤0 or ≤50% min. Clickable → `/inventory`
+
+### Mini stat cards (6-column grid)
+- Active Customers → `/customers`
+- Active Jobs → `/production`
+- Materials in Stock → `/inventory`
+- Pending Orders → `/sales-orders`
+- {Period} Output (kg) — from production jobs in date range → `/production`
+- Net Profit — gated (ADMIN/MANAGER only) → `/finance`
+
+### Period selector (dropdown, 7 options)
+- Default: **Today**
+- All 7: Today, Yesterday, This Week, Last Week, This Month, Last Month, Last 3 Months
+- `periodDateRange(p)` computes `{ from, to }` date strings for filtering
+- Jobs/invoices/orders filtered client-side by date range
+- Finance data (cash) uses `periodToMonth(p)` → month string for API (only Last Month differs)
+
+### Role gating
+- Uses `localStorage.getItem('user')` (NOT `useAuthStore` — zustand persist has hydration delays)
+- Only Net Profit mini-card is gated (ADMIN/MANAGER only)
+- Revenue removed from dashboard entirely (was not updating due to monthly backend granularity)
+
+### Recent Orders panel
+- Latest 5 orders sorted by `createdAt` desc
+- Shows: order number, customer name, **expected delivery date** (overdue in red if past due + not completed/picked up), amount, status badge
+
+### Inventory Alerts panel
+- Materials below `minStock`, colored Critical (≤50% of min or ≤0) / Low (<100%), shows up to 8
+
+## FinancePage — Post Journal Entry (14 Jul 2026)
+- "**+ Post Journal Entry**" button added to Journal tab header (blue, right-aligned)
+- Modal: description + date + reference (auto) + dynamic multi-line table with account picker, debit/credit, memo
+- Validates: debits = credits, at least 2 lines, no negative amounts
+- Submits via `financeApi.postJournalEntry` with `sourceModule: 'ADJUSTMENT'`
+- Journal loader also fetches accounts for the dropdown
+
+## FinancePage — Add Account (14 Jul 2026)
+- "**+ Add Account**" button added to Chart of Accounts tab header
+- Modal: code + name + type dropdown + description
+- Calls `financeApi.createAccount()`, refreshes list on success
+- Backend endpoint `POST /api/finance/accounts` already existed

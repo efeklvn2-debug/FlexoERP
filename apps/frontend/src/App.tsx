@@ -10,6 +10,8 @@ import { ProductionPage } from './pages/ProductionPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { FinancePage } from './pages/FinancePage'
 import { SalesOrdersPage } from './pages/SalesOrdersPage'
+import { NotificationProvider } from './contexts/NotificationContext'
+import { Toast } from './components/Toast'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -34,20 +36,23 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/inventory" element={<ProtectedRoute><InventoryPage /></ProtectedRoute>} />
-        <Route path="/customers" element={<ProtectedRoute><CustomersPage /></ProtectedRoute>} />
-        <Route path="/customers/:customerId" element={<ProtectedRoute><CustomerDetailPage /></ProtectedRoute>} />
-        <Route path="/procurement" element={<ProtectedRoute><ProcurementPage /></ProtectedRoute>} />
-        <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
-        <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
-        <Route path="/sales-orders" element={<ProtectedRoute><SalesOrdersPage /></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-        <Route path="/*" element={<ProtectedRoute><Routes><Route path="/" element={<DashboardPage />} /></Routes></ProtectedRoute>} />
-      </Routes>
-    </BrowserRouter>
+    <NotificationProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/inventory" element={<ProtectedRoute><InventoryPage /></ProtectedRoute>} />
+          <Route path="/customers" element={<ProtectedRoute><CustomersPage /></ProtectedRoute>} />
+          <Route path="/customers/:customerId" element={<ProtectedRoute><CustomerDetailPage /></ProtectedRoute>} />
+          <Route path="/procurement" element={<ProtectedRoute><ProcurementPage /></ProtectedRoute>} />
+          <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
+          <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
+          <Route path="/sales-orders" element={<ProtectedRoute><SalesOrdersPage /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+          <Route path="/*" element={<ProtectedRoute><Routes><Route path="/" element={<DashboardPage />} /></Routes></ProtectedRoute>} />
+        </Routes>
+      </BrowserRouter>
+      <Toast />
+    </NotificationProvider>
   )
 }
 

@@ -49,7 +49,7 @@ export const financeService = {
       orderBy: { date: 'asc' },
       select: { date: true }
     })
-    return earliest?.date || new Date('2026-01-01')
+    return earliest?.date || new Date(new Date().getFullYear() - 5, 0, 1)
   },
 
   async validateJournalDate(date: Date, tx?: Prisma.TransactionClient): Promise<void> {
@@ -209,19 +209,28 @@ export const financeService = {
     return { accounts: balances, totals }
   },
 
-  async getFinanceDashboard() {
+  async getFinanceDashboard(month?: string) {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const tomorrow = new Date(today)
     tomorrow.setDate(tomorrow.getDate() + 1)
 
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+    let startOfMonth: Date
+    let endOfMonth: Date
+    if (month) {
+      const [year, m] = month.split('-').map(Number)
+      startOfMonth = new Date(year, m - 1, 1)
+      endOfMonth = new Date(year, m, 0, 23, 59, 59)
+    } else {
+      startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+      endOfMonth = tomorrow
+    }
 
     const cashFlow = await financeRepository.getCashFlow(today, tomorrow)
 
-    const revenue = await financeRepository.getRevenueByPeriod(startOfMonth, tomorrow)
-    const expenses = await financeRepository.getExpensesByPeriod(startOfMonth, tomorrow)
-    const cogs = await financeRepository.getCogsByPeriod(startOfMonth, tomorrow)
+    const revenue = await financeRepository.getRevenueByPeriod(startOfMonth, endOfMonth)
+    const expenses = await financeRepository.getExpensesByPeriod(startOfMonth, endOfMonth)
+    const cogs = await financeRepository.getCogsByPeriod(startOfMonth, endOfMonth)
 
     const totalRevenue = revenue.sales + revenue.packing + revenue.otherIncome
     const totalExpenses = Object.values(expenses).reduce((a, b) => a + b, 0)
@@ -234,6 +243,25 @@ export const financeService = {
     if (receivablesAccount) {
       const balance = await financeRepository.getAccountBalance(receivablesAccount.id)
       receivablesTotal = Math.max(0, balance.balance)
+
+      const arCustomers = await prisma.invoice.groupBy({
+        by: ['customerId'],
+        where: {
+          status: { in: ['ISSUED', 'PARTIAL', 'OVERDUE'] },
+          balanceDue: { gt: 0 }
+        }
+      })
+      customerCount = arCustomers.length
+
+      const overdueResult = await prisma.invoice.aggregate({
+        where: {
+          status: { in: ['ISSUED', 'PARTIAL', 'OVERDUE'] },
+          dueDate: { lt: new Date() },
+          balanceDue: { gt: 0 }
+        },
+        _sum: { balanceDue: true }
+      })
+      overdueAmount = Number(overdueResult._sum.balanceDue || 0)
     }
 
     const payablesAccount = await financeRepository.findAccountByCode('2000')
@@ -263,9 +291,14 @@ export const financeService = {
       },
       profitSnapshot: {
         revenueThisMonth: totalRevenue,
+        revenueBreakdown: {
+          salesRevenue: revenue.sales,
+          packingRevenue: revenue.packing,
+          otherIncome: revenue.otherIncome
+        },
         materialCostThisMonth: cogs,
         expensesThisMonth: totalExpenses,
-        estimatedProfit: totalRevenue - cogs - totalExpenses
+        netProfit: totalRevenue - cogs - totalExpenses
       }
     }
   },
