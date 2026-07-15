@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express'
 import { salesService } from './service'
 import { CustomerInput, OrderInput, OrderUpdateInput } from './validation'
 import { AuthenticatedRequest } from '../../middleware/auth'
+import { sendError } from '../../middleware/errorHandler'
 
 export const salesController = {
   // Customer endpoints
@@ -11,7 +12,7 @@ export const salesController = {
       const customers = await salesService.getAllCustomers(includeInactive)
       res.json({ data: customers })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.getAllCustomers')
     }
   },
 
@@ -20,7 +21,7 @@ export const salesController = {
       const customer = await salesService.getCustomerById(req.params.id)
       res.json({ data: customer })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.getCustomerById')
     }
   },
 
@@ -45,7 +46,7 @@ export const salesController = {
       const customer = await salesService.createCustomer(input)
       res.status(201).json({ data: customer })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.createCustomer')
     }
   },
 
@@ -55,7 +56,7 @@ export const salesController = {
       const customer = await salesService.updateCustomer(req.params.id, input)
       res.json({ data: customer })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.updateCustomer')
     }
   },
 
@@ -64,7 +65,7 @@ export const salesController = {
       await salesService.deleteCustomer(req.params.id)
       res.status(204).send()
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.deleteCustomer')
     }
   },
 
@@ -78,7 +79,7 @@ export const salesController = {
       const orders = await salesService.getAllOrders(filters)
       res.json({ data: orders })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.getAllOrders')
     }
   },
 
@@ -87,7 +88,7 @@ export const salesController = {
       const order = await salesService.getOrderById(req.params.id)
       res.json({ data: order })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.getOrderById')
     }
   },
 
@@ -98,7 +99,7 @@ export const salesController = {
       const order = await salesService.createOrder(input, userId)
       res.status(201).json({ data: order })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.createOrder')
     }
   },
 
@@ -109,7 +110,7 @@ export const salesController = {
       const order = await salesService.updateOrder(req.params.id, input, userId)
       res.json({ data: order })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.updateOrder')
     }
   },
 
@@ -118,7 +119,7 @@ export const salesController = {
       await salesService.cancelOrder(req.params.id)
       res.status(204).send()
     } catch (error) {
-      next(error)
+      sendError(res, error, 'sales.cancelOrder')
     }
   }
 }

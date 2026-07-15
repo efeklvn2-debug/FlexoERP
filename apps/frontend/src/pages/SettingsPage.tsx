@@ -40,6 +40,7 @@ export function SettingsPage() {
   const [showArchivedInkColors, setShowArchivedInkColors] = useState(false)
   const [showAddInkColorModal, setShowAddInkColorModal] = useState(false)
   const [inkColorForm, setInkColorForm] = useState({ name: '', mapping: '' })
+  const [editingInkColor, setEditingInkColor] = useState<any>(null)
   const [archiveInkConfirm, setArchiveInkConfirm] = useState<any>(null)
 
   const [materialForm, setMaterialForm] = useState({
@@ -943,7 +944,7 @@ const loadSettings = async () => {
             <div className="flex justify-between items-center">
               <h2 className="text-lg font-semibold">Ink Colors</h2>
               <button
-                onClick={() => { setInkColorForm({ name: '', mapping: '' }); setShowAddInkColorModal(true) }}
+                onClick={() => { setEditingInkColor(null); setInkColorForm({ name: '', mapping: '' }); setShowAddInkColorModal(true) }}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Add Ink Color
@@ -998,12 +999,23 @@ const loadSettings = async () => {
                             Restore
                           </button>
                         ) : (
-                          <button
-                            onClick={() => setArchiveInkConfirm(ic)}
-                            className="text-red-600 hover:text-red-700 text-sm font-medium"
-                          >
-                            Archive
-                          </button>
+                          <div className="flex items-center justify-end space-x-2">
+                            <button
+                              onClick={() => { setEditingInkColor(ic); setInkColorForm({ name: ic.name, mapping: ic.mapping }); setShowAddInkColorModal(true) }}
+                              className="text-slate-400 hover:text-blue-600 text-sm font-medium"
+                              title="Edit"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => setArchiveInkConfirm(ic)}
+                              className="text-red-600 hover:text-red-700 text-sm font-medium"
+                            >
+                              Archive
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -1021,19 +1033,26 @@ const loadSettings = async () => {
           </div>
         )}
 
-        {/* Add Ink Color Modal */}
+        {/* Add/Edit Ink Color Modal */}
         {showAddInkColorModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold mb-4">Add Ink Color</h2>
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAddInkColorModal(false)}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+              <h2 className="text-xl font-bold mb-4">{editingInkColor ? 'Edit Ink Color' : 'Add Ink Color'}</h2>
               <form onSubmit={async (e) => {
                 e.preventDefault()
                 setSaving(true)
                 try {
-                  const res = await settingsApi.createInkColor(inkColorForm)
-                  if (res.error) { notify.error(res.error.message); return }
+                  if (editingInkColor) {
+                    const res = await settingsApi.updateInkColor(editingInkColor.id, inkColorForm)
+                    if (res.error) { notify.error(res.error.message); return }
+                    notify.success(`Ink color "${inkColorForm.name}" updated`)
+                  } else {
+                    const res = await settingsApi.createInkColor(inkColorForm)
+                    if (res.error) { notify.error(res.error.message); return }
+                    notify.success(`Ink color "${inkColorForm.name}" added`)
+                  }
                   setShowAddInkColorModal(false)
-                  notify.success(`Ink color "${inkColorForm.name}" added`)
+                  setEditingInkColor(null)
                   loadInkColors()
                 } catch (err: any) {
                   notify.error(err.message)
@@ -1067,8 +1086,8 @@ const loadSettings = async () => {
                   </p>
                 </div>
                 <div className="flex justify-end space-x-3 pt-4">
-                  <button type="button" onClick={() => setShowAddInkColorModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
-                  <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg">{saving ? 'Adding...' : 'Add'}</button>
+                  <button type="button" onClick={() => { setShowAddInkColorModal(false); setEditingInkColor(null) }} className="px-4 py-2 border border-slate-300 rounded-lg">Cancel</button>
+                  <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg">{saving ? 'Saving...' : editingInkColor ? 'Update' : 'Add'}</button>
                 </div>
               </form>
             </div>

@@ -3,9 +3,16 @@ import { Supplier } from './types'
 
 export const supplierRepository = {
   async findAll(): Promise<Supplier[]> {
-    return prisma.supplier.findMany({
-      orderBy: { name: 'asc' }
+    const suppliers = await prisma.supplier.findMany({
+      orderBy: { name: 'asc' },
+      include: { invoices: { select: { amount: true, amountPaid: true } } }
     })
+    return suppliers.map(s => ({
+      ...s,
+      invoices: undefined,
+      outstandingBalance: Number(s.invoices.reduce((sum, inv) => sum + Number(inv.amount) - Number(inv.amountPaid), 0)),
+      totalBilled: Number(s.invoices.reduce((sum, inv) => sum + Number(inv.amount), 0))
+    })) as unknown as Supplier[]
   },
 
   async findById(id: string): Promise<Supplier | null> {

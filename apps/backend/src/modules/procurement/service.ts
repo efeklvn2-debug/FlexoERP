@@ -24,8 +24,8 @@ async function generateSupplierInvoiceNumber(): Promise<string> {
 
 export const procurementService = {
   // Purchase Orders
-  async getAllPOs(status?: string): Promise<PurchaseOrder[]> {
-    return procurementRepository.findAllPOs({ status })
+  async getAllPOs(status?: string, excludeInvoiced?: boolean): Promise<PurchaseOrder[]> {
+    return procurementRepository.findAllPOs({ status, excludeInvoiced })
   },
 
   async getPOById(id: string): Promise<PurchaseOrder> {
@@ -179,7 +179,8 @@ export const procurementService = {
         const rolls = await procurementRepository.createRollsFromWeights(
           poId,
           lineItem.materialId,
-          rollWeights
+          rollWeights,
+          date ? dateFromInput(date) : undefined
         )
         allRolls.push(...rolls)
       }

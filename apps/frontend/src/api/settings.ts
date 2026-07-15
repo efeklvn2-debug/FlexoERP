@@ -94,7 +94,7 @@ export const settingsApi = {
   },
 
   updateInkColor: async (id: string, data: { name?: string; mapping?: string }) => {
-    return api.put<any>(`/settings/ink-colors/${id}`, data)
+    return api.patch<any>(`/settings/ink-colors/${id}`, data)
   },
 
   archiveInkColor: async (id: string) => {

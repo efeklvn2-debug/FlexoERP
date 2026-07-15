@@ -1,7 +1,16 @@
 import { Router } from 'express'
 import { salesOrderController, paymentController, invoiceController, coreBuybackController } from './controller'
 import { authenticate, loadUser, authorize } from '../../middleware/auth'
+import { validateRequest } from '../../middleware/validation'
 import { Role } from '@flexoprint/types'
+import {
+  createOrderSchema, updateOrderSchema,
+  createCustomerSchema, updateCustomerSchema,
+  recordPickupSchema, recordPaymentSchema,
+  createInvoiceSchema, addInvoicePaymentSchema,
+  coreBuybackSchema, adjustDepositSchema,
+  sellPackingBagsSchema, startProductionSchema
+} from './validation'
 
 export const salesOrderRouter = Router()
 
@@ -10,45 +19,45 @@ salesOrderRouter.use(authenticate, loadUser)
 // Sales Orders
 salesOrderRouter.get('/orders', salesOrderController.getOrders)
 salesOrderRouter.get('/orders/:id', salesOrderController.getOrderById)
-salesOrderRouter.post('/orders', salesOrderController.createOrder)
-salesOrderRouter.patch('/orders/:id', salesOrderController.updateOrder)
+salesOrderRouter.post('/orders', validateRequest(createOrderSchema), salesOrderController.createOrder)
+salesOrderRouter.patch('/orders/:id', validateRequest(updateOrderSchema), salesOrderController.updateOrder)
 salesOrderRouter.patch('/orders/:id/approve', salesOrderController.approveOrder)
-salesOrderRouter.patch('/orders/:id/start-production', salesOrderController.startProduction)
+salesOrderRouter.patch('/orders/:id/start-production', validateRequest(startProductionSchema), salesOrderController.startProduction)
 salesOrderRouter.patch('/orders/:id/cancel', salesOrderController.cancelOrder)
 salesOrderRouter.patch('/orders/:id/ready', salesOrderController.markReady)
-salesOrderRouter.patch('/orders/:id/pickup', salesOrderController.recordPickup)
+salesOrderRouter.patch('/orders/:id/pickup', validateRequest(recordPickupSchema), salesOrderController.recordPickup)
 
 // Payments
-salesOrderRouter.post('/payments', paymentController.recordPayment)
+salesOrderRouter.post('/payments', validateRequest(recordPaymentSchema), paymentController.recordPayment)
 salesOrderRouter.get('/payments', paymentController.getPayments)
 salesOrderRouter.get('/payments/order/:salesOrderId', paymentController.getPaymentsBySalesOrder)
 salesOrderRouter.get('/payments/customer/:customerId', paymentController.getPaymentsByCustomer)
 
 // Invoices
-salesOrderRouter.post('/invoices', invoiceController.createInvoice)
+salesOrderRouter.post('/invoices', validateRequest(createInvoiceSchema), invoiceController.createInvoice)
 salesOrderRouter.get('/invoices', invoiceController.getInvoices)
 salesOrderRouter.get('/invoices/:id', invoiceController.getInvoice)
 salesOrderRouter.patch('/invoices/:id/issue', invoiceController.issueInvoice)
-salesOrderRouter.post('/invoices/:id/payments', invoiceController.addPayment)
+salesOrderRouter.post('/invoices/:id/payments', validateRequest(addInvoicePaymentSchema), invoiceController.addPayment)
 salesOrderRouter.get('/invoices/:id/pdf', invoiceController.downloadPdf)
 
 // Core Buyback
-salesOrderRouter.post('/core-buyback', coreBuybackController.recordCoreBuyback)
+salesOrderRouter.post('/core-buyback', validateRequest(coreBuybackSchema), coreBuybackController.recordCoreBuyback)
 salesOrderRouter.get('/core-buyback', coreBuybackController.getCoreBuybacks)
 
 // Customer Balance & Aging
 salesOrderRouter.get('/customers', salesOrderController.getCustomers)
 salesOrderRouter.get('/customers/:customerId', salesOrderController.getCustomerById)
-salesOrderRouter.post('/customers', salesOrderController.createCustomer)
-salesOrderRouter.patch('/customers/:customerId', salesOrderController.updateCustomer)
+salesOrderRouter.post('/customers', validateRequest(createCustomerSchema), salesOrderController.createCustomer)
+salesOrderRouter.patch('/customers/:customerId', validateRequest(updateCustomerSchema), salesOrderController.updateCustomer)
 salesOrderRouter.get('/customers/:customerId/balance', salesOrderController.getCustomerBalance)
 salesOrderRouter.get('/customers/:customerId/aging', salesOrderController.getCustomerAging)
 salesOrderRouter.get('/customer-balances', salesOrderController.getAllCustomerBalances)
 salesOrderRouter.get('/customers/:customerId/transactions', salesOrderController.getCustomerTransactions)
-salesOrderRouter.post('/customers/:customerId/deposit', authorize(Role.ADMIN, Role.MANAGER), salesOrderController.adjustDeposit)
+salesOrderRouter.post('/customers/:customerId/deposit', authorize(Role.ADMIN, Role.MANAGER), validateRequest(adjustDepositSchema), salesOrderController.adjustDeposit)
 
 // Packing Bag Sales
-salesOrderRouter.post('/packing-bags/sell', coreBuybackController.sellPackingBags)
+salesOrderRouter.post('/packing-bags/sell', validateRequest(sellPackingBagsSchema), coreBuybackController.sellPackingBags)
 
 // Receipts
 salesOrderRouter.post('/payments/:id/generate-receipt', salesOrderController.generateReceipt)

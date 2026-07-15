@@ -10,6 +10,7 @@ import { ProductionPage } from './pages/ProductionPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { FinancePage } from './pages/FinancePage'
 import { SalesOrdersPage } from './pages/SalesOrdersPage'
+import { SuppliersPage } from './pages/SuppliersPage'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { Toast } from './components/Toast'
 
@@ -47,6 +48,7 @@ function App() {
           <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
           <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
           <Route path="/sales-orders" element={<ProtectedRoute><SalesOrdersPage /></ProtectedRoute>} />
+          <Route path="/suppliers" element={<ProtectedRoute><SuppliersPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
           <Route path="/*" element={<ProtectedRoute><Routes><Route path="/" element={<DashboardPage />} /></Routes></ProtectedRoute>} />
         </Routes>

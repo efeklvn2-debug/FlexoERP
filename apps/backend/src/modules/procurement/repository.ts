@@ -37,9 +37,12 @@ export const procurementRepository = {
     return po ? convertPO(po) : null
   },
 
-  async findAllPOs(filters?: { status?: string }): Promise<PurchaseOrder[]> {
+  async findAllPOs(filters?: { status?: string; excludeInvoiced?: boolean }): Promise<PurchaseOrder[]> {
     const where: Prisma.PurchaseOrderWhereInput = {}
     if (filters?.status) where.status = filters.status as any
+    if (filters?.excludeInvoiced) {
+      where.supplierInvoices = { none: {} }
+    }
 
     const pos = await prisma.purchaseOrder.findMany({
       where,
@@ -133,11 +136,11 @@ export const procurementRepository = {
     })
   },
 
-  async createRollsFromWeights(purchaseOrderId: string, materialId: string, weights: number[]): Promise<Roll[]> {
+  async createRollsFromWeights(purchaseOrderId: string, materialId: string, weights: number[], receivedDate?: Date): Promise<Roll[]> {
     const createdRolls: Roll[] = []
     
     await prisma.$transaction(async (tx) => {
-      const today = new Date()
+      const today = receivedDate || new Date()
       const prefix = `RL-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}-`
       
       const lastRoll = await tx.roll.findFirst({
@@ -159,7 +162,7 @@ export const procurementRepository = {
             weight,
             remainingWeight: weight,
             status: 'AVAILABLE',
-            receivedDate: new Date(),
+            receivedDate: today,
             notes: ''
           },
           include: { material: true }

@@ -9,4 +9,6 @@ export interface Supplier {
   isActive: boolean
   createdAt: Date
   updatedAt: Date
+  outstandingBalance?: number
+  totalBilled?: number
 }

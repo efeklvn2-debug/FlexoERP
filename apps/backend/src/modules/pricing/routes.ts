@@ -4,37 +4,10 @@ import { authenticate, loadUser } from '../../middleware/auth'
 
 export const pricingRouter = Router()
 
-pricingRouter.get(
-  '/materials-prices',
-  authenticate,
-  loadUser,
-  pricingController.getMaterialsWithPrices
-)
+pricingRouter.use(authenticate, loadUser)
 
-pricingRouter.get(
-  '/',
-  authenticate,
-  loadUser,
-  pricingController.getPriceLists
-)
-
-pricingRouter.post(
-  '/',
-  authenticate,
-  loadUser,
-  pricingController.createPriceList
-)
-
-pricingRouter.patch(
-  '/:id',
-  authenticate,
-  loadUser,
-  pricingController.updatePriceList
-)
-
-pricingRouter.delete(
-  '/:id',
-  authenticate,
-  loadUser,
-  pricingController.deletePriceList
-)
+pricingRouter.get('/materials-prices', pricingController.getMaterialsWithPrices)
+pricingRouter.get('/', pricingController.getPriceLists)
+pricingRouter.post('/', pricingController.createPriceList)
+pricingRouter.patch('/:id', pricingController.updatePriceList)
+pricingRouter.delete('/:id', pricingController.deletePriceList)

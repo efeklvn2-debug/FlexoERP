@@ -95,8 +95,11 @@ export interface PaymentMade {
 
 export const procurementApi = {
   // Purchase Orders
-  getPOs: async (status?: string) => {
-    const query = status ? `?status=${status}` : ''
+  getPOs: async (status?: string, excludeInvoiced?: boolean) => {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (excludeInvoiced) params.set('excludeInvoiced', 'true')
+    const query = params.toString() ? `?${params.toString()}` : ''
     return api.get<PurchaseOrder[]>(`/procurement/purchase-orders${query}`)
   },
   getPO: async (id: string) => api.get<PurchaseOrder>(`/procurement/purchase-orders/${id}`),

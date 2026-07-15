@@ -3,7 +3,7 @@ import { inventoryService } from './service'
 import { dateFromInput } from '../../utils/dates'
 import { MaterialInput, StockMovementInput } from './validation'
 import { AuthenticatedRequest } from '../../middleware/auth'
-import { AppError } from '../../middleware/errorHandler'
+import { AppError, sendError } from '../../middleware/errorHandler'
 
 export const inventoryController = {
   async getSubCategories(req: Request, res: Response, next: NextFunction) {
@@ -11,7 +11,7 @@ export const inventoryController = {
       const result = await inventoryService.getSubCategories()
       res.json({ data: result })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.getSubCategories')
     }
   },
 
@@ -23,7 +23,7 @@ export const inventoryController = {
         : await inventoryService.getMaterialsWithStock()
       res.json({ data: materials })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.getAllMaterials')
     }
   },
 
@@ -32,7 +32,7 @@ export const inventoryController = {
       const material = await inventoryService.getMaterialById(req.params.id)
       res.json({ data: material })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.getMaterialById')
     }
   },
 
@@ -43,7 +43,7 @@ export const inventoryController = {
       const material = await inventoryService.createMaterial(input, userId)
       res.status(201).json({ data: material })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.createMaterial')
     }
   },
 
@@ -54,7 +54,7 @@ export const inventoryController = {
       const material = await inventoryService.updateMaterial(req.params.id, input, userId)
       res.json({ data: material })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.updateMaterial')
     }
   },
 
@@ -63,7 +63,7 @@ export const inventoryController = {
       const material = await inventoryService.archiveMaterial(req.params.id)
       res.json({ data: material })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.archiveMaterial')
     }
   },
 
@@ -72,7 +72,7 @@ export const inventoryController = {
       const material = await inventoryService.restoreMaterial(req.params.id)
       res.json({ data: material })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.restoreMaterial')
     }
   },
 
@@ -81,7 +81,7 @@ export const inventoryController = {
       await inventoryService.deleteMaterial(req.params.id)
       res.status(204).send()
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.deleteMaterial')
     }
   },
 
@@ -91,7 +91,7 @@ export const inventoryController = {
       const material = await inventoryService.adjustStock(req.params.id, newQuantity, reason)
       res.json({ data: material })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.adjustStock')
     }
   },
 
@@ -102,7 +102,7 @@ export const inventoryController = {
       const movement = await inventoryService.recordStockMovement(input, userId)
       res.status(201).json({ data: movement })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.recordStockMovement')
     }
   },
 
@@ -113,7 +113,7 @@ export const inventoryController = {
       const movements = await inventoryService.getStockMovements(materialId, limit)
       res.json({ data: movements })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.getStockMovements')
     }
   },
 
@@ -122,7 +122,7 @@ export const inventoryController = {
       const rolls = await inventoryService.getMaterialRolls(req.params.id)
       res.json({ data: rolls })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.getMaterialRolls')
     }
   },
 
@@ -131,7 +131,7 @@ export const inventoryController = {
       const result = await inventoryService.getCoreStock()
       res.json({ data: result })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.getCoreStock')
     }
   },
 
@@ -141,7 +141,7 @@ export const inventoryController = {
       const result = await inventoryService.getPackingBagStock(days)
       res.json({ data: result })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.getPackingBagStock')
     }
   },
 
@@ -157,7 +157,7 @@ export const inventoryController = {
       const result = await inventoryService.initializeStock(materials, date || dateFromInput(), userId)
       res.json({ data: result })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.initializeStock')
     }
   },
 
@@ -167,7 +167,7 @@ export const inventoryController = {
       const movements = await inventoryService.getInitialStockMovements(limit)
       res.json({ data: movements })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'inventory.getInitialStockMovements')
     }
   }
 }

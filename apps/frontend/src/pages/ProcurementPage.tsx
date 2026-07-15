@@ -73,6 +73,7 @@ export function ProcurementPage() {
   const [selectedPaymentHistory, setSelectedPaymentHistory] = useState<SupplierInvoice | null>(null)
   const [poForInv, setPoForInv] = useState<PurchaseOrder | null>(null)
   const [invForm, setInvForm] = useState({ poId: '', invoiceNumber: '', date: '', amount: 0 })
+  const [uninvoicedPOs, setUninvoicedPOs] = useState<PurchaseOrder[]>([])
   const [payForm, setPayForm] = useState({ amount: 0, date: '', paymentMethod: 'Cash' as 'Cash' | 'Bank Transfer', reference: '', notes: '' })
 
   // PO filters
@@ -325,7 +326,7 @@ export function ProcurementPage() {
     }
   }
 
-  const openInvoiceModal = (po?: PurchaseOrder) => {
+  const openInvoiceModal = async (po?: PurchaseOrder) => {
     setPoForInv(po || null)
     const today = new Date().toISOString().split('T')[0]
     setInvForm({
@@ -334,6 +335,10 @@ export function ProcurementPage() {
       date: today,
       amount: po?.totalAmount ? Number(po.totalAmount) : 0
     })
+    try {
+      const res = await procurementApi.getPOs('RECEIVED', true)
+      setUninvoicedPOs(Array.isArray(res.data) ? res.data : (res.data as any)?.data || [])
+    } catch { /* ignore */ }
     setShowInvModal(true)
   }
 
@@ -1353,7 +1358,7 @@ export function ProcurementPage() {
                     required
                   >
                     <option value="">Select PO</option>
-                    {purchaseOrders.filter(p => p.status === 'RECEIVED').map(po => (
+                    {uninvoicedPOs.map(po => (
                       <option key={po.id} value={po.id}>{po.poNumber} - {po.supplier}</option>
                     ))}
                   </select>

@@ -11,6 +11,8 @@ export interface Supplier {
   isActive: boolean
   createdAt: string
   updatedAt: string
+  outstandingBalance?: number
+  totalBilled?: number
 }
 
 export const suppliersApi = {
@@ -20,5 +22,5 @@ export const suppliersApi = {
     api.post<Supplier>('/suppliers', data),
   update: async (id: string, data: { name?: string; email?: string; phone?: string; address?: string; notes?: string; isActive?: boolean }) =>
     api.patch<Supplier>(`/suppliers/${id}`, data),
-  deactivate: async (id: string) => api.delete(`/suppliers/${id}`)
+  deactivate: async (id: string) => api.patch<Supplier>(`/suppliers/${id}/deactivate`, {})
 }

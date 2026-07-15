@@ -120,7 +120,7 @@ export function SalesOrdersPage() {
   const [orderForm, setOrderForm] = useState({
     customerId: '',
     materialTypeId: '',
-    quantityType: 'rolls' as QuantityType,
+    quantityType: 'kg' as QuantityType,
     quantity: 0,
     unitPrice: 0,
     deliveryMethod: 'PICKUP' as DeliveryMethod,
@@ -777,7 +777,7 @@ export function SalesOrdersPage() {
       }
       notify.success('Order created successfully')
       setShowOrderModal(false)
-      setOrderForm({ customerId: '', materialTypeId: '', quantityType: 'rolls', quantity: 0, unitPrice: 0, deliveryMethod: 'PICKUP', shippingAddress: '', expectedDeliveryDate: '', notes: '' })
+      setOrderForm({ customerId: '', materialTypeId: '', quantityType: 'kg', quantity: 0, unitPrice: 0, deliveryMethod: 'PICKUP', shippingAddress: '', expectedDeliveryDate: '', notes: '' })
       loadData()
     } catch (err: any) {
       console.error('Create order error:', err)

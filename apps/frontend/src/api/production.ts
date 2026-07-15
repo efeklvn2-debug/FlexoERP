@@ -139,7 +139,7 @@ export const productionApi = {
   },
 
   updateJob: async (id: string, data: Partial<CreateJobInput>) => {
-    return api.put<ProductionJob>(`/production/${id}`, data)
+    return api.patch<ProductionJob>(`/production/${id}`, data)
   },
 
   completeJob: async (id: string, date?: string, consumedRollIds?: string[]) => {

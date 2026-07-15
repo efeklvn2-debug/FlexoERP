@@ -31,11 +31,7 @@ export const updatePOSchema = z.object({
 })
 
 export const receivePOSchema = z.object({
-  poId: z.string().min(1, 'PO ID is required'),
-  lineItems: z.array(z.object({
-    lineItemId: z.string(),
-    rollWeights: z.array(z.number().positive()).min(1, 'At least one roll weight is required')
-  })).min(1, 'At least one line item is required')
+  date: z.string().optional()
 })
 
 export const rollSchema = z.object({
@@ -58,6 +54,28 @@ export const productionJobSchema = z.object({
   })).min(1, 'At least one roll is required')
 })
 
+export const supplierInvoiceSchema = z.object({
+  poId: z.string().min(1, 'PO is required'),
+  date: z.string().min(1, 'Date is required'),
+  amount: z.number().positive('Amount must be positive'),
+  invoiceNumber: z.string().optional()
+})
+
+export const supplierPaymentSchema = z.object({
+  amount: z.number().positive('Amount must be positive'),
+  date: z.string().optional(),
+  paymentMethod: z.enum(['Cash', 'Bank Transfer']).optional(),
+  reference: z.string().optional(),
+  notes: z.string().optional()
+})
+
+export const bulkRollSchema = z.object({
+  materialId: z.string().min(1, 'Material is required'),
+  count: z.number().int().positive('Count must be positive'),
+  weights: z.array(z.number().positive()).optional(),
+  purchaseOrderId: z.string().optional()
+})
+
 export type PurchaseOrderInput = z.infer<typeof purchaseOrderSchema>
 export type POLineItemInput = z.infer<typeof poLineItemSchema>
 export type AddLineItemInput = z.infer<typeof addLineItemSchema>
@@ -65,3 +83,6 @@ export type UpdatePOInput = z.infer<typeof updatePOSchema>
 export type ReceivePOInput = z.infer<typeof receivePOSchema>
 export type RollInput = z.infer<typeof rollSchema>
 export type ProductionJobInput = z.infer<typeof productionJobSchema>
+export type SupplierInvoiceInput = z.infer<typeof supplierInvoiceSchema>
+export type SupplierPaymentInput = z.infer<typeof supplierPaymentSchema>
+export type BulkRollInput = z.infer<typeof bulkRollSchema>

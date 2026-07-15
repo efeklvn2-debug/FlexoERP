@@ -2,22 +2,24 @@ import { Request, Response, NextFunction } from 'express'
 import { procurementService } from './service'
 import { PurchaseOrderInput, RollInput, ReceivePOInput, AddLineItemInput, UpdatePOInput } from './validation'
 import { AuthenticatedRequest } from '../../middleware/auth'
+import { sendError } from '../../middleware/errorHandler'
 
 export const procurementController = {
   // Purchase Orders
   async getAllPOs(req: Request, res: Response, next: NextFunction) {
     try {
       const status = req.query.status as string | undefined
-      const pos = await procurementService.getAllPOs(status)
+      const excludeInvoiced = req.query.excludeInvoiced === 'true'
+      const pos = await procurementService.getAllPOs(status, excludeInvoiced)
       res.json({ data: pos })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.getAllPOs') }
   },
 
   async getPOById(req: Request, res: Response, next: NextFunction) {
     try {
       const po = await procurementService.getPOById(req.params.id)
       res.json({ data: po })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.getPOById') }
   },
 
   async createPO(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -25,7 +27,7 @@ export const procurementController = {
       const input = req.body as PurchaseOrderInput
       const po = await procurementService.createPO(input, req.user?.id)
       res.status(201).json({ data: po })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.createPO') }
   },
 
   async updatePO(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -33,7 +35,7 @@ export const procurementController = {
       const input = req.body as UpdatePOInput
       const po = await procurementService.updatePO(req.params.id, input)
       res.json({ data: po })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.updatePO') }
   },
 
   async addLineItem(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -41,7 +43,7 @@ export const procurementController = {
       const input = req.body as AddLineItemInput
       const po = await procurementService.addLineItem(req.params.id, input)
       res.status(201).json({ data: po })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.addLineItem') }
   },
 
   async removeLineItem(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -49,14 +51,14 @@ export const procurementController = {
       const { lineItemId } = req.params
       const po = await procurementService.removeLineItem(req.params.id, lineItemId)
       res.json({ data: po })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.removeLineItem') }
   },
 
   async deletePO(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       await procurementService.deletePO(req.params.id)
       res.status(204).send()
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.deletePO') }
   },
 
   async receivePO(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -64,7 +66,7 @@ export const procurementController = {
       const { date } = req.body
       const result = await procurementService.receivePO(req.params.id, req.user?.id, date)
       res.status(201).json({ data: result })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.receivePO') }
   },
 
   // Rolls
@@ -74,14 +76,14 @@ export const procurementController = {
       const status = req.query.status as string | undefined
       const rolls = await procurementService.getAllRolls(materialId, status)
       res.json({ data: rolls })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.getAllRolls') }
   },
 
   async getRollById(req: Request, res: Response, next: NextFunction) {
     try {
       const roll = await procurementService.getRollById(req.params.id)
       res.json({ data: roll })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.getRollById') }
   },
 
   async createRoll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -89,7 +91,7 @@ export const procurementController = {
       const input = req.body as RollInput
       const roll = await procurementService.createRoll(input)
       res.status(201).json({ data: roll })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.createRoll') }
   },
 
   async createMultipleRolls(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -97,7 +99,7 @@ export const procurementController = {
       const { materialId, count, weights, purchaseOrderId } = req.body
       const rolls = await procurementService.createMultipleRolls(materialId, count, weights, purchaseOrderId)
       res.status(201).json({ data: rolls })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.createMultipleRolls') }
   },
 
   // Supplier Invoices
@@ -106,14 +108,14 @@ export const procurementController = {
       const status = req.query.status as string | undefined
       const invoices = await procurementService.getAllSupplierInvoices(status)
       res.json({ data: invoices })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.getAllSupplierInvoices') }
   },
 
   async getSupplierInvoiceById(req: Request, res: Response, next: NextFunction) {
     try {
       const invoice = await procurementService.getSupplierInvoiceById(req.params.id)
       res.json({ data: invoice })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.getSupplierInvoiceById') }
   },
 
   async createSupplierInvoice(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -121,7 +123,7 @@ export const procurementController = {
       const { poId, date, amount, invoiceNumber } = req.body
       const invoice = await procurementService.createSupplierInvoice(poId, date, amount, invoiceNumber)
       res.status(201).json({ data: invoice })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.createSupplierInvoice') }
   },
 
   async addPayment(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -129,6 +131,6 @@ export const procurementController = {
       const { amount, date, paymentMethod, reference, notes } = req.body
       const payment = await procurementService.addPayment(req.params.id, amount, date, paymentMethod, reference, notes)
       res.status(201).json({ data: payment })
-    } catch (error) { next(error) }
+    } catch (error) { sendError(res, error, 'procurement.addPayment') }
   }
 }

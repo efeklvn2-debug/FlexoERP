@@ -6,117 +6,21 @@ import { authenticate, loadUser } from '../../middleware/auth'
 
 export const inventoryRouter = Router()
 
-inventoryRouter.get(
-  '/materials',
-  authenticate,
-  loadUser,
-  inventoryController.getAllMaterials
-)
+inventoryRouter.use(authenticate, loadUser)
 
-inventoryRouter.get(
-  '/materials/sub-categories',
-  authenticate,
-  loadUser,
-  inventoryController.getSubCategories
-)
-
-inventoryRouter.get(
-  '/materials/:id',
-  authenticate,
-  loadUser,
-  inventoryController.getMaterialById
-)
-
-inventoryRouter.post(
-  '/materials',
-  authenticate,
-  loadUser,
-  validateRequest(materialSchema),
-  inventoryController.createMaterial
-)
-
-inventoryRouter.patch(
-  '/materials/:id',
-  authenticate,
-  loadUser,
-  validateRequest(materialUpdateSchema),
-  inventoryController.updateMaterial
-)
-
-inventoryRouter.patch(
-  '/materials/:id/archive',
-  authenticate,
-  loadUser,
-  inventoryController.archiveMaterial
-)
-
-inventoryRouter.patch(
-  '/materials/:id/restore',
-  authenticate,
-  loadUser,
-  inventoryController.restoreMaterial
-)
-
-inventoryRouter.get(
-  '/materials/:id/rolls',
-  authenticate,
-  loadUser,
-  inventoryController.getMaterialRolls
-)
-
-inventoryRouter.delete(
-  '/materials/:id',
-  authenticate,
-  loadUser,
-  inventoryController.deleteMaterial
-)
-
-inventoryRouter.patch(
-  '/materials/:id/adjust-stock',
-  authenticate,
-  loadUser,
-  inventoryController.adjustStock
-)
-
-inventoryRouter.post(
-  '/movements',
-  authenticate,
-  loadUser,
-  validateRequest(stockMovementSchema),
-  inventoryController.recordStockMovement
-)
-
-inventoryRouter.get(
-  '/movements',
-  authenticate,
-  loadUser,
-  inventoryController.getStockMovements
-)
-
-inventoryRouter.get(
-  '/core-stock',
-  authenticate,
-  loadUser,
-  inventoryController.getCoreStock
-)
-
-inventoryRouter.get(
-  '/packing-bag-stock',
-  authenticate,
-  loadUser,
-  inventoryController.getPackingBagStock
-)
-
-inventoryRouter.post(
-  '/initialize-stock',
-  authenticate,
-  loadUser,
-  inventoryController.initializeStock
-)
-
-inventoryRouter.get(
-  '/initial-stock-movements',
-  authenticate,
-  loadUser,
-  inventoryController.getInitialStockMovements
-)
+inventoryRouter.get('/materials', inventoryController.getAllMaterials)
+inventoryRouter.get('/materials/sub-categories', inventoryController.getSubCategories)
+inventoryRouter.get('/materials/:id', inventoryController.getMaterialById)
+inventoryRouter.post('/materials', validateRequest(materialSchema), inventoryController.createMaterial)
+inventoryRouter.patch('/materials/:id', validateRequest(materialUpdateSchema), inventoryController.updateMaterial)
+inventoryRouter.patch('/materials/:id/archive', inventoryController.archiveMaterial)
+inventoryRouter.patch('/materials/:id/restore', inventoryController.restoreMaterial)
+inventoryRouter.get('/materials/:id/rolls', inventoryController.getMaterialRolls)
+inventoryRouter.delete('/materials/:id', inventoryController.deleteMaterial)
+inventoryRouter.patch('/materials/:id/adjust-stock', inventoryController.adjustStock)
+inventoryRouter.post('/movements', validateRequest(stockMovementSchema), inventoryController.recordStockMovement)
+inventoryRouter.get('/movements', inventoryController.getStockMovements)
+inventoryRouter.get('/core-stock', inventoryController.getCoreStock)
+inventoryRouter.get('/packing-bag-stock', inventoryController.getPackingBagStock)
+inventoryRouter.post('/initialize-stock', inventoryController.initializeStock)
+inventoryRouter.get('/initial-stock-movements', inventoryController.getInitialStockMovements)

@@ -57,12 +57,13 @@ export function errorHandler(
 }
 
 export function sendError(res: Response, error: any, logLabel?: string) {
-  if (logLabel) logger.error(error, logLabel)
   if (error instanceof AppError) {
+    if (logLabel) logger.warn({ code: error.code, message: error.message }, logLabel)
     return res.status(error.statusCode).json({
       error: { code: error.code, message: error.message, details: error.details }
     })
   }
+  if (logLabel) logger.error(error, logLabel)
   return res.status(500).json({
     error: { code: 'INTERNAL_ERROR', message: error.message || 'An unexpected error occurred' }
   })

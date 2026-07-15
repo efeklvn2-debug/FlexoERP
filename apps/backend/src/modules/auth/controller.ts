@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express'
 import { authService } from './service'
 import { LoginInput, RefreshTokenInput } from './validation'
 import { AuthenticatedRequest } from '../../middleware/auth'
+import { sendError } from '../../middleware/errorHandler'
 
 export const authController = {
   async login(req: Request, res: Response, next: NextFunction) {
@@ -10,7 +11,7 @@ export const authController = {
       const result = await authService.login(input)
       res.status(200).json({ data: result })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'auth.login')
     }
   },
 
@@ -20,7 +21,7 @@ export const authController = {
       const tokens = await authService.refreshToken(input.refreshToken)
       res.status(200).json({ data: tokens })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'auth.refreshToken')
     }
   },
 
@@ -30,7 +31,7 @@ export const authController = {
       const user = await authService.register(input)
       res.status(201).json({ data: user })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'auth.register')
     }
   },
 
@@ -40,7 +41,7 @@ export const authController = {
       await authService.logout(refreshToken)
       res.status(204).send()
     } catch (error) {
-      next(error)
+      sendError(res, error, 'auth.logout')
     }
   },
 
@@ -52,7 +53,7 @@ export const authController = {
       }
       res.status(200).json({ data: req.user })
     } catch (error) {
-      next(error)
+      sendError(res, error, 'auth.me')
     }
   }
 }
