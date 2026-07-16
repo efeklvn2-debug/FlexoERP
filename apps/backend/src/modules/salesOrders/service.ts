@@ -1146,7 +1146,7 @@ export const paymentService = {
       if (input.salesOrderId && input.transactionType === 'PAYMENT') {
         const order = await tx.salesOrder.findUnique({
           where: { id: input.salesOrderId },
-          select: { totalPaid: true, totalAmount: true, approvedAt: true }
+          select: { totalPaid: true, approvedAt: true }
         })
         if (order) {
           const payDate = dateFromInput(input.date)
@@ -1154,9 +1154,12 @@ export const paymentService = {
             logger.warn({ orderId: input.salesOrderId, paymentDate: payDate, approvedAt: order.approvedAt },
               'Payment date is before order approval date — sequencing issue')
           }
-          const previousPayments = Number(order.totalPaid)
-          const orderTotal = Number(order.totalAmount)
-          const remaining = Math.max(0, orderTotal - previousPayments)
+          const invoices = await tx.invoice.findMany({
+            where: { salesOrderId: input.salesOrderId },
+            select: { balanceDue: true }
+          })
+          const outstandingInvoiceBalance = invoices.reduce((sum, inv) => sum + Number(inv.balanceDue), 0)
+          const remaining = Math.max(0, outstandingInvoiceBalance)
           if (input.amount > remaining) {
             overpayment = input.amount - remaining
             revenuePortion = remaining

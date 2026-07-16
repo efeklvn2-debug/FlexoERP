@@ -39,12 +39,27 @@
 1. Status check used `amountPaid >= totalAmount`, ignoring `depositApplied`/`previousPayments`
 2. First fix used `newAmountPaid + D + P - prevAmountPaid` — collapses to `revenuePortion + D + P`, discards prior payments
 
-### Current fix (service.ts:1191-1208)
+### Fix 1 (service.ts:1191-1208)
 ```js
 newInvoiceBalanceDue = Math.max(0, oldBalanceDue - revenuePortion)
 newInvoiceStatus = newInvoiceBalanceDue <= 0 ? 'PAID' : amountPaid > 0 ? 'PARTIAL' : oldStatus
 ```
 Simple decrement of old balance — works for old invoices (D+P separate) and new (D+P included in amountPaid).
+
+### Fix 2 — Overpayment detection (FIXED 16 Jul 2026)
+`recordPayment()` overpayment detection used `order.totalAmount - order.totalPaid` to compute remaining balance. When a partial pickup was paid in full, remaining equaled the full order value (not just the invoiced amount), so overpayment was never detected — no deposit created.
+
+**New logic** (service.ts:1157-1162): Queries `invoice.balanceDue` sums and compares payment against outstanding invoice balance only:
+```ts
+const invoices = await tx.invoice.findMany({
+  where: { salesOrderId: input.salesOrderId },
+  select: { balanceDue: true }
+})
+const outstandingInvoiceBalance = invoices.reduce((sum, inv) => sum + Number(inv.balanceDue), 0)
+const remaining = Math.max(0, outstandingInvoiceBalance)
+```
+
+**Test**: SO-2026-0157 — 21kg/₦71,400 order. Pickup 11kg (invoice ₦37,400), pay ₦71,400 → ₦37,400 revenue, ₦34,000 deposit. Second pickup 10kg → deposit auto-applied, invoice PAID.
 
 ### Corrective script
 `_fix_invoice.cjs` — fixed 18 stuck invoices incl. Freshyo (INV-2026-0093) and Y2K (INV-2026-0100).
