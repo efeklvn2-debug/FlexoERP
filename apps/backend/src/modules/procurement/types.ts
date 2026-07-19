@@ -20,6 +20,7 @@ export interface PurchaseOrder {
   supplier: string
   status: POStatus
   expectedDate?: Date
+  issuedDate?: Date
   receivedDate?: Date
   notes?: string
   totalAmount?: number

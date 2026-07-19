@@ -11,6 +11,7 @@ export const poLineItemSchema = z.object({
 export const purchaseOrderSchema = z.object({
   supplier: z.string().min(1, 'Supplier is required'),
   expectedDate: z.string().optional(),
+  issuedDate: z.string().optional(),
   notes: z.string().optional(),
   items: z.array(poLineItemSchema).min(1, 'At least one line item is required')
 })

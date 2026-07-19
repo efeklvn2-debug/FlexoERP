@@ -21,9 +21,11 @@ export interface PurchaseOrder {
   supplier: string
   status: POStatus
   expectedDate?: string
+  issuedDate?: string
   receivedDate?: string
   notes?: string
   totalAmount?: number
+  createdAt?: string
   rolls?: Roll[]
   items?: POLineItem[]
 }
@@ -106,6 +108,7 @@ export const procurementApi = {
   createPO: async (data: { 
     supplier: string; 
     expectedDate?: string; 
+    issuedDate?: string;
     notes?: string;
     items: CreatePOLineItem[];
   }) => api.post<PurchaseOrder>('/procurement/purchase-orders', data),

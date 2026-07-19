@@ -297,7 +297,7 @@ function DashboardPage() {
                     <p className="text-2xl font-bold text-slate-900 mt-1">{lowStockItems.length}</p>
                     {lowStockItems.length > 0 && (
                       <p className="text-sm font-medium text-red-600 mt-2">
-                        {lowStockItems.filter(m => m.totalStock <= 0).length} critical
+                        {lowStockItems.filter(m => m.totalStock <= 0 || (m.minStock > 0 && m.totalStock / m.minStock <= 0.5)).length} critical
                       </p>
                     )}
                   </div>

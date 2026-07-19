@@ -76,6 +76,7 @@ export const procurementRepository = {
     poNumber: string
     supplier: string
     expectedDate?: Date
+    issuedDate?: Date
     notes?: string
     createdById?: string
   }): Promise<PurchaseOrder> {
@@ -91,6 +92,7 @@ export const procurementRepository = {
     poNumber: string
     supplier: string
     expectedDate?: Date
+    issuedDate?: Date
     notes?: string
     createdById?: string
     totalAmount: number
@@ -107,6 +109,7 @@ export const procurementRepository = {
         poNumber: data.poNumber,
         supplier: data.supplier,
         expectedDate: data.expectedDate,
+        issuedDate: data.issuedDate,
         notes: data.notes,
         createdById: data.createdById,
         totalAmount: data.totalAmount,

@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
-import { Role, RolePermissions } from '@flexoprint/types'
+import { Role, RolePermissions, Permission } from '@flexoprint/types'
 import { AppError } from './errorHandler'
 import { prisma } from '../database'
 
@@ -81,7 +81,7 @@ export function authorize(...allowedRoles: Role[]) {
   }
 }
 
-export function requirePermission(permission: keyof typeof RolePermissions) {
+export function requirePermission(permission: Permission) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       throw new AppError(401, 'UNAUTHORIZED', 'Authentication required')

@@ -48,7 +48,7 @@ export const recordPaymentSchema = z.object({
   salesOrderId: z.string().optional(),
   customerId: z.string().optional(),
   transactionType: z.enum(['DEPOSIT', 'PAYMENT', 'CORE_BUYBACK', 'DEPOSIT_APPLIED', 'REFUND']),
-  paymentMethod: z.enum(['Cash', 'Electronic', 'CORE_CREDIT']),
+  paymentMethod: z.enum(['Cash', 'Electronic']),
   amount: z.number().positive('Amount must be positive'),
   referenceNumber: z.string().optional(),
   notes: z.string().optional(),
@@ -68,14 +68,14 @@ export const addInvoicePaymentSchema = z.object({
   date: z.string().optional(),
   reference: z.string().optional(),
   notes: z.string().optional(),
-  paymentMethod: z.enum(['Cash', 'Electronic', 'CORE_CREDIT']).optional()
+  paymentMethod: z.enum(['Cash', 'Electronic']).optional()
 })
 
 export const coreBuybackSchema = z.object({
   customerId: z.string().optional(),
   sellerName: z.string().optional(),
   coresQuantity: z.number().int().positive('Cores quantity must be positive'),
-  paymentMethod: z.enum(['Cash', 'Electronic', 'CORE_CREDIT']),
+  paymentMethod: z.enum(['Cash', 'Electronic']),
   notes: z.string().optional(),
   date: z.string().optional()
 })
@@ -88,7 +88,7 @@ export const sellPackingBagsSchema = z.object({
   customerId: z.string().min(1, 'Customer is required'),
   quantity: z.number().positive('Quantity must be positive'),
   unitPrice: z.number().min(0, 'Unit price must be non-negative'),
-  paymentMethod: z.enum(['Cash', 'Electronic', 'CORE_CREDIT']),
+  paymentMethod: z.enum(['Cash', 'Electronic']),
   referenceNumber: z.string().optional(),
   notes: z.string().optional(),
   applyDeposit: z.boolean().optional(),

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from 'react'
 
 type NotificationType = 'success' | 'error'
 
@@ -58,8 +58,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 export function useNotification() {
   const ctx = useContext(NotificationContext)
   if (!ctx) throw new Error('useNotification must be used within NotificationProvider')
-  return {
+  return useMemo(() => ({
     success: (message: string) => ctx.addNotification('success', message),
     error: (message: string) => ctx.addNotification('error', message),
-  }
+  }), [ctx])
 }

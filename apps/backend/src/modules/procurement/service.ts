@@ -46,6 +46,7 @@ export const procurementService = {
       poNumber,
       supplier: input.supplier,
       expectedDate: input.expectedDate ? dateFromInput(input.expectedDate) : undefined,
+      issuedDate: input.issuedDate ? dateFromInput(input.issuedDate) : undefined,
       notes: input.notes,
       createdById: userId,
       totalAmount,

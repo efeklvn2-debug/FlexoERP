@@ -136,13 +136,13 @@ Every pickup generates a separate invoice for the exact quantity picked up. No m
 ## Misc
 - Clear buttons: `text-red-700 bg-red-50 border-red-200 rounded-lg hover:bg-red-100`
 - Period filters default to `''` (not "This Month")
-- Opening balances: Account.openingBalance + OBE journal entry
+- Opening balances: Account.openingBalance only (OBE journal entry removed 17 Jul — was one-sided, caused trial balance imbalance)
 - Inventory init: Dr 1300 / Cr 3000 via material.costPrice × quantity
 - Dynamic subCategories endpoint: `GET /inventory/materials/sub-categories` (before `/:id`)
 - Material code auto-fill from name + `codeManuallyEdited` flag
 - PO labels: ink→"Quantity(kg)", IPA/Butanol→"Quantity(Liters)"
 - Receive PO: dynamic content per material category
-- SettingsPage: archive/restore per row, "Show archived" toggle, opacity-50
+- SettingsPage: archive/restore per row, "Show archived" toggle, opacity-50, minStock field in Add Material + Set Prices modals
 
 ## Parent Roll Consumption Order (7 Jul 2026)
 
@@ -236,3 +236,21 @@ Every pickup generates a separate invoice for the exact quantity picked up. No m
 - Modal: code + name + type dropdown + description
 - Calls `financeApi.createAccount()`, refreshes list on success
 - Backend endpoint `POST /api/finance/accounts` already existed
+
+## Opening Balance Equity (OBE) One-Sided Entry Fix (17 Jul 2026)
+
+### Bug
+`postOpeningBalances()` created one-sided journal entries: a single OBE (3000) credit/debit line with no matching contra line. Caused trial balance imbalance (₦30,000 gap from 3 calls).
+
+### Root cause
+`account.openingBalance` already captures balances. Trial balance reads: `balance = openingBalance + totalDebit - totalCredit`. OBE JE was redundant and one-sided.
+
+### Fix
+- Deleted 3 one-sided entries (JE-2026-0471/472/473)
+- Removed OBE journal entry creation from `postOpeningBalances()` — now only sets `account.openingBalance`
+- `initializeStock` balanced JE (Dr 1300/Cr 3000) left untouched — it's correct
+
+## TODO: Financial Accounts Setup Guide
+- Create a guide for new users setting up their chart of accounts, opening balances, and initial configuration
+- Should cover: required accounts, account codes, opening balance entry workflow, common mistakes
+- Not yet started

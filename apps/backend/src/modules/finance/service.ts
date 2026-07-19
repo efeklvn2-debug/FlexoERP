@@ -733,9 +733,6 @@ export const financeService = {
     }
 
     const difference = totalAssetDebits - totalLiabilityEquityCredits
-    const obeAccount = await prisma.account.findUnique({ where: { code: '3000' } })
-    if (!obeAccount) throw new AppError(500, 'INTERNAL', 'Opening Balance Equity account (3000) not found')
-
     return prisma.$transaction(async (tx) => {
       for (const { account, amount } of assetLines) {
         await tx.account.update({
@@ -751,48 +748,7 @@ export const financeService = {
         })
       }
 
-      const entryNumber = await financeRepository.getNextEntryNumber(tx)
       const entryDate = dateFromInput(date as any)
-
-      if (Math.abs(difference) > 0.01) {
-        if (difference > 0) {
-          await tx.journalEntry.create({
-            data: {
-              entryNumber,
-              date: entryDate,
-              description: `Opening balances as of ${entryDate.toISOString().split('T')[0]} — credit to Opening Balance Equity (3000)`,
-              sourceModule: 'OPENING',
-              postedById: userId,
-              lines: {
-                create: [{
-                  accountId: obeAccount.id,
-                  debit: 0,
-                  credit: Math.abs(difference),
-                  memo: `Balancing entry: total assets (${totalAssetDebits}) exceed total liabilities + equity (${totalLiabilityEquityCredits})`
-                }]
-              }
-            }
-          })
-        } else {
-          await tx.journalEntry.create({
-            data: {
-              entryNumber,
-              date: entryDate,
-              description: `Opening balances as of ${entryDate.toISOString().split('T')[0]} — debit to Opening Balance Equity (3000)`,
-              sourceModule: 'OPENING',
-              postedById: userId,
-              lines: {
-                create: [{
-                  accountId: obeAccount.id,
-                  debit: Math.abs(difference),
-                  credit: 0,
-                  memo: `Balancing entry: total liabilities + equity (${totalLiabilityEquityCredits}) exceed total assets (${totalAssetDebits})`
-                }]
-              }
-            }
-          })
-        }
-      }
 
       logger.info({ accountsUpdated: lines.length, difference, date: entryDate }, 'Opening balances posted')
 
@@ -801,8 +757,7 @@ export const financeService = {
         accountsUpdated: lines.length,
         totalAssetDebits,
         totalLiabilityEquityCredits,
-        unbalancedAmount: Math.abs(difference),
-        obeAccountId: obeAccount.id
+        unbalancedAmount: Math.abs(difference)
       }
     })
   }

@@ -96,7 +96,7 @@ export const coreManagementService = {
    */
   async processRandomCorePurchase(
     coresQuantity: number, 
-    paymentMethod: 'Cash' | 'Electronic' | 'CORE_CREDIT',
+    paymentMethod: 'Cash' | 'Electronic',
     referenceNumber?: string,
     notes?: string,
     userId?: string

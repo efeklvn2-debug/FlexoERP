@@ -50,7 +50,7 @@ export function ProcurementPage() {
   const [showViewPOModal, setShowViewPOModal] = useState(false)
   const [showEditPOModal, setShowEditPOModal] = useState(false)
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
-  const [editPOForm, setEditPOForm] = useState({ supplier: '', expectedDate: '', notes: '' })
+  const [editPOForm, setEditPOForm] = useState({ supplier: '', expectedDate: '', issuedDate: '', notes: '' })
   const [editLineItems, setEditLineItems] = useState<POLineItemForm[]>([])
   const [editingLineItemIndex, setEditingLineItemIndex] = useState<number | null>(null)
   const [editCurrentItem, setEditCurrentItem] = useState({
@@ -115,7 +115,7 @@ export function ProcurementPage() {
     return result
   }, [supplierInvoices, invFilterSearch, invFilterStatus])
 
-  const [poForm, setPoForm] = useState({ supplier: '', expectedDate: '', notes: '' })
+  const [poForm, setPoForm] = useState({ supplier: '', expectedDate: '', issuedDate: '', notes: '' })
   const [poLineItems, setPoLineItems] = useState<POLineItemForm[]>([])
   const [currentItem, setCurrentItem] = useState({
     category: '' as ItemCategory | '',
@@ -198,7 +198,7 @@ export function ProcurementPage() {
     if (!res.error) {
       notify.success('Purchase order created')
       setShowPOModal(false)
-      setPoForm({ supplier: '', expectedDate: '', notes: '' })
+      setPoForm({ supplier: '', expectedDate: '', issuedDate: '', notes: '' })
       setPoLineItems([])
       setCurrentItem({ category: '', subCategory: '', materialId: '', quantity: 1, totalWeight: 0, unitPrice: 0, rollWeights: '' })
       loadData()
@@ -403,6 +403,7 @@ export function ProcurementPage() {
     setEditPOForm({
       supplier: po.supplier,
       expectedDate: po.expectedDate ? po.expectedDate.split('T')[0] : '',
+      issuedDate: po.issuedDate ? po.issuedDate.split('T')[0] : '',
       notes: po.notes || ''
     })
     setEditLineItems(po.items?.map(item => {
@@ -789,6 +790,11 @@ export function ProcurementPage() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Expected Date</label>
                   <DateInput value={poForm.expectedDate} onChange={e => setPoForm({...poForm, expectedDate: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Issue Date</label>
+                  <DateInput value={poForm.issuedDate} onChange={e => setPoForm({...poForm, issuedDate: e.target.value})} className="w-full px-4 py-2 border border-slate-300 rounded-lg" />
+                  <p className="text-xs text-slate-400 mt-1">Date this PO was issued. Leave empty for today.</p>
                 </div>
               </div>
 

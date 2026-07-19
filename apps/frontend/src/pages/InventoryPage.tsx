@@ -1106,7 +1106,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Roll #</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Weight</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Film Wt</th>
+
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Material</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Type</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
@@ -1120,7 +1120,6 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
               <tr key={r.id} className={`hover:bg-slate-50 cursor-pointer ${r.archivedAt ? 'opacity-50' : ''}`} onClick={() => { setSelectedRoll(r); setShowDetailsModal(true) }}>
                 <td className="px-4 py-3 text-sm font-medium text-slate-900">{r.rollNumber || '-'}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{Number(r.weight).toFixed(2)}</td>
-                <td className="px-4 py-3 text-sm text-slate-600">{(Number(r.weight) - 0.7).toFixed(2)}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{r.material || '-'}</td>
                 <td className="px-4 py-3">
                   {r.isCombination ? (

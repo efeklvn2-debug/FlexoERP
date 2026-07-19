@@ -48,14 +48,16 @@ export function SettingsPage() {
     code: '',
     category: 'PLAIN_ROLLS' as MaterialCategory,
     costPrice: 0,
-    packSize: 1
+    packSize: 1,
+    minStock: 0
   })
   const codeManuallyEdited = useRef(false)
 
   const [priceForm, setPriceForm] = useState({
     costPrice: 0,
     pricePerKg: 0,
-    pricePerPack: 0
+    pricePerPack: 0,
+    minStock: 0
   })
 
   useEffect(() => {
@@ -206,14 +208,14 @@ const loadSettings = async () => {
         costPrice: materialForm.costPrice || undefined,
         packSize: materialForm.packSize || 1,
         unitOfMeasure: materialForm.category === 'PACKAGING' ? 'bundle' : 'pcs',
-        minStock: 0
+        minStock: materialForm.minStock || 0
       })
       
       if (res.error) {
         notify.error(res.error.message)
       } else {
         setShowMaterialModal(false)
-        setMaterialForm({ name: '', code: '', category: 'PLAIN_ROLLS', costPrice: 0, packSize: 1 })
+        setMaterialForm({ name: '', code: '', category: 'PLAIN_ROLLS', costPrice: 0, packSize: 1, minStock: 0 })
         loadMaterials()
         notify.success('Material created successfully')
       }
@@ -228,9 +230,10 @@ const loadSettings = async () => {
     setSaving(true)
 
     try {
-      // Save cost price using inventoryApi
+      // Save cost price + minStock using inventoryApi
       await inventoryApi.updateMaterial(selectedMaterial!.id, {
-        costPrice: priceForm.costPrice || undefined
+        costPrice: priceForm.costPrice || undefined,
+        minStock: priceForm.minStock || 0
       })
 
       // Save selling prices using pricingApi
@@ -261,7 +264,8 @@ const loadSettings = async () => {
     setPriceForm({
       costPrice: material.costPrice || 0,
       pricePerKg: material.pricePerKg || 0,
-      pricePerPack: material.pricePerPack || 0
+      pricePerPack: material.pricePerPack || 0,
+      minStock: material.minStock || 0
     })
     setShowPriceModal(true)
   }
@@ -1174,6 +1178,18 @@ const loadSettings = async () => {
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Minimum Stock</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={materialForm.minStock}
+                    onChange={e => setMaterialForm({...materialForm, minStock: parseInt(e.target.value) || 0})}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Items below this level appear on the Low Stock dashboard</p>
+                </div>
                 {materialForm.category === 'PACKAGING' && (
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Pack Size (pcs per bundle)</label>
@@ -1212,6 +1228,18 @@ const loadSettings = async () => {
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                   />
                   <p className="text-xs text-slate-500 mt-1">Your purchase cost for this material</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Minimum Stock</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={priceForm.minStock}
+                    onChange={e => setPriceForm({...priceForm, minStock: parseInt(e.target.value) || 0})}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Items below this level appear on the Low Stock dashboard</p>
                 </div>
                 {selectedMaterial.category === 'PLAIN_ROLLS' && (
                   <div>

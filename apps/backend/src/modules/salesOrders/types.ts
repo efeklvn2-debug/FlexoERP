@@ -2,7 +2,7 @@ export type DeliveryMethod = 'PICKUP' | 'SHIPPING'
 export type MTOOrderStatus = 'PENDING' | 'APPROVED' | 'MRP_PENDING' | 'IN_PRODUCTION' | 'READY' | 'PICKED_UP' | 'COMPLETED' | 'CANCELLED'
 export type MTOPaymentStatus = 'PENDING_PAYMENT' | 'PARTIAL_DEPOSIT' | 'DEPOSIT_COMPLETE' | 'PARTIAL_PAYMENT' | 'FULLY_PAID' | 'OVERPAID'
 export type TransactionType = 'DEPOSIT' | 'PAYMENT' | 'CORE_BUYBACK' | 'DEPOSIT_APPLIED' | 'REFUND'
-export type PaymentMethod = 'Cash' | 'Electronic' | 'CORE_CREDIT'
+export type PaymentMethod = 'Cash' | 'Electronic'
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'CANCELLED'
 export type PaymentType = 'CASH' | 'CREDIT'
 

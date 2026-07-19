@@ -125,6 +125,7 @@ export const pricingService = {
       category: m.category,
       subCategory: m.subCategory,
       packSize: m.packSize,
+      minStock: m.minStock,
       isActive: m.isActive,
       costPrice: m.costPrice ? Number(m.costPrice) : null,
       pricePerKg: m.priceLists[0]?.pricePerKg ? Number(m.priceLists[0].pricePerKg) : null,
