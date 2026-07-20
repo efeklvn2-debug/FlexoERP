@@ -1,8 +1,11 @@
 import { Request, Response, NextFunction } from 'express'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../database'
 import { createChildLogger } from '../logger'
 
 const logger = createChildLogger('idempotency')
+
+const TTL_MS = 24 * 60 * 60 * 1000
 
 export async function idempotencyMiddleware(
   req: Request,
@@ -27,19 +30,33 @@ export async function idempotencyMiddleware(
     })
 
     if (existing) {
-      logger.info({ key: idempotencyKey }, 'Returning cached response for idempotent request')
-      res.status(200).json(existing.response)
-      return
+      if (Date.now() - existing.createdAt.getTime() > TTL_MS) {
+        await prisma.idempotencyKey.delete({ where: { id: idempotencyKey } })
+        logger.info({ key: idempotencyKey }, 'Expired idempotent key, allowing retry')
+      } else {
+        const cached = existing.response as any
+        const statusCode = typeof cached?.statusCode === 'number' ? cached.statusCode : 200
+        const body = cached?.statusCode ? cached.body : cached
+        logger.info({ key: idempotencyKey }, 'Returning cached response for idempotent request')
+        res.status(statusCode).json(body)
+        return
+      }
     }
 
     const originalJson = res.json.bind(res)
+
     res.json = function (body: unknown) {
+      const cachePayload = { statusCode: res.statusCode, body }
       prisma.idempotencyKey.create({
         data: {
           id: idempotencyKey,
-          response: body
+          response: cachePayload as Prisma.InputJsonValue
         }
       }).catch((err) => {
+        if ((err as any)?.code === 'P2002') {
+          logger.warn({ key: idempotencyKey }, 'Duplicate idempotent key, response already cached')
+          return
+        }
         logger.error({ err, key: idempotencyKey }, 'Failed to cache idempotent response')
       })
       return originalJson(body)

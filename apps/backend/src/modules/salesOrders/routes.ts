@@ -1,8 +1,8 @@
 import { Router } from 'express'
 import { salesOrderController, paymentController, invoiceController, coreBuybackController } from './controller'
-import { authenticate, loadUser, authorize } from '../../middleware/auth'
+import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
 import { validateRequest } from '../../middleware/validation'
-import { Role } from '@flexoprint/types'
+import { mutationLimiter } from '../../middleware/rateLimiters'
 import {
   createOrderSchema, updateOrderSchema,
   createCustomerSchema, updateCustomerSchema,
@@ -17,48 +17,48 @@ export const salesOrderRouter = Router()
 salesOrderRouter.use(authenticate, loadUser)
 
 // Sales Orders
-salesOrderRouter.get('/orders', salesOrderController.getOrders)
-salesOrderRouter.get('/orders/:id', salesOrderController.getOrderById)
-salesOrderRouter.post('/orders', validateRequest(createOrderSchema), salesOrderController.createOrder)
-salesOrderRouter.patch('/orders/:id', validateRequest(updateOrderSchema), salesOrderController.updateOrder)
-salesOrderRouter.patch('/orders/:id/approve', salesOrderController.approveOrder)
-salesOrderRouter.patch('/orders/:id/start-production', validateRequest(startProductionSchema), salesOrderController.startProduction)
-salesOrderRouter.patch('/orders/:id/cancel', salesOrderController.cancelOrder)
-salesOrderRouter.patch('/orders/:id/ready', salesOrderController.markReady)
-salesOrderRouter.patch('/orders/:id/pickup', validateRequest(recordPickupSchema), salesOrderController.recordPickup)
+salesOrderRouter.get('/orders', requirePermission('sales_order:read'), salesOrderController.getOrders)
+salesOrderRouter.get('/orders/:id', requirePermission('sales_order:read'), salesOrderController.getOrderById)
+salesOrderRouter.post('/orders', mutationLimiter, requirePermission('sales_order:create'), validateRequest(createOrderSchema), salesOrderController.createOrder)
+salesOrderRouter.patch('/orders/:id', requirePermission('sales_order:edit'), validateRequest(updateOrderSchema), salesOrderController.updateOrder)
+salesOrderRouter.patch('/orders/:id/approve', requirePermission('sales_order:approve'), salesOrderController.approveOrder)
+salesOrderRouter.patch('/orders/:id/start-production', requirePermission('production:create'), validateRequest(startProductionSchema), salesOrderController.startProduction)
+salesOrderRouter.patch('/orders/:id/cancel', requirePermission('sales_order:delete'), salesOrderController.cancelOrder)
+salesOrderRouter.patch('/orders/:id/ready', requirePermission('sales_order:edit'), salesOrderController.markReady)
+salesOrderRouter.patch('/orders/:id/pickup', mutationLimiter, requirePermission('sales_order:pickup'), validateRequest(recordPickupSchema), salesOrderController.recordPickup)
 
 // Payments
-salesOrderRouter.post('/payments', validateRequest(recordPaymentSchema), paymentController.recordPayment)
-salesOrderRouter.get('/payments', paymentController.getPayments)
-salesOrderRouter.get('/payments/order/:salesOrderId', paymentController.getPaymentsBySalesOrder)
-salesOrderRouter.get('/payments/customer/:customerId', paymentController.getPaymentsByCustomer)
+salesOrderRouter.post('/payments', mutationLimiter, requirePermission('sales_order:payment'), validateRequest(recordPaymentSchema), paymentController.recordPayment)
+salesOrderRouter.get('/payments', requirePermission('sales_order:read'), paymentController.getPayments)
+salesOrderRouter.get('/payments/order/:salesOrderId', requirePermission('sales_order:read'), paymentController.getPaymentsBySalesOrder)
+salesOrderRouter.get('/payments/customer/:customerId', requirePermission('sales_order:read'), paymentController.getPaymentsByCustomer)
 
 // Invoices
-salesOrderRouter.post('/invoices', validateRequest(createInvoiceSchema), invoiceController.createInvoice)
-salesOrderRouter.get('/invoices', invoiceController.getInvoices)
-salesOrderRouter.get('/invoices/:id', invoiceController.getInvoice)
-salesOrderRouter.patch('/invoices/:id/issue', invoiceController.issueInvoice)
-salesOrderRouter.post('/invoices/:id/payments', validateRequest(addInvoicePaymentSchema), invoiceController.addPayment)
-salesOrderRouter.get('/invoices/:id/pdf', invoiceController.downloadPdf)
+salesOrderRouter.post('/invoices', requirePermission('sales_order:payment'), validateRequest(createInvoiceSchema), invoiceController.createInvoice)
+salesOrderRouter.get('/invoices', requirePermission('sales_order:read'), invoiceController.getInvoices)
+salesOrderRouter.get('/invoices/:id', requirePermission('sales_order:read'), invoiceController.getInvoice)
+salesOrderRouter.patch('/invoices/:id/issue', requirePermission('sales_order:edit'), invoiceController.issueInvoice)
+salesOrderRouter.post('/invoices/:id/payments', mutationLimiter, requirePermission('sales_order:payment'), validateRequest(addInvoicePaymentSchema), invoiceController.addPayment)
+salesOrderRouter.get('/invoices/:id/pdf', requirePermission('sales_order:read'), invoiceController.downloadPdf)
 
 // Core Buyback
-salesOrderRouter.post('/core-buyback', validateRequest(coreBuybackSchema), coreBuybackController.recordCoreBuyback)
-salesOrderRouter.get('/core-buyback', coreBuybackController.getCoreBuybacks)
+salesOrderRouter.post('/core-buyback', requirePermission('inventory:adjust'), validateRequest(coreBuybackSchema), coreBuybackController.recordCoreBuyback)
+salesOrderRouter.get('/core-buyback', requirePermission('inventory:read'), coreBuybackController.getCoreBuybacks)
 
 // Customer Balance & Aging
-salesOrderRouter.get('/customers', salesOrderController.getCustomers)
-salesOrderRouter.get('/customers/:customerId', salesOrderController.getCustomerById)
-salesOrderRouter.post('/customers', validateRequest(createCustomerSchema), salesOrderController.createCustomer)
-salesOrderRouter.patch('/customers/:customerId', validateRequest(updateCustomerSchema), salesOrderController.updateCustomer)
-salesOrderRouter.get('/customers/:customerId/balance', salesOrderController.getCustomerBalance)
-salesOrderRouter.get('/customers/:customerId/aging', salesOrderController.getCustomerAging)
-salesOrderRouter.get('/customer-balances', salesOrderController.getAllCustomerBalances)
-salesOrderRouter.get('/customers/:customerId/transactions', salesOrderController.getCustomerTransactions)
-salesOrderRouter.post('/customers/:customerId/deposit', authorize(Role.ADMIN, Role.MANAGER), validateRequest(adjustDepositSchema), salesOrderController.adjustDeposit)
+salesOrderRouter.get('/customers', requirePermission('customer:read'), salesOrderController.getCustomers)
+salesOrderRouter.get('/customers/:customerId', requirePermission('customer:read'), salesOrderController.getCustomerById)
+salesOrderRouter.post('/customers', requirePermission('customer:create'), validateRequest(createCustomerSchema), salesOrderController.createCustomer)
+salesOrderRouter.patch('/customers/:customerId', requirePermission('customer:edit'), validateRequest(updateCustomerSchema), salesOrderController.updateCustomer)
+salesOrderRouter.get('/customers/:customerId/balance', requirePermission('customer:read'), salesOrderController.getCustomerBalance)
+salesOrderRouter.get('/customers/:customerId/aging', requirePermission('customer:read'), salesOrderController.getCustomerAging)
+salesOrderRouter.get('/customer-balances', requirePermission('customer:read'), salesOrderController.getAllCustomerBalances)
+salesOrderRouter.get('/customers/:customerId/transactions', requirePermission('customer:read'), salesOrderController.getCustomerTransactions)
+salesOrderRouter.post('/customers/:customerId/deposit', requirePermission('customer:payment'), validateRequest(adjustDepositSchema), salesOrderController.adjustDeposit)
 
 // Packing Bag Sales
-salesOrderRouter.post('/packing-bags/sell', validateRequest(sellPackingBagsSchema), coreBuybackController.sellPackingBags)
+salesOrderRouter.post('/packing-bags/sell', requirePermission('sales_order:pickup'), validateRequest(sellPackingBagsSchema), coreBuybackController.sellPackingBags)
 
 // Receipts
-salesOrderRouter.post('/payments/:id/generate-receipt', salesOrderController.generateReceipt)
-salesOrderRouter.get('/receipts/:id/pdf', salesOrderController.downloadReceiptPdf)
+salesOrderRouter.post('/payments/:id/generate-receipt', requirePermission('sales_order:read'), salesOrderController.generateReceipt)
+salesOrderRouter.get('/receipts/:id/pdf', requirePermission('sales_order:read'), salesOrderController.downloadReceiptPdf)

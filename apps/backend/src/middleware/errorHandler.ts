@@ -65,7 +65,12 @@ export function sendError(res: Response, error: any, logLabel?: string) {
   }
   if (logLabel) logger.error(error, logLabel)
   return res.status(500).json({
-    error: { code: 'INTERNAL_ERROR', message: error.message || 'An unexpected error occurred' }
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: process.env.NODE_ENV === 'production'
+        ? 'An unexpected error occurred'
+        : error.message || 'An unexpected error occurred'
+    }
   })
 }
 

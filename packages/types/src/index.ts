@@ -51,44 +51,50 @@ export interface HealthCheckResponse {
   database: 'connected' | 'disconnected'
 }
 
+// DB-backed — seeded in prisma/seed.ts
+// This type is a compile-time reference; runtime source of truth is the database.
 export type Permission =
   | 'auth:read'
-  | 'auth:write'
-  | 'sales:read'
-  | 'sales:write'
+  | 'auth:manage_users'
+  | 'sales_order:read'
+  | 'sales_order:create'
+  | 'sales_order:edit'
+  | 'sales_order:approve'
+  | 'sales_order:delete'
+  | 'sales_order:pickup'
+  | 'sales_order:payment'
+  | 'sales_order:adjust_deposit'
   | 'production:read'
-  | 'production:write'
+  | 'production:create'
+  | 'production:complete'
+  | 'production:edit'
+  | 'production:delete'
   | 'inventory:read'
-  | 'inventory:write'
-  | 'accounting:read'
-  | 'accounting:write'
-  | 'reporting:read'
-
-export const RolePermissions: Record<Role, Permission[]> = {
-  [Role.ADMIN]: [
-    'auth:read', 'auth:write',
-    'sales:read', 'sales:write',
-    'production:read', 'production:write',
-    'inventory:read', 'inventory:write',
-    'accounting:read', 'accounting:write',
-    'reporting:read'
-  ],
-  [Role.MANAGER]: [
-    'sales:read', 'sales:write',
-    'production:read', 'production:write',
-    'inventory:read', 'inventory:write',
-    'accounting:read',
-    'reporting:read'
-  ],
-  [Role.OPERATOR]: [
-    'sales:read', 'sales:write',
-    'production:read', 'production:write',
-    'inventory:read', 'inventory:write'
-  ],
-  [Role.VIEWER]: [
-    'reporting:read'
-  ]
-}
+  | 'inventory:create'
+  | 'inventory:edit'
+  | 'inventory:adjust'
+  | 'inventory:dispose'
+  | 'procurement:read'
+  | 'procurement:create'
+  | 'procurement:receive'
+  | 'procurement:edit'
+  | 'finance:read'
+  | 'finance:write'
+  | 'finance:manage_accounts'
+  | 'settings:read'
+  | 'settings:write'
+  | 'settings:manage_materials'
+  | 'settings:manage_colors'
+  | 'customer:read'
+  | 'customer:create'
+  | 'customer:edit'
+  | 'customer:payment'
+  | 'supplier:read'
+  | 'supplier:create'
+  | 'supplier:edit'
+  | 'report:read'
+  | 'pricing:read'
+  | 'pricing:write'
 
 export enum OrderStatus {
   PENDING = 'PENDING',

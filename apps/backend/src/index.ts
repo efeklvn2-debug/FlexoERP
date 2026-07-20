@@ -1,6 +1,11 @@
+import 'dotenv/config'
 import { createApp } from './app'
 import { logger } from './logger'
 import { prisma } from './database'
+
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = 'development'
+}
 
 const PORT = process.env.PORT || 3000
 
@@ -15,7 +20,11 @@ async function seedInitialData() {
   })
 
   if (!adminExists) {
-    const passwordHash = await bcrypt.hash('admin123', 12)
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123'
+    if (!process.env.ADMIN_PASSWORD && process.env.NODE_ENV === 'production') {
+      throw new Error('ADMIN_PASSWORD environment variable is required in production')
+    }
+    const passwordHash = await bcrypt.hash(adminPassword, 12)
     await prisma.user.create({
       data: {
         username: 'admin',
@@ -23,7 +32,7 @@ async function seedInitialData() {
         role: 'ADMIN'
       }
     })
-    logger.info('Created default admin user (username: admin, password: admin123)')
+    logger.info('Created default admin user (username: admin)')
   }
 }
 

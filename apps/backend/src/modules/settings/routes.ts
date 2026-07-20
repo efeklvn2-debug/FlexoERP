@@ -1,24 +1,26 @@
 import { Router } from 'express'
 import { settingsController } from './controller'
-import { authenticate, loadUser } from '../../middleware/auth'
+import { validateRequest } from '../../middleware/validation'
+import { inkColorSchema, updateInkColorSchema, consumptionRatesSchema, overheadRateSchema, vatSettingsSchema, invoiceSettingsSchema } from './validation'
+import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
 
 export const settingsRouter = Router()
 
 settingsRouter.use(authenticate, loadUser)
 
-settingsRouter.get('/', settingsController.getSettings)
-settingsRouter.get('/consumption-rates', settingsController.getConsumptionRates)
-settingsRouter.patch('/consumption-rates', settingsController.updateConsumptionRates)
-settingsRouter.get('/overhead-rate', settingsController.getOverheadRate)
-settingsRouter.patch('/overhead-rate', settingsController.updateOverheadRate)
-settingsRouter.get('/overhead-rate-history', settingsController.getOverheadRateHistory)
-settingsRouter.patch('/vat', settingsController.updateVatSettings)
-settingsRouter.get('/invoice', settingsController.getInvoiceSettings)
-settingsRouter.patch('/invoice', settingsController.updateInvoiceSettings)
+settingsRouter.get('/', requirePermission('settings:read'), settingsController.getSettings)
+settingsRouter.get('/consumption-rates', requirePermission('settings:read'), settingsController.getConsumptionRates)
+settingsRouter.patch('/consumption-rates', requirePermission('settings:write'), validateRequest(consumptionRatesSchema), settingsController.updateConsumptionRates)
+settingsRouter.get('/overhead-rate', requirePermission('settings:read'), settingsController.getOverheadRate)
+settingsRouter.patch('/overhead-rate', requirePermission('settings:write'), validateRequest(overheadRateSchema), settingsController.updateOverheadRate)
+settingsRouter.get('/overhead-rate-history', requirePermission('settings:read'), settingsController.getOverheadRateHistory)
+settingsRouter.patch('/vat', requirePermission('settings:write'), validateRequest(vatSettingsSchema), settingsController.updateVatSettings)
+settingsRouter.get('/invoice', requirePermission('settings:read'), settingsController.getInvoiceSettings)
+settingsRouter.patch('/invoice', requirePermission('settings:write'), validateRequest(invoiceSettingsSchema), settingsController.updateInvoiceSettings)
 
 // Ink Colors
-settingsRouter.get('/ink-colors', settingsController.getInkColors)
-settingsRouter.post('/ink-colors', settingsController.createInkColor)
-settingsRouter.patch('/ink-colors/:id', settingsController.updateInkColor)
-settingsRouter.patch('/ink-colors/:id/archive', settingsController.archiveInkColor)
-settingsRouter.patch('/ink-colors/:id/restore', settingsController.restoreInkColor)
+settingsRouter.get('/ink-colors', requirePermission('settings:read'), settingsController.getInkColors)
+settingsRouter.post('/ink-colors', requirePermission('settings:manage_colors'), validateRequest(inkColorSchema), settingsController.createInkColor)
+settingsRouter.patch('/ink-colors/:id', requirePermission('settings:manage_colors'), validateRequest(updateInkColorSchema), settingsController.updateInkColor)
+settingsRouter.patch('/ink-colors/:id/archive', requirePermission('settings:manage_colors'), settingsController.archiveInkColor)
+settingsRouter.patch('/ink-colors/:id/restore', requirePermission('settings:manage_colors'), settingsController.restoreInkColor)

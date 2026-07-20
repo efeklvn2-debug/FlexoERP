@@ -307,6 +307,7 @@ export function ReportsPage() {
     return d >= from && d <= to
   }), [purchaseOrders, from, to])
   const poTotalAmount = useMemo(() => poInRange.reduce((s, p) => s + Number(p.totalAmount || 0), 0), [poInRange])
+  const poTotalQty = useMemo(() => poInRange.reduce((s, p) => s + (p.items || []).reduce((s2, i) => s2 + Number(i.totalWeight || 0), 0), 0), [poInRange])
   const poByStatus = useMemo(() => {
     const byStatus: Record<string, number> = {}
     poInRange.forEach(p => { byStatus[p.status] = (byStatus[p.status] || 0) + 1 })
@@ -449,7 +450,7 @@ export function ReportsPage() {
               {activeReport === 'stock-valuation' && <StockValuationView materials={materials} stockValue={stockValue} pieData={stockPieData} />}
               {activeReport === 'inventory-movements' && <InventoryMovementsView data={invMovements} />}
               {activeReport === 'low-stock' && <LowStockView items={lowStockItems} />}
-              {activeReport === 'po-summary' && <POSummaryView orders={poInRange} totalAmount={poTotalAmount} byStatus={poByStatus} supplierQty={poBySupplierQty} supplierAmount={poBySupplierAmount} />}
+              {activeReport === 'po-summary' && <POSummaryView orders={poInRange} totalAmount={poTotalAmount} totalQty={poTotalQty} byStatus={poByStatus} supplierQty={poBySupplierQty} supplierAmount={poBySupplierAmount} />}
 
               <div className="text-xs text-slate-400 mt-4 text-right print:block">
                 Generated: {new Date().toLocaleString('en-NG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -687,8 +688,8 @@ function AgingReportView({ data: rawData, title }: { data: AgingReport | null; t
     )
   }, [data, title])
 
-  const chartData = data.buckets.map(b => ({ name: b.label, amount: b.total }))
-  const topEntries = [...data.entries].sort((a, b) => b.total - a.total).slice(0, 10)
+  const chartData = useMemo(() => data.buckets.map(b => ({ name: b.label, amount: b.total })), [data])
+  const topEntries = useMemo(() => [...data.entries].sort((a, b) => b.total - a.total).slice(0, 10), [data])
 
   return (
     <ReportWrapper onExport={doExport}>
@@ -771,7 +772,7 @@ function AgingReportView({ data: rawData, title }: { data: AgingReport | null; t
 function SalesByCustomerView({ data: rawData }: { data: SalesByCustomerReport | null }) {
   if (!rawData) return <EmptyReport />
   const data = rawData
-  const top10 = [...data.customers].sort((a, b) => b.revenue - a.revenue).slice(0, 10)
+  const top10 = useMemo(() => [...data.customers].sort((a, b) => b.revenue - a.revenue).slice(0, 10), [data])
 
   const doExport = useCallback(() => {
     exportCSV('sales_by_customer.csv',
@@ -945,33 +946,43 @@ function SalesByProductView({ data: rawData }: { data: SalesByProductReport | nu
 
 // ─── Production Output ───────────────────────────
 function ProductionOutputView({ jobs, totalOutput, chartData, allJobs, from, to }: { jobs: ProductionJob[]; totalOutput: number; chartData: { period: string; kg: number }[]; allJobs: ProductionJob[]; from: string; to: string }) {
-  const completedJobs = jobs.filter(j => j.status === 'COMPLETED' || j.status === 'PICKED_UP' || j.status === 'READY')
-  const runningJobs = jobs.filter(j => j.status === 'IN_PRODUCTION').length
-  const queuedJobs = jobs.filter(j => j.status === 'PENDING' || j.status === 'APPROVED').length
-  const activeList: string[] = []
-  if (runningJobs > 0) activeList.push(`${runningJobs} Running`)
-  if (queuedJobs > 0) activeList.push(`${queuedJobs} Queued`)
+  const completedJobs = useMemo(() => jobs.filter(j => j.status === 'COMPLETED' || j.status === 'PICKED_UP' || j.status === 'READY'), [jobs])
+  const runningJobs = useMemo(() => jobs.filter(j => j.status === 'IN_PRODUCTION').length, [jobs])
+  const queuedJobs = useMemo(() => jobs.filter(j => j.status === 'PENDING' || j.status === 'APPROVED').length, [jobs])
+  const activeList = useMemo(() => {
+    const list: string[] = []
+    if (runningJobs > 0) list.push(`${runningJobs} Running`)
+    if (queuedJobs > 0) list.push(`${queuedJobs} Queued`)
+    return list
+  }, [runningJobs, queuedJobs])
 
   // Previous period variance
-  const fromMs = new Date(from).getTime()
-  const toMs = new Date(to).getTime()
-  const rangeMs = toMs - fromMs
-  const prevFrom = new Date(fromMs - rangeMs).toISOString().split('T')[0]
-  const prevTo = new Date(fromMs - 1).toISOString().split('T')[0]
-  const prevJobs = allJobs.filter(j => {
+  const prevFrom = useMemo(() => {
+    const fromMs = new Date(from).getTime()
+    const toMs = new Date(to).getTime()
+    const rangeMs = toMs - fromMs
+    return new Date(fromMs - rangeMs).toISOString().split('T')[0]
+  }, [from, to])
+  const prevTo = useMemo(() => {
+    const fromMs = new Date(from).getTime()
+    return new Date(fromMs - 1).toISOString().split('T')[0]
+  }, [from])
+  const prevJobs = useMemo(() => allJobs.filter(j => {
     const d = (j.endDate || j.createdAt).substring(0, 10)
     return d >= prevFrom && d <= prevTo
-  })
-  const prevOutput = prevJobs.reduce((s, j) => s + (j.printedRolls || []).reduce((r, p) => r + Number(p.weightUsed || 0), 0), 0)
-  const variance = prevOutput > 0 ? ((totalOutput - prevOutput) / prevOutput) * 100 : null
+  }), [allJobs, prevFrom, prevTo])
+  const prevOutput = useMemo(() => prevJobs.reduce((s, j) => s + (j.printedRolls || []).reduce((r, p) => r + Number(p.weightUsed || 0), 0), 0), [prevJobs])
+  const variance = useMemo(() => prevOutput > 0 ? ((totalOutput - prevOutput) / prevOutput) * 100 : null, [prevOutput, totalOutput])
 
   // Material type breakdown
-  const materialMap: Record<string, number> = {}
-  jobs.forEach(j => (j.printedRolls || []).forEach(p => {
-    const matName = p.roll?.material?.name || 'Unknown'
-    materialMap[matName] = (materialMap[matName] || 0) + Number(p.weightUsed || 0)
-  }))
-  const materialBreakdown = Object.entries(materialMap).sort(([, a], [, b]) => b - a)
+  const materialBreakdown = useMemo(() => {
+    const materialMap: Record<string, number> = {}
+    jobs.forEach(j => (j.printedRolls || []).forEach(p => {
+      const matName = p.roll?.material?.name || 'Unknown'
+      materialMap[matName] = (materialMap[matName] || 0) + Number(p.weightUsed || 0)
+    }))
+    return Object.entries(materialMap).sort(([, a], [, b]) => b - a)
+  }, [jobs])
 
   const doExport = useCallback(() => {
     exportCSV('production_output.csv',
@@ -1156,7 +1167,7 @@ function WasteAnalysisView({ jobs, totalWaste, wasteByJob, totalOutput, wasteCha
 
 // ─── Stock Valuation ────────────────────────────
 function StockValuationView({ materials, stockValue, pieData }: { materials: MaterialWithStock[]; stockValue: number; pieData: { name: string; value: number }[] }) {
-  const withStock = materials.filter(m => (m.totalStock || 0) > 0)
+  const withStock = useMemo(() => materials.filter(m => (m.totalStock || 0) > 0), [materials])
 
   const doExport = useCallback(() => {
     exportCSV('stock_valuation.csv',
@@ -1256,7 +1267,7 @@ function InventoryMovementsView({ data: rawData }: { data: InventoryMovementRepo
     )
   }, [data])
 
-  const chartData = data.byType.map(t => ({ name: t.type, in: t.type === 'IN' || t.type === 'INITIAL' ? t.totalQuantity : 0, out: t.type === 'OUT' || t.type === 'ADJUSTMENT' ? t.totalQuantity : 0 }))
+  const chartData = useMemo(() => data.byType.map(t => ({ name: t.type, in: t.type === 'IN' || t.type === 'INITIAL' ? t.totalQuantity : 0, out: t.type === 'OUT' || t.type === 'ADJUSTMENT' ? t.totalQuantity : 0 })), [data])
 
   return (
     <ReportWrapper onExport={doExport}>
@@ -1352,8 +1363,8 @@ function InventoryMovementsView({ data: rawData }: { data: InventoryMovementRepo
 
 // ─── Low Stock Report ────────────────────────────
 function LowStockView({ items }: { items: MaterialWithStock[] }) {
-  const critical = items.filter(m => m.totalStock <= 0 || (m.minStock > 0 && m.totalStock / m.minStock <= 0.5))
-  const low = items.filter(m => !critical.includes(m) && m.totalStock < m.minStock)
+  const critical = useMemo(() => items.filter(m => m.totalStock <= 0 || (m.minStock > 0 && m.totalStock / m.minStock <= 0.5)), [items])
+  const low = useMemo(() => items.filter(m => !critical.includes(m) && m.totalStock < m.minStock), [items, critical])
 
   const doExport = useCallback(() => {
     exportCSV('low_stock_report.csv',
@@ -1414,16 +1425,18 @@ function LowStockView({ items }: { items: MaterialWithStock[] }) {
 }
 
 // ─── PO Summary ──────────────────────────────────
-function POSummaryView({ orders, totalAmount, byStatus, supplierQty, supplierAmount }: {
-  orders: PurchaseOrder[]; totalAmount: number; byStatus: Record<string, number>;
+function POSummaryView({ orders, totalAmount, totalQty, byStatus, supplierQty, supplierAmount }: {
+  orders: PurchaseOrder[]; totalAmount: number; totalQty: number; byStatus: Record<string, number>;
   supplierQty: { supplier: string; qty: number }[]; supplierAmount: { supplier: string; amount: number }[];
 }) {
   const statusLabels: Record<string, string> = { PENDING: 'Pending', RECEIVED: 'Received', PARTIALLY_RECEIVED: 'Partial', CANCELLED: 'Cancelled' }
 
+  const poQty = (po: PurchaseOrder) => (po.items || []).reduce((s, i) => s + Number(i.totalWeight || 0), 0)
+
   const doExport = useCallback(() => {
     exportCSV('po_summary.csv',
-      ['PO #', 'Supplier', 'Status', 'Amount'],
-      orders.map(o => [o.poNumber, o.supplier, o.status, String(o.totalAmount || 0)])
+      ['PO #', 'Supplier', 'Status', 'Qty', 'Amount'],
+      orders.map(o => [o.poNumber, o.supplier, o.status, formatKg(poQty(o)), String(o.totalAmount || 0)])
     )
   }, [orders])
 
@@ -1472,6 +1485,7 @@ function POSummaryView({ orders, totalAmount, byStatus, supplierQty, supplierAmo
               <th className="text-left py-2.5 px-4 font-medium text-slate-600">PO #</th>
               <th className="text-left py-2.5 px-4 font-medium text-slate-600">Supplier</th>
               <th className="text-left py-2.5 px-4 font-medium text-slate-600">Status</th>
+              <th className="text-right py-2.5 px-4 font-medium text-slate-600">Qty</th>
               <th className="text-right py-2.5 px-4 font-medium text-slate-600">Amount</th>
             </tr>
           </thead>
@@ -1481,6 +1495,7 @@ function POSummaryView({ orders, totalAmount, byStatus, supplierQty, supplierAmo
                 <td className="py-2 px-4 font-medium">{po.poNumber}</td>
                 <td className="py-2 px-4">{po.supplier}</td>
                 <td className="py-2 px-4">{statusLabels[po.status] || po.status}</td>
+                <td className="py-2 px-4 text-right">{formatKg(poQty(po))}</td>
                 <td className="py-2 px-4 text-right">{po.totalAmount ? formatCurrency(Number(po.totalAmount)) : '-'}</td>
               </tr>
             ))}
@@ -1488,6 +1503,7 @@ function POSummaryView({ orders, totalAmount, byStatus, supplierQty, supplierAmo
           <tfoot>
             <tr className="bg-slate-100 font-bold">
               <td colSpan={3} className="py-3 px-4">{orders.length} orders</td>
+              <td className="py-3 px-4 text-right">{formatKg(totalQty)}</td>
               <td className="py-3 px-4 text-right">{formatCurrency(totalAmount)}</td>
             </tr>
           </tfoot>

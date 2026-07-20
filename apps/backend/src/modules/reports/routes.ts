@@ -1,12 +1,14 @@
 import { Router } from 'express'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { reportLimiter } from '../../middleware/rateLimiters'
 import { reportsController } from './controller'
 
 export const reportsRouter = Router()
 
+reportsRouter.use(reportLimiter)
 reportsRouter.use(authenticate)
 reportsRouter.use(loadUser)
-reportsRouter.use(requirePermission('reporting:read'))
+reportsRouter.use(requirePermission('report:read'))
 
 reportsRouter.get('/aging/receivables', reportsController.getAgingReceivables)
 reportsRouter.get('/aging/payables', reportsController.getAgingPayables)

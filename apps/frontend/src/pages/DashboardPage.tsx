@@ -4,6 +4,7 @@ import { useNotification } from '../contexts/NotificationContext'
 import { Layout } from '../components/Layout'
 import { financeApi, FinanceDashboard } from '../api/finance'
 import { salesOrderApi, SalesOrder, ORDER_STATUS_LABELS } from '../api/salesOrders'
+import { hasPermission } from '../stores/authStore'
 import { productionApi, ProductionJob } from '../api/production'
 import { inventoryApi, MaterialWithStock } from '../api/inventory'
 
@@ -110,9 +111,7 @@ function periodLabel(p: DashboardPeriod): string {
 function DashboardPage() {
   const navigate = useNavigate()
   const notify = useNotification()
-  const userJson = localStorage.getItem('user')
-  const currentUser = userJson ? JSON.parse(userJson) : null
-  const canViewFinance = currentUser?.role === 'ADMIN' || currentUser?.role === 'MANAGER'
+  const canViewFinance = hasPermission('finance:read')
 
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState<DashboardPeriod>('today')
@@ -126,26 +125,24 @@ function DashboardPage() {
   const loadDashboard = async (p: DashboardPeriod) => {
     setLoading(true)
     const month = periodToMonth(p)
-    try {
-      const [dashRes, ordersRes, jobsRes, matRes, custRes] = await Promise.all([
-        financeApi.getDashboard(month),
-        salesOrderApi.getOrders(),
-        productionApi.getJobs(),
-        inventoryApi.getMaterials(),
-        salesOrderApi.getCustomers()
-      ])
+    const [ordersRes, jobsRes, matRes, custRes] = await Promise.all([
+      salesOrderApi.getOrders(),
+      productionApi.getJobs(),
+      inventoryApi.getMaterials(),
+      salesOrderApi.getCustomers()
+    ])
+    if (hasPermission('finance:read')) {
+      const dashRes = await financeApi.getDashboard(month)
       if ((dashRes.data as any)?.data) setDashboard((dashRes.data as any).data)
-      if (ordersRes.data) setOrders((ordersRes.data as any)?.data || [])
-      else notify.error('Failed to load orders')
-      if (jobsRes.data) setJobs((jobsRes.data as any)?.data || [])
-      else notify.error('Failed to load production jobs')
-      if (matRes.data) setMaterials((matRes.data as any)?.data || [])
-      else notify.error('Failed to load materials')
-      if (custRes.data) setCustomers((custRes.data as any)?.data || [])
-      else notify.error('Failed to load customers')
-    } catch (err: any) {
-      notify.error(err?.message || 'Failed to load dashboard')
     }
+    if (ordersRes.data) setOrders((ordersRes.data as any)?.data || [])
+    else notify.error('Failed to load orders')
+    if (jobsRes.data) setJobs((jobsRes.data as any)?.data || [])
+    else notify.error('Failed to load production jobs')
+    if (matRes.data) setMaterials((matRes.data as any)?.data || [])
+    else notify.error('Failed to load materials')
+    if (custRes.data) setCustomers((custRes.data as any)?.data || [])
+    else notify.error('Failed to load customers')
     setLoading(false)
   }
 

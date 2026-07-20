@@ -1,11 +1,14 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
-import { Role, RolePermissions, Permission } from '@flexoprint/types'
+import { Role, Permission } from '@flexoprint/types'
 import { AppError } from './errorHandler'
 import { prisma } from '../database'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'flexoprint-secret-change-in-production'
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is required. Set it before starting the server.')
+}
+const JWT_SECRET = process.env.JWT_SECRET
 
 export interface AuthUser {
   id: string
@@ -27,8 +30,8 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
   const token = authHeader.substring(7)
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { userId: string }
-    req.user = { id: payload.userId, username: '', role: Role.OPERATOR } as AuthUser
+    const payload = jwt.verify(token, JWT_SECRET) as { userId: string; role: string }
+    req.user = { id: payload.userId, username: '', role: payload.role as Role }
     next()
   } catch {
     throw new AppError(401, 'UNAUTHORIZED', 'Invalid or expired token')
@@ -67,41 +70,65 @@ export async function loadUser(req: AuthenticatedRequest, res: Response, next: N
   }
 }
 
-export function authorize(...allowedRoles: Role[]) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export async function checkUserPermission(userId: string, role: Role, permissionName: string): Promise<boolean> {
+  const permission = await prisma.permission.findUnique({ where: { name: permissionName } })
+  if (!permission) return false
+
+  const rolePerm = await prisma.rolePermission.findUnique({
+    where: { role_permissionId: { role, permissionId: permission.id } }
+  })
+
+  const userPerm = await prisma.userPermission.findUnique({
+    where: { userId_permissionId: { userId, permissionId: permission.id } }
+  })
+
+  if (userPerm) return userPerm.granted
+
+  return !!rolePerm
+}
+
+export async function getUserEffectivePermissions(userId: string, role: Role): Promise<string[]> {
+  const dbPerms = await prisma.permission.findMany({
+    include: {
+      rolePermissions: { where: { role } },
+      userPermissions: { where: { userId } }
+    }
+  })
+
+  return dbPerms
+    .filter(p => {
+      const roleMatch = p.rolePermissions.length > 0
+      const userOverride = p.userPermissions.find(u => u.userId === userId)
+      if (userOverride) return userOverride.granted
+      return roleMatch
+    })
+    .map(p => p.name)
+}
+
+export function requirePermission(permissionName: Permission) {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       throw new AppError(401, 'UNAUTHORIZED', 'Authentication required')
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
-      throw new AppError(403, 'FORBIDDEN', 'Insufficient permissions')
+    try {
+      const has = await checkUserPermission(req.user.id, req.user.role, permissionName)
+      if (!has) {
+        throw new AppError(403, 'FORBIDDEN', `Permission denied: ${permissionName}`)
+      }
+      next()
+    } catch (err) {
+      next(err)
     }
-
-    next()
   }
 }
 
-export function requirePermission(permission: Permission) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      throw new AppError(401, 'UNAUTHORIZED', 'Authentication required')
-    }
-
-    const permissions = RolePermissions[req.user.role]
-    if (!permissions.includes(permission)) {
-      throw new AppError(403, 'FORBIDDEN', `Permission denied: ${permission}`)
-    }
-
-    next()
-  }
+export function generateAccessToken(userId: string, role: string): string {
+  return jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: '15m' })
 }
 
-export function generateAccessToken(userId: string): string {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '15m' })
-}
-
-export function generateRefreshToken(userId: string): string {
-  const token = jwt.sign({ userId, type: 'refresh' }, JWT_SECRET, { expiresIn: '7d' })
+export function generateRefreshToken(userId: string, role: string): string {
+  const token = jwt.sign({ userId, role, type: 'refresh' }, JWT_SECRET, { expiresIn: '7d' })
   return token + ':' + crypto.randomUUID()
 }
 
@@ -110,9 +137,9 @@ export function extractJwtFromRefreshToken(token: string): string {
   return idx === -1 ? token : token.slice(0, idx)
 }
 
-export function verifyToken(token: string): { userId: string } | null {
+export function verifyToken(token: string): { userId: string; role: string } | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as { userId: string }
+    return jwt.verify(token, JWT_SECRET) as { userId: string; role: string }
   } catch {
     return null
   }

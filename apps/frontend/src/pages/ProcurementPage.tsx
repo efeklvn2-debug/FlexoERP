@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNotification } from '../contexts/NotificationContext'
-import { procurementApi, PurchaseOrder, SupplierInvoice, SupplierInvoiceStatus } from '../api/procurement'
+import { procurementApi, PurchaseOrder, SupplierInvoice } from '../api/procurement'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
 import { inventoryApi, MaterialWithStock } from '../api/inventory'
@@ -71,7 +71,7 @@ export function ProcurementPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<SupplierInvoice | null>(null)
   const [showPaymentHistoryModal, setShowPaymentHistoryModal] = useState(false)
   const [selectedPaymentHistory, setSelectedPaymentHistory] = useState<SupplierInvoice | null>(null)
-  const [poForInv, setPoForInv] = useState<PurchaseOrder | null>(null)
+  const [, setPoForInv] = useState<PurchaseOrder | null>(null)
   const [invForm, setInvForm] = useState({ poId: '', invoiceNumber: '', date: '', amount: 0 })
   const [uninvoicedPOs, setUninvoicedPOs] = useState<PurchaseOrder[]>([])
   const [payForm, setPayForm] = useState({ amount: 0, date: '', paymentMethod: 'Cash' as 'Cash' | 'Bank Transfer', reference: '', notes: '' })
@@ -722,7 +722,6 @@ export function ProcurementPage() {
                     <td colSpan={8} className="px-6 py-8 text-center text-slate-500">No supplier invoices found</td>
                   </tr>
                 ) : filteredInvoices.map(inv => {
-                  const balance = Number(inv.amount) - Number(inv.amountPaid)
                   return (
                     <tr key={inv.id} className="hover:bg-slate-50">
                       <td className="px-6 py-4 text-sm font-medium text-blue-600">{inv.invoiceNumber}</td>

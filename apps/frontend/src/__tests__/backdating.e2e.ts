@@ -15,7 +15,6 @@
 
 import { salesOrderApi } from '../api/salesOrders'
 import { productionApi } from '../api/production'
-import { procurementApi } from '../api/procurement'
 
 const YESTERDAY = new Date(Date.now() - 86400000).toISOString().split('T')[0]
 const TODAY = new Date().toISOString().split('T')[0]
@@ -59,14 +58,14 @@ async function testBackdatingFlow() {
   assert(!customerRes.error, 'Customer created', customerRes.error?.message)
   const customer = (customerRes.data as any)?.data || customerRes.data
   ctx.customerId = customer.id
-  console.log(`  Customer ID: ${ctx.customerId}`)
+  console.log(`  Customer ID: ${ctx.customerId!}`)
 
   // ──────────────────────────────────────────────
   // Step 2: Create a sales order  
   // ──────────────────────────────────────────────
   console.log('\n--- Step 2: Create sales order ---')
   const orderRes = await salesOrderApi.createOrder({
-    customerId: ctx.customerId,
+    customerId: ctx.customerId!,
     specsJson: { width: 50, material: 'TEST', gsm: 100 },
     quantityOrdered: 10,
     unitPrice: 2000,
@@ -80,7 +79,7 @@ async function testBackdatingFlow() {
   // Step 3: Approve order with YESTERDAY's date
   // ──────────────────────────────────────────────
   console.log('\n--- Step 3: Approve order (backdated) ---')
-  const approveRes = await salesOrderApi.approveOrder(ctx.orderId, YESTERDAY)
+  const approveRes = await salesOrderApi.approveOrder(ctx.orderId!, YESTERDAY)
   assert(!approveRes.error, 'Order approved', approveRes.error?.message)
   const approvedOrder = (approveRes.data as any)?.data || approveRes.data
   const approvedAt = new Date(approvedOrder.approvedAt)
@@ -98,7 +97,7 @@ async function testBackdatingFlow() {
   // ──────────────────────────────────────────────
   console.log('\n--- Step 4: Approve another order (default today) ---')
   const order2Res = await salesOrderApi.createOrder({
-    customerId: ctx.customerId,
+    customerId: ctx.customerId!,
     specsJson: { width: 60, material: 'TEST2', gsm: 120 },
     quantityOrdered: 5,
     unitPrice: 3000,
@@ -198,7 +197,7 @@ async function testBackdatingFlow() {
   console.log(`  Job ID: ${ctx.jobId}`)
 
   // Complete with yesterday's date
-  const completeRes = await productionApi.completeJob(ctx.jobId, YESTERDAY)
+  const completeRes = await productionApi.completeJob(ctx.jobId!, YESTERDAY)
   assert(!completeRes.error, 'Job completed', completeRes.error?.message)
   const completedJob = (completeRes.data as any)?.data || completeRes.data
   const endDate = new Date(completedJob.endDate)

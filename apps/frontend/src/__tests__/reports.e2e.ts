@@ -32,10 +32,6 @@ function assert(condition: boolean, label: string, detail?: string) {
   }
 }
 
-function assertNotNull<T>(val: T | null | undefined, label: string): T {
-  assert(val != null, `${label} exists`)
-  return val!
-}
 
 function body(resp: { data: any }): any {
   return resp.data?.data ?? resp.data

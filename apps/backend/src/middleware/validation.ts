@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
+import { ParamsDictionary } from 'express-serve-static-core'
+import { ParsedQs } from 'qs'
 import { ZodSchema, ZodError } from 'zod'
 import { createChildLogger } from '../logger'
 
@@ -26,7 +28,7 @@ export function validateRequest<T>(schema: ZodSchema<T>) {
   }
 }
 
-export function validateParams<T>(schema: ZodSchema<T>) {
+export function validateParams<T extends ParamsDictionary>(schema: ZodSchema<T>) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
       req.params = schema.parse(req.params)
@@ -48,7 +50,7 @@ export function validateParams<T>(schema: ZodSchema<T>) {
   }
 }
 
-export function validateQuery<T>(schema: ZodSchema<T>) {
+export function validateQuery<T extends ParsedQs>(schema: ZodSchema<T>) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
       req.query = schema.parse(req.query)

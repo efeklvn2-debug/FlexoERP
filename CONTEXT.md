@@ -214,7 +214,7 @@ Every pickup generates a separate invoice for the exact quantity picked up. No m
 
 ### Role gating
 - Uses `localStorage.getItem('user')` (NOT `useAuthStore` — zustand persist has hydration delays)
-- Only Net Profit mini-card is gated (ADMIN/MANAGER only)
+- Only Net Profit mini-card is gated (ADMIN/MANAGER only, via `hasPermission('finance:read')`)
 - Revenue removed from dashboard entirely (was not updating due to monthly backend granularity)
 
 ### Recent Orders panel
@@ -249,6 +249,76 @@ Every pickup generates a separate invoice for the exact quantity picked up. No m
 - Deleted 3 one-sided entries (JE-2026-0471/472/473)
 - Removed OBE journal entry creation from `postOpeningBalances()` — now only sets `account.openingBalance`
 - `initializeStock` balanced JE (Dr 1300/Cr 3000) left untouched — it's correct
+
+## TS Errors Cleanup (20 Jul 2026) — All 30 eliminated
+
+**Backend (11 → 0)**:
+- `modules/sales/` (7 errors) — **deleted entire deprecated directory + route from `app.ts`**
+- `middleware/idempotency.ts` (1 error) — added `Prisma` import + `as Prisma.InputJsonValue` cast
+- `middleware/validation.ts` (2 errors) — added `ParamsDictionary`/`ParsedQs` generic constraints
+- `modules/auth/service.ts` (1 error) — cast role expression with `as Role`
+
+**Frontend (19 → 0)**:
+- `InventoryPage.tsx` (12 errors) — removed unused imports + sub-component sort props; added `today` in PrintedRollsTab; Date cast; unused setter prefixes
+- `FinancePage.tsx` (1 error) — removed unused `idx` param
+- `ProcurementPage.tsx` (3 errors) — removed unused import + dead var `balance`; prefixed `poForInv` as `_`
+- `Layout.tsx` (1 error) — cast wheel handler + options
+- `backdating.e2e.ts` (1 file) — removed unused import; `!` assertions on ctx fields
+- `reports.e2e.ts` (1 error) — removed unused `assertNotNull`
+
+## Permission System & Admin Panel (20 Jul 2026)
+
+### Architecture (3-layer separation)
+1. **Permission definitions** — DB `Permission` table (seeded from `prisma/seed.ts`), referenced by TypeScript `Permission` union type
+2. **Role→Permission mappings** — `RolePermission` table (one-to-many: role → permission). Prisma upsert creates/updates but **never deletes** — stale records persist unless manually removed
+3. **Per-user overrides** — `UserPermission` table with `granted: Boolean` (true=grant, false=deny). Overrides take precedence over role defaults in `checkUserPermission()` logic
+
+### Seed defaults
+- **ADMIN**: All 42 permissions inc. `auth:manage_users`
+- **MANAGER**: All 42 EXCEPT `auth:manage_users` (40 perms)
+- **OPERATOR**: All 42 EXCEPT `auth:manage_users` (40 perms)
+- **VIEWER**: 10 read-only permissions
+- Seed evolved: OPERATOR originally had 24 perms → then all 42 → then settled at 40 (no auth:manage_users)
+- Admin uses control panel to strip further from any role or user
+
+### Backend middleware chain
+- `authenticate` → decodes JWT, sets `req.user.id` + `req.user.role` from token payload
+- `loadUser` → REQUIRED after `authenticate` because token role may be stale; fetches fresh role+active status from DB
+- `requirePermission('perm:name')` → DB-backed check via `checkUserPermission()`: queries `RolePermission` + `UserPermission` (override takes precedence)
+
+### Frontend gating
+- `hasPermission()` — standalone function (reads from zustand store synchronously). NOT a store action (avoids circular type reference in persist middleware).
+- `ProtectedRoute requiredPermissions` prop — route-level gating
+- All action buttons gated by `hasPermission()`: Approve/Cancel (`sales_order:approve/delete`), Start Production (`production:create`), Record Pickup (`sales_order:pickup`), New Order (`sales_order:create`), Adjust Stock (`inventory:adjust`), etc.
+- `hasPermission('finance:read')` for finance visibility, `hasPermission('finance:write')` for reverse JE, `hasPermission('customer:payment')` for deposit
+- **4 pages migrated from role-based to permission-based gating** (20 Jul 2026): DashboardPage `currentUser?.role === 'ADMIN' || 'MANAGER'` → `hasPermission('finance:read')`, FinancePage → `hasPermission('finance:write')`, CustomersPage → `hasPermission('customer:payment')`, InventoryPage `isAdmin` → `hasPermission('inventory:adjust')`
+
+### API response unwrapping pattern
+- `api.get/post` returns `{ data: { data: actualResult } }`
+- Safe unwrap: `Array.isArray(res.data) ? res.data : (res.data as any)?.data || []`
+
+### Admin Panel — Backend (8 endpoints)
+All in `auth` module, gated by `requirePermission('auth:manage_users')`:
+- `GET /auth/users`, `GET /auth/users/:id`, `PATCH /auth/users/:id`
+- `GET /auth/permissions/all`, `GET /auth/roles`
+- `GET /auth/roles/:role/permissions`, `PUT /auth/roles/:role/permissions` (transactional delete+create)
+- `GET /auth/users/:id/permissions`, `PUT /auth/users/:id/permissions`, `DELETE /auth/users/:id/permissions/:permId`
+- Fixed: `/register` route changed from `authorize(Role.ADMIN)` (legacy role-check) to `requirePermission('auth:manage_users')`
+
+### Admin Panel — Frontend (`AdminPage.tsx`)
+- Route: `/admin` with `requiredPermissions={['auth:manage_users']}`
+- Sidebar: "Admin" nav item (between Settings and Reports), gated by `hasPermission('auth:manage_users')`, rendered only when user has it
+- 3 tabs:
+  - **Users**: Table (username, role, active badge, override count) + edit modal (role dropdown + active toggle)
+  - **Roles**: Role selector dropdown → all 42 permissions grouped by module with checkboxes + bulk save
+  - **Overrides**: User selector → current overrides table (granted/denied badge, remove button) + "Add Override" modal (permission picker + grant toggle)
+- **Roles tab**: Module names formatted (`sales_order` → "Sales Order"). Each module has a select-all checkbox with indeterminate visual + live counter `(4/8)`. Single click toggles all permissions in that module.
+- **Sidebar all-items gating**: Every nav item has a `permission?` field. Filter is `!item.permission || hasPermission(item.permission)` — if admin strips `finance:read`, the Finance link disappears entirely. Dashboard is the only ungated item.
+
+### GOTCHAS
+- `Role` is a TypeScript enum (`Role.ADMIN`), not a string union — use `as Role` cast or enum values
+- Prisma `upsert` never deletes; updating role permissions requires manual `deleteMany` of stale `RolePermission` records
+- API client has `delete` not `del` — `api.delete<T>(url)`
 
 ## TODO: Financial Accounts Setup Guide
 - Create a guide for new users setting up their chart of accounts, opening balances, and initial configuration

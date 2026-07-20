@@ -7,6 +7,7 @@ import { settingsApi } from '../api/settings'
 import { productionApi, ParentRoll, ProductionJob } from '../api/production'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
+import { hasPermission } from '../stores/authStore'
 
 
 type PaymentMethod = 'Cash' | 'Electronic'
@@ -1143,23 +1144,23 @@ export function SalesOrdersPage() {
     const actions: { label: string; action: string; variant: string }[] = []
     switch (order.status) {
       case 'PENDING':
-        actions.push({ label: 'Approve', action: 'approve', variant: 'bg-green-600 hover:bg-green-700' })
-        actions.push({ label: 'Cancel', action: 'cancel', variant: 'bg-red-600 hover:bg-red-700' })
+        if (hasPermission('sales_order:approve')) actions.push({ label: 'Approve', action: 'approve', variant: 'bg-green-600 hover:bg-green-700' })
+        if (hasPermission('sales_order:delete')) actions.push({ label: 'Cancel', action: 'cancel', variant: 'bg-red-600 hover:bg-red-700' })
         break
       case 'APPROVED':
       case 'MRP_PENDING':
-        actions.push({ label: 'Start Production', action: 'startProduction', variant: 'bg-indigo-600 hover:bg-indigo-700' })
-        actions.push({ label: 'Cancel', action: 'cancel', variant: 'bg-red-600 hover:bg-red-700' })
+        if (hasPermission('production:create')) actions.push({ label: 'Start Production', action: 'startProduction', variant: 'bg-indigo-600 hover:bg-indigo-700' })
+        if (hasPermission('sales_order:delete')) actions.push({ label: 'Cancel', action: 'cancel', variant: 'bg-red-600 hover:bg-red-700' })
         break
       case 'IN_PRODUCTION':
         actions.push({ label: 'Go to Production', action: 'viewProduction', variant: 'bg-indigo-600 hover:bg-indigo-700' })
         break
       case 'READY':
-        actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
+        if (hasPermission('sales_order:pickup')) actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
         break
       case 'PICKED_UP':
         if (Number(order.quantityDelivered) < Number(order.quantityOrdered)) {
-          actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
+          if (hasPermission('sales_order:pickup')) actions.push({ label: 'Record Pickup', action: 'pickup', variant: 'bg-teal-600 hover:bg-teal-700' })
         }
         break
     }
@@ -1215,12 +1216,16 @@ export function SalesOrdersPage() {
             <p className="text-slate-500 mt-1">Make-to-Order workflow management</p>
           </div>
           <div className="flex space-x-3">
-            <button onClick={() => setShowOrderModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              + New Order
-            </button>
-            <button onClick={() => setShowCoreBuybackModal(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-              Core Buyback
-            </button>
+            {hasPermission('sales_order:create') && (
+              <button onClick={() => setShowOrderModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                + New Order
+              </button>
+            )}
+            {hasPermission('inventory:adjust') && (
+              <button onClick={() => setShowCoreBuybackModal(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                Core Buyback
+              </button>
+            )}
           </div>
         </div>
 

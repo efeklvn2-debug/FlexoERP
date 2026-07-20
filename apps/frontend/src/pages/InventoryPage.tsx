@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNotification } from '../contexts/NotificationContext'
 import { useSearchParams } from 'react-router-dom'
-import { inventoryApi, MaterialWithStock, MaterialCategory, MovementType } from '../api/inventory'
+import { inventoryApi, MaterialWithStock } from '../api/inventory'
 import { procurementApi, Roll } from '../api/procurement'
 import { productionApi, PrintedRollDisplay } from '../api/production'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
+import { hasPermission } from '../stores/authStore'
 
 type TabType = 'plain-rolls' | 'ink-solvents' | 'cores' | 'packing-bags' | 'printed-rolls' | 'initial-stock'
 
@@ -31,9 +32,7 @@ export function InventoryPage() {
   const notify = useNotification()
   const [showInitializeModal, setShowInitializeModal] = useState(false)
   
-  const userStr = localStorage.getItem('user')
-  const user = userStr ? JSON.parse(userStr) : null
-  const isAdmin = user?.role === 'ADMIN'
+  const canAdjust = hasPermission('inventory:adjust')
   const [initialStockItems, setInitialStockItems] = useState<InitialStockItem[]>([])
   const [saving, setSaving] = useState(false)
   const [adjustMaterial, setAdjustMaterial] = useState<MaterialWithStock | null>(null)
@@ -72,12 +71,12 @@ export function InventoryPage() {
     status: '',
     materialSubCategory: ''
   })
-  const [plainRollsSort, setPlainRollsSort] = useState<'rollNumber' | 'weight' | 'remainingWeight' | 'createdAt'>('createdAt')
-  const [plainRollsSortOrder, setPlainRollsSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [plainRollsSort, _setPlainRollsSort] = useState<'rollNumber' | 'weight' | 'remainingWeight' | 'createdAt'>('createdAt')
+  const [plainRollsSortOrder, _setPlainRollsSortOrder] = useState<'asc' | 'desc'>('desc')
 
   const [materialsFilter, setMaterialsFilter] = useState({ search: '' })
-  const [materialsSort, setMaterialsSort] = useState<'name' | 'totalStock' | 'code'>('name')
-  const [materialsSortOrder, setMaterialsSortOrder] = useState<'asc' | 'desc'>('asc')
+  const [materialsSort, _setMaterialsSort] = useState<'name' | 'totalStock' | 'code'>('name')
+  const [materialsSortOrder, _setMaterialsSortOrder] = useState<'asc' | 'desc'>('asc')
 
   const [printedRollFilter, setPrintedRollFilter] = useState({
     search: '',
@@ -88,8 +87,8 @@ export function InventoryPage() {
     dateTo: '',
     combination: ''
   })
-  const [printedRollSort, setPrintedRollSort] = useState<'createdAt' | 'weight' | 'rollNumber'>('createdAt')
-  const [printedRollSortOrder, setPrintedRollSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [printedRollSort, _setPrintedRollSort] = useState<'createdAt' | 'weight' | 'rollNumber'>('createdAt')
+  const [printedRollSortOrder, _setPrintedRollSortOrder] = useState<'asc' | 'desc'>('desc')
   const [includeArchived, setIncludeArchived] = useState(false)
 
   useEffect(() => {
@@ -142,7 +141,7 @@ export function InventoryPage() {
       if (plainRollsSort === 'rollNumber') comparison = (a.rollNumber || '').localeCompare(b.rollNumber || '')
       else if (plainRollsSort === 'weight') comparison = Number(a.weight) - Number(b.weight)
       else if (plainRollsSort === 'remainingWeight') comparison = Number(a.remainingWeight) - Number(b.remainingWeight)
-      else comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      else comparison = new Date(a.createdAt as string).getTime() - new Date(b.createdAt as string).getTime()
       return plainRollsSortOrder === 'desc' ? -comparison : comparison
     })
     return result
@@ -228,10 +227,6 @@ export function InventoryPage() {
                 rolls={filteredPlainRolls}
                 filter={plainRollsFilter}
                 setFilter={setPlainRollsFilter}
-                sort={plainRollsSort}
-                setSort={setPlainRollsSort}
-                sortOrder={plainRollsSortOrder}
-                setSortOrder={setPlainRollsSortOrder}
                 total={plainRolls.length}
                 subCategories={subCategories.PLAIN_ROLLS || []}
                 onRollClick={async (roll) => {
@@ -254,35 +249,27 @@ export function InventoryPage() {
                 materials={filteredInkSolvents}
                 filter={materialsFilter}
                 setFilter={setMaterialsFilter}
-                sort={materialsSort}
-                setSort={setMaterialsSort}
-                sortOrder={materialsSortOrder}
-                setSortOrder={setMaterialsSortOrder}
                 total={inkSolvents.length}
                 title="Inks / Solvents"
-                onAdjust={isAdmin ? setAdjustMaterial : undefined}
-                isAdmin={isAdmin}
+                onAdjust={canAdjust ? setAdjustMaterial : undefined}
+                isAdmin={canAdjust}
               />
             )}
             {activeTab === 'cores' && (
               <CoresTab />
             )}
             {activeTab === 'packing-bags' && (
-              <PackingBagsTab onAdjust={isAdmin ? setAdjustMaterial : undefined} />
+              <PackingBagsTab onAdjust={canAdjust ? setAdjustMaterial : undefined} />
             )}
             {activeTab === 'printed-rolls' && (
               <PrintedRollsTab
                 rolls={filteredPrintedRolls}
                 filter={printedRollFilter}
                 setFilter={setPrintedRollFilter}
-                sort={printedRollSort}
-                setSort={setPrintedRollSort}
-                sortOrder={printedRollSortOrder}
-                setSortOrder={setPrintedRollSortOrder}
                 total={printedRolls.length}
                 subCategories={subCategories.PLAIN_ROLLS || []}
                 onRefresh={loadData}
-                isAdmin={isAdmin}
+                isAdmin={canAdjust}
                 includeArchived={includeArchived}
                 onToggleArchived={() => setIncludeArchived(!includeArchived)}
               />
@@ -799,14 +786,10 @@ export function InventoryPage() {
   )
 }
 
-function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, subCategories, onRollClick }: {
+function PlainRollsTab({ rolls, filter, setFilter, total, subCategories, onRollClick }: {
   rolls: Roll[]
   filter: { search: string; status: string; materialSubCategory: string }
   setFilter: React.Dispatch<React.SetStateAction<{ search: string; status: string; materialSubCategory: string }>>
-  sort: string
-  setSort: React.Dispatch<React.SetStateAction<any>>
-  sortOrder: 'asc' | 'desc'
-  setSortOrder: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
   total: number
   subCategories: string[]
   onRollClick?: (roll: Roll) => void
@@ -902,14 +885,10 @@ function PlainRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, set
   )
 }
 
-function MaterialsTab({ materials, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, title, onAdjust, isAdmin }: {
+function MaterialsTab({ materials, filter, setFilter, total, title, onAdjust, isAdmin }: {
   materials: MaterialWithStock[]
   filter: { search: string }
   setFilter: React.Dispatch<React.SetStateAction<{ search: string }>>
-  sort: string
-  setSort: React.Dispatch<React.SetStateAction<any>>
-  sortOrder: 'asc' | 'desc'
-  setSortOrder: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
   total: number
   title: string
   onAdjust?: (material: MaterialWithStock) => void
@@ -966,14 +945,10 @@ function MaterialsTab({ materials, filter, setFilter, sort, setSort, sortOrder, 
   )
 }
 
-function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, setSortOrder, total, subCategories, onRefresh, isAdmin, includeArchived, onToggleArchived }: {
+function PrintedRollsTab({ rolls, filter, setFilter, total, subCategories, onRefresh, isAdmin, includeArchived, onToggleArchived }: {
   rolls: PrintedRollDisplay[]
   filter: { search: string; customer: string; material: string; status: string; dateFrom: string; dateTo: string; combination: string }
   setFilter: React.Dispatch<React.SetStateAction<{ search: string; customer: string; material: string; status: string; dateFrom: string; dateTo: string; combination: string }>>
-  sort: string
-  setSort: React.Dispatch<React.SetStateAction<any>>
-  sortOrder: 'asc' | 'desc'
-  setSortOrder: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
   total: number
   subCategories: string[]
   onRefresh?: () => Promise<void>
@@ -981,6 +956,7 @@ function PrintedRollsTab({ rolls, filter, setFilter, sort, setSort, sortOrder, s
   includeArchived?: boolean
   onToggleArchived?: () => void
 }) {
+  const today = new Date().toISOString().split('T')[0]
   const notify = useNotification()
   const [selectedRoll, setSelectedRoll] = useState<PrintedRollDisplay | null>(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)

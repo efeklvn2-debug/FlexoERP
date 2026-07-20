@@ -3,6 +3,7 @@ import { salesOrderApi, Customer, CustomerBalance } from '../api/salesOrders'
 import { settingsApi } from '../api/settings'
 import { Layout } from '../components/Layout'
 import { useNotification } from '../contexts/NotificationContext'
+import { hasPermission } from '../stores/authStore'
 
 const DEFAULT_COLORS = ['RoyalBlue', 'VioletBlue', 'SkyBlue']
 
@@ -21,9 +22,7 @@ export function CustomersPage() {
   const [showOutstandingOnly, setShowOutstandingOnly] = useState(false)
   const [showHasRollsOnly, setShowHasRollsOnly] = useState(false)
 
-  const userStr = localStorage.getItem('user')
-  const user = userStr ? JSON.parse(userStr) : null
-  const canAdjustDeposit = user?.role === 'ADMIN' || user?.role === 'MANAGER'
+  const canAdjustDeposit = hasPermission('customer:payment')
 
   const [inkColors, setInkColors] = useState<any[]>([])
   const [form, setForm] = useState({

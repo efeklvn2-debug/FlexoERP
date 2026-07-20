@@ -5,8 +5,6 @@ import { receiptRepository } from './repository'
 import { logger } from '../../logger'
 import { sendError } from '../../middleware/errorHandler'
 
-console.log('[CONTROLLER] Loading salesOrderController...')
-
 export const salesOrderController = {
   async getOrders(req: Request, res: Response) {
     try {

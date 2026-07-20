@@ -6,7 +6,8 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('Seeding database...')
 
-  const passwordHash = await bcrypt.hash('admin123', 10)
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123'
+  const passwordHash = await bcrypt.hash(adminPassword, 12)
   await prisma.user.upsert({
     where: { username: 'admin' },
     update: {},
@@ -16,7 +17,111 @@ async function main() {
       role: 'ADMIN'
     }
   })
-  console.log('Created admin user (admin/admin123)')
+  console.log('Created admin user (admin/' + adminPassword + ')')
+
+  // test users for other roles
+  const makeUser = async (username: string, role: string) => {
+    const h = await bcrypt.hash('test123', 10)
+    await prisma.user.upsert({
+      where: { username },
+      update: {},
+      create: { username, passwordHash: h, role: role as any }
+    })
+    console.log(`Created ${role.toLowerCase()} user (${username}/test123)`)
+  }
+  await makeUser('manager', 'MANAGER')
+  await makeUser('operator', 'OPERATOR')
+  await makeUser('viewer', 'VIEWER')
+
+  // ── Permissions ──────────────────────────────────────────────────────
+  const permDefs = [
+    { name: 'auth:read',                description: 'View own profile',                        module: 'auth' },
+    { name: 'auth:manage_users',         description: 'Create and manage users',                 module: 'auth' },
+    { name: 'sales_order:read',          description: 'View sales orders',                       module: 'sales_orders' },
+    { name: 'sales_order:create',        description: 'Create sales orders',                     module: 'sales_orders' },
+    { name: 'sales_order:edit',          description: 'Edit sales orders',                       module: 'sales_orders' },
+    { name: 'sales_order:approve',       description: 'Approve sales orders for production',     module: 'sales_orders' },
+    { name: 'sales_order:delete',        description: 'Delete or cancel sales orders',           module: 'sales_orders' },
+    { name: 'sales_order:pickup',        description: 'Record customer pickups',                module: 'sales_orders' },
+    { name: 'sales_order:payment',       description: 'Record payments against orders',          module: 'sales_orders' },
+    { name: 'sales_order:adjust_deposit', description: 'Adjust customer deposits',               module: 'sales_orders' },
+    { name: 'production:read',           description: 'View production jobs',                    module: 'production' },
+    { name: 'production:create',         description: 'Create or start production jobs',         module: 'production' },
+    { name: 'production:complete',       description: 'Complete / close production jobs',        module: 'production' },
+    { name: 'production:edit',           description: 'Edit production jobs',                    module: 'production' },
+    { name: 'production:delete',         description: 'Delete or archive old jobs',              module: 'production' },
+    { name: 'inventory:read',            description: 'View inventory and stock',                module: 'inventory' },
+    { name: 'inventory:create',          description: 'Add new materials',                       module: 'inventory' },
+    { name: 'inventory:edit',            description: 'Edit material definitions',               module: 'inventory' },
+    { name: 'inventory:adjust',          description: 'Adjust stock quantities',                 module: 'inventory' },
+    { name: 'inventory:dispose',         description: 'Dispose or mark rolls as consumed',       module: 'inventory' },
+    { name: 'procurement:read',          description: 'View purchase orders',                    module: 'procurement' },
+    { name: 'procurement:create',        description: 'Create purchase orders',                  module: 'procurement' },
+    { name: 'procurement:receive',       description: 'Receive PO items into inventory',         module: 'procurement' },
+    { name: 'procurement:edit',          description: 'Edit purchase orders',                    module: 'procurement' },
+    { name: 'finance:read',              description: 'View accounts and journal entries',        module: 'finance' },
+    { name: 'finance:write',             description: 'Post manual journal entries',              module: 'finance' },
+    { name: 'finance:manage_accounts',   description: 'Add or edit chart of accounts',           module: 'finance' },
+    { name: 'settings:read',             description: 'View business settings',                  module: 'settings' },
+    { name: 'settings:write',            description: 'Update business settings',                module: 'settings' },
+    { name: 'settings:manage_materials', description: 'Add or edit material definitions',         module: 'settings' },
+    { name: 'settings:manage_colors',    description: 'Manage ink color mappings',               module: 'settings' },
+    { name: 'customer:read',             description: 'View customers',                          module: 'customers' },
+    { name: 'customer:create',           description: 'Add new customers',                       module: 'customers' },
+    { name: 'customer:edit',             description: 'Edit customer details',                   module: 'customers' },
+    { name: 'customer:payment',          description: 'Record customer payments and deposits',    module: 'customers' },
+    { name: 'supplier:read',             description: 'View suppliers',                          module: 'suppliers' },
+    { name: 'supplier:create',           description: 'Add suppliers',                           module: 'suppliers' },
+    { name: 'supplier:edit',             description: 'Edit supplier details',                   module: 'suppliers' },
+    { name: 'report:read',               description: 'View reports',                            module: 'reports' },
+    { name: 'pricing:read',              description: 'View price lists',                        module: 'pricing' },
+    { name: 'pricing:write',             description: 'Set and update price lists',              module: 'pricing' },
+  ] as const
+
+  const perms = new Map<string, string>()
+  for (const p of permDefs) {
+    const created = await prisma.permission.upsert({
+      where: { name: p.name },
+      update: { description: p.description, module: p.module },
+      create: { name: p.name, description: p.description, module: p.module }
+    })
+    perms.set(p.name, created.id)
+  }
+  console.log(`Created ${permDefs.length} permissions`)
+
+  // ── Role → Permission mappings ─────────────────────────────────────
+  type Role = 'ADMIN' | 'MANAGER' | 'OPERATOR' | 'VIEWER'
+
+  const rolePerms: Record<Role, string[]> = {
+    ADMIN: permDefs.map(p => p.name),
+    MANAGER: permDefs.filter(p => p.name !== 'auth:manage_users').map(p => p.name),
+    OPERATOR: permDefs.filter(p => p.name !== 'auth:manage_users').map(p => p.name),
+    VIEWER: [
+      'auth:read',
+      'sales_order:read',
+      'production:read',
+      'inventory:read',
+      'finance:read',
+      'settings:read',
+      'customer:read',
+      'supplier:read',
+      'report:read',
+      'pricing:read',
+    ],
+  }
+
+  for (const [role, permNames] of Object.entries(rolePerms)) {
+    for (const name of permNames) {
+      const permId = perms.get(name)
+      if (!permId) continue
+      await prisma.rolePermission.upsert({
+        where: { role_permissionId: { role: role as Role, permissionId: permId } },
+        update: {},
+        create: { role: role as Role, permissionId: permId }
+      })
+    }
+  }
+  console.log('Created role → permission mappings')
 
   const materials = [
     { code: 'PR25', name: '25 Microns', category: 'PLAIN_ROLLS' as const, subCategory: '25microns', unitOfMeasure: 'kg', costPrice: 2900, coreWeight: 0.7 },

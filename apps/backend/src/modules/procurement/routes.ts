@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { procurementController } from './controller'
-import { authenticate, loadUser } from '../../middleware/auth'
+import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
 import { validateRequest } from '../../middleware/validation'
 import {
   purchaseOrderSchema, updatePOSchema, addLineItemSchema,
@@ -13,23 +13,23 @@ export const procurementRouter = Router()
 procurementRouter.use(authenticate, loadUser)
 
 // Purchase Orders
-procurementRouter.get('/purchase-orders', procurementController.getAllPOs)
-procurementRouter.get('/purchase-orders/:id', procurementController.getPOById)
-procurementRouter.post('/purchase-orders', validateRequest(purchaseOrderSchema), procurementController.createPO)
-procurementRouter.patch('/purchase-orders/:id', validateRequest(updatePOSchema), procurementController.updatePO)
-procurementRouter.post('/purchase-orders/:id/items', validateRequest(addLineItemSchema), procurementController.addLineItem)
-procurementRouter.delete('/purchase-orders/:id/items/:lineItemId', procurementController.removeLineItem)
-procurementRouter.delete('/purchase-orders/:id', procurementController.deletePO)
-procurementRouter.post('/purchase-orders/:id/receive', validateRequest(receivePOSchema), procurementController.receivePO)
+procurementRouter.get('/purchase-orders', requirePermission('procurement:read'), procurementController.getAllPOs)
+procurementRouter.get('/purchase-orders/:id', requirePermission('procurement:read'), procurementController.getPOById)
+procurementRouter.post('/purchase-orders', requirePermission('procurement:create'), validateRequest(purchaseOrderSchema), procurementController.createPO)
+procurementRouter.patch('/purchase-orders/:id', requirePermission('procurement:edit'), validateRequest(updatePOSchema), procurementController.updatePO)
+procurementRouter.post('/purchase-orders/:id/items', requirePermission('procurement:edit'), validateRequest(addLineItemSchema), procurementController.addLineItem)
+procurementRouter.delete('/purchase-orders/:id/items/:lineItemId', requirePermission('procurement:edit'), procurementController.removeLineItem)
+procurementRouter.delete('/purchase-orders/:id', requirePermission('procurement:edit'), procurementController.deletePO)
+procurementRouter.post('/purchase-orders/:id/receive', requirePermission('procurement:receive'), validateRequest(receivePOSchema), procurementController.receivePO)
 
 // Rolls
-procurementRouter.get('/rolls', procurementController.getAllRolls)
-procurementRouter.get('/rolls/:id', procurementController.getRollById)
-procurementRouter.post('/rolls', validateRequest(rollSchema), procurementController.createRoll)
-procurementRouter.post('/rolls/bulk', validateRequest(bulkRollSchema), procurementController.createMultipleRolls)
+procurementRouter.get('/rolls', requirePermission('procurement:read'), procurementController.getAllRolls)
+procurementRouter.get('/rolls/:id', requirePermission('procurement:read'), procurementController.getRollById)
+procurementRouter.post('/rolls', requirePermission('procurement:create'), validateRequest(rollSchema), procurementController.createRoll)
+procurementRouter.post('/rolls/bulk', requirePermission('procurement:create'), validateRequest(bulkRollSchema), procurementController.createMultipleRolls)
 
 // Supplier Invoices
-procurementRouter.get('/supplier-invoices', procurementController.getAllSupplierInvoices)
-procurementRouter.get('/supplier-invoices/:id', procurementController.getSupplierInvoiceById)
-procurementRouter.post('/supplier-invoices', validateRequest(supplierInvoiceSchema), procurementController.createSupplierInvoice)
-procurementRouter.post('/supplier-invoices/:id/payments', validateRequest(supplierPaymentSchema), procurementController.addPayment)
+procurementRouter.get('/supplier-invoices', requirePermission('procurement:read'), procurementController.getAllSupplierInvoices)
+procurementRouter.get('/supplier-invoices/:id', requirePermission('procurement:read'), procurementController.getSupplierInvoiceById)
+procurementRouter.post('/supplier-invoices', requirePermission('procurement:create'), validateRequest(supplierInvoiceSchema), procurementController.createSupplierInvoice)
+procurementRouter.post('/supplier-invoices/:id/payments', requirePermission('procurement:create'), validateRequest(supplierPaymentSchema), procurementController.addPayment)

@@ -3,6 +3,7 @@ import { useNotification } from '../contexts/NotificationContext'
 import { Layout } from '../components/Layout'
 import { DateInput } from '../components/DateInput'
 import { financeApi, Account, JournalEntry, AccountBalance, FinanceDashboard, VatSummary, ProfitSummary, DeferredCogsSummary, GeneralLedger } from '../api/finance'
+import { hasPermission } from '../stores/authStore'
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-NG', {
@@ -106,9 +107,7 @@ export function FinancePage() {
     code: '', name: '', type: '', description: ''
   })
 
-  const userStr = localStorage.getItem('user')
-  const user = userStr ? JSON.parse(userStr) : null
-  const canReverse = user?.role === 'ADMIN' || user?.role === 'MANAGER'
+  const canReverse = hasPermission('finance:write')
 
   const drillToJournal = (day?: Date) => {
     const d = day || new Date()
@@ -1198,7 +1197,7 @@ export function FinancePage() {
                         <tr>
                           <td colSpan={5} className="px-6 py-8 text-center text-slate-500">No balance sheet accounts found. Click "Seed Accounts" to create the default chart of accounts.</td>
                         </tr>
-                      ) : openingBalances.map((item, idx) => (
+                      ) : openingBalances.map((item) => (
                         <tr key={item.accountId} className="hover:bg-slate-50">
                           <td className="px-6 py-3 text-sm font-mono font-medium text-slate-900">{item.code}</td>
                           <td className="px-6 py-3 text-sm text-slate-900">{item.name}</td>

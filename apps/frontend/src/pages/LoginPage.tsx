@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import { useAuthStore } from '../stores/authStore'
 
 export function LoginPage() {
   const [username, setUsername] = useState('')
@@ -13,21 +13,15 @@ export function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    
-    try {
-      const res = await axios.post('/api/auth/login', { username, password })
-      const { accessToken, refreshToken } = res.data.data.tokens
-      
-      localStorage.setItem('accessToken', accessToken)
-      localStorage.setItem('refreshToken', refreshToken)
-      localStorage.setItem('user', JSON.stringify(res.data.data.user))
-      
+
+    await useAuthStore.getState().login(username, password)
+
+    if (useAuthStore.getState().isAuthenticated) {
       navigate('/')
-    } catch (err: any) {
-      setError(err.response?.data?.error?.message || 'Invalid credentials')
-    } finally {
-      setLoading(false)
+    } else {
+      setError(useAuthStore.getState().error || 'Invalid credentials')
     }
+    setLoading(false)
   }
 
   return (

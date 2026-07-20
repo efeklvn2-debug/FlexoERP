@@ -5,7 +5,6 @@ import { rateLimit } from 'express-rate-limit'
 import { authRouter } from './modules/auth'
 import { healthRouter } from './modules/health'
 import { inventoryRouter } from './modules/inventory'
-import { salesRouter } from './modules/sales'
 import { procurementRouter } from './modules/procurement'
 import { supplierRouter } from './modules/suppliers'
 import { settingsRouter } from './modules/settings'
@@ -15,6 +14,7 @@ import { pricingRouter } from './modules/pricing'
 import { financeRouter } from './modules/finance'
 import { salesOrderRouter } from './modules/salesOrders'
 import { reportsRouter } from './modules/reports'
+import { honeypotMiddleware } from './middleware/honeypot'
 import { idempotencyMiddleware } from './middleware/idempotency'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler'
 import { logger } from './logger'
@@ -22,11 +22,28 @@ import { logger } from './logger'
 export function createApp() {
   const app = express()
 
+  app.set('trust proxy', 1)
+
+  app.use(honeypotMiddleware)
+
   app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
     credentials: true
   }))
-  app.use(helmet())
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        connectSrc: ["'self'", process.env.CORS_ORIGIN || 'http://localhost:5173'].filter(Boolean),
+        imgSrc: ["'self'", "data:"],
+        fontSrc: ["'self'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+      }
+    }
+  }))
   app.use(express.json())
   app.use(express.urlencoded({ extended: true }))
 
@@ -44,7 +61,6 @@ export function createApp() {
   app.use('/api/health', healthRouter)
   app.use('/api/auth', authRouter)
   app.use('/api/inventory', inventoryRouter)
-  app.use('/api/sales', salesRouter)
   app.use('/api/procurement', procurementRouter)
   app.use('/api/suppliers', supplierRouter)
   app.use('/api/production', productionRouter)

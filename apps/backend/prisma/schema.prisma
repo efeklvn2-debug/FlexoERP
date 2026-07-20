@@ -27,8 +27,9 @@ model User {
   archivedAt      DateTime?
   createdAt       DateTime      @default(now())
   updatedAt    DateTime       @updatedAt
-  refreshTokens RefreshToken[]
-  receipts     Receipt[]
+  refreshTokens  RefreshToken[]
+  receipts       Receipt[]
+  userPermissions UserPermission[]
 }
 
 model RefreshToken {
@@ -40,12 +41,52 @@ model RefreshToken {
   createdAt DateTime @default(now())
 }
 
+model Permission {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  module      String?
+  createdAt   DateTime  @default(now())
+  rolePermissions RolePermission[]
+  userPermissions  UserPermission[]
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  role         Role
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  @@unique([role, permissionId])
+  @@index([role])
+}
+
+model UserPermission {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  granted      Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+
+  @@unique([userId, permissionId])
+  @@index([userId])
+}
+
 model IdempotencyKey {
   id        String   @id
   response  Json
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+model BlockedIp {
+  id        String   @id
+  blockedAt DateTime @default(now())
+  reason    String
 }
 
 enum OrderStatus {

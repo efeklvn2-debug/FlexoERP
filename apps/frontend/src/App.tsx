@@ -12,25 +12,37 @@ import { FinancePage } from './pages/FinancePage'
 import { SalesOrdersPage } from './pages/SalesOrdersPage'
 import { SuppliersPage } from './pages/SuppliersPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { AdminPage } from './pages/AdminPage'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { Toast } from './components/Toast'
+import { useAuthStore, hasPermission } from './stores/authStore'
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+function ProtectedRoute({ children, requiredPermissions }: { children: React.ReactNode; requiredPermissions?: string[] }) {
+  const [ok, setOk] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const token = localStorage.getItem('accessToken')
-    setIsAuthenticated(!!token)
-    setLoading(false)
+    if (!token) { setLoading(false); return }
+
+    const { isAuthenticated, checkAuth } = useAuthStore.getState()
+    ;(isAuthenticated ? Promise.resolve() : checkAuth())
+      .finally(() => {
+        setOk(useAuthStore.getState().isAuthenticated)
+        setLoading(false)
+      })
   }, [])
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>
   }
 
-  if (!isAuthenticated) {
+  if (!ok) {
     return <Navigate to="/login" replace />
+  }
+
+  if (requiredPermissions && !requiredPermissions.every(p => hasPermission(p))) {
+    return <Navigate to="/" replace />
   }
 
   return <>{children}</>
@@ -42,16 +54,17 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/inventory" element={<ProtectedRoute><InventoryPage /></ProtectedRoute>} />
-          <Route path="/customers" element={<ProtectedRoute><CustomersPage /></ProtectedRoute>} />
-          <Route path="/customers/:customerId" element={<ProtectedRoute><CustomerDetailPage /></ProtectedRoute>} />
-          <Route path="/procurement" element={<ProtectedRoute><ProcurementPage /></ProtectedRoute>} />
-          <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
-          <Route path="/finance" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
-          <Route path="/sales-orders" element={<ProtectedRoute><SalesOrdersPage /></ProtectedRoute>} />
-          <Route path="/suppliers" element={<ProtectedRoute><SuppliersPage /></ProtectedRoute>} />
-          <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+          <Route path="/inventory" element={<ProtectedRoute requiredPermissions={['inventory:read']}><InventoryPage /></ProtectedRoute>} />
+          <Route path="/customers" element={<ProtectedRoute requiredPermissions={['customer:read']}><CustomersPage /></ProtectedRoute>} />
+          <Route path="/customers/:customerId" element={<ProtectedRoute requiredPermissions={['customer:read']}><CustomerDetailPage /></ProtectedRoute>} />
+          <Route path="/procurement" element={<ProtectedRoute requiredPermissions={['procurement:read']}><ProcurementPage /></ProtectedRoute>} />
+          <Route path="/production" element={<ProtectedRoute requiredPermissions={['production:read']}><ProductionPage /></ProtectedRoute>} />
+          <Route path="/finance" element={<ProtectedRoute requiredPermissions={['finance:read']}><FinancePage /></ProtectedRoute>} />
+          <Route path="/sales-orders" element={<ProtectedRoute requiredPermissions={['sales_order:read']}><SalesOrdersPage /></ProtectedRoute>} />
+          <Route path="/suppliers" element={<ProtectedRoute requiredPermissions={['supplier:read']}><SuppliersPage /></ProtectedRoute>} />
+          <Route path="/reports" element={<ProtectedRoute requiredPermissions={['report:read']}><ReportsPage /></ProtectedRoute>} />
+          <Route path="/admin" element={<ProtectedRoute requiredPermissions={['auth:manage_users']}><AdminPage /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute requiredPermissions={['settings:read']}><SettingsPage /></ProtectedRoute>} />
           <Route path="/*" element={<ProtectedRoute><Routes><Route path="/" element={<DashboardPage />} /></Routes></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>

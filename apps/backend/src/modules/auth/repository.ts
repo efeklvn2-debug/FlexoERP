@@ -21,6 +21,13 @@ export const authRepository = {
     return user as UserEntity | null
   },
 
+  async listUsers(): Promise<UserEntity[]> {
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' }
+    })
+    return users as UserEntity[]
+  },
+
   async createUser(data: {
     username: string
     passwordHash: string
@@ -87,6 +94,59 @@ export const authRepository = {
   async deleteUserRefreshTokens(userId: string): Promise<void> {
     await prisma.refreshToken.deleteMany({
       where: { userId }
+    })
+  },
+
+  // ── Permission management ─────────────────────────────────────
+
+  async listPermissions() {
+    return prisma.permission.findMany({
+      orderBy: [{ module: 'asc' }, { name: 'asc' }]
+    })
+  },
+
+  async getRolePermissionIds(role: Role): Promise<string[]> {
+    const rps = await prisma.rolePermission.findMany({
+      where: { role },
+      select: { permissionId: true }
+    })
+    return rps.map(rp => rp.permissionId)
+  },
+
+  async setRolePermissions(role: Role, permissionIds: string[]): Promise<number> {
+    await prisma.$transaction(async (tx) => {
+      await tx.rolePermission.deleteMany({ where: { role } })
+      if (permissionIds.length > 0) {
+        await tx.rolePermission.createMany({
+          data: permissionIds.map(permissionId => ({ role, permissionId }))
+        })
+      }
+    })
+    return permissionIds.length
+  },
+
+  async getUserPermissionOverrides(userId: string) {
+    return prisma.userPermission.findMany({
+      where: { userId },
+      include: { permission: { select: { name: true, module: true } } }
+    })
+  },
+
+  async setUserPermissionOverrides(userId: string, overrides: { permissionId: string; granted: boolean }[]): Promise<number> {
+    await prisma.$transaction(async (tx) => {
+      await tx.userPermission.deleteMany({ where: { userId } })
+      if (overrides.length > 0) {
+        await tx.userPermission.createMany({
+          data: overrides.map(o => ({ userId, permissionId: o.permissionId, granted: o.granted }))
+        })
+      }
+    })
+    return overrides.length
+  },
+
+  async deleteUserPermissionOverride(userId: string, permissionId: string): Promise<void> {
+    await prisma.userPermission.deleteMany({
+      where: { userId, permissionId }
     })
   }
 }
