@@ -137,19 +137,11 @@ export const inventoryRepository = {
       })
 
       if (data.stockId) {
-        const stock = await client.stock.findUnique({ where: { id: data.stockId } })
-        if (stock) {
-          let newQuantity = stock.quantity
-          if (data.type === 'IN' || data.type === 'ADJUSTMENT') {
-            newQuantity += data.quantity
-          } else if (data.type === 'OUT') {
-            newQuantity -= data.quantity
-          }
-          await client.stock.update({
-            where: { id: data.stockId },
-            data: { quantity: newQuantity }
-          })
-        }
+        const increment = (data.type === 'IN' || data.type === 'ADJUSTMENT') ? data.quantity : -data.quantity
+        await client.stock.update({
+          where: { id: data.stockId },
+          data: { quantity: { increment } }
+        })
       }
 
       logger.info({ movementId: movement.id, type: data.type, materialId: data.materialId }, 'Stock movement created')

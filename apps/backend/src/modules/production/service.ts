@@ -26,6 +26,32 @@ export const productionJobSchema = z.object({
 
 export type ProductionJobInput = z.infer<typeof productionJobSchema>
 
+async function createRolls(tx: Prisma.TransactionClient, weights: number[], date: string | undefined, materialId: string, primaryParentId: string | null): Promise<any[]> {
+  const lastRoll = await tx.roll.findFirst({
+    where: { rollNumber: { startsWith: 'PR' } },
+    orderBy: { rollNumber: 'desc' }
+  })
+  let counter = lastRoll ? parseInt(lastRoll.rollNumber.replace(/^\D+/g, '')) || 0 : 0
+
+  const created: any[] = []
+  for (const weight of weights) {
+    counter++
+    const roll = await tx.roll.create({
+      data: {
+        rollNumber: `PR${String(counter).padStart(5, '0')}`,
+        materialId,
+        weight,
+        remainingWeight: weight,
+        status: 'AVAILABLE',
+        receivedDate: date ? dateFromInput(date) : new Date(),
+        parentRollId: primaryParentId
+      }
+    })
+    created.push(roll)
+  }
+  return created
+}
+
 export const productionService = {
   async getJobs(status?: string) {
     const jobs = await prisma.productionJob.findMany({
@@ -75,118 +101,90 @@ export const productionService = {
   },
 
   async createJob(input: ProductionJobInput) {
-    try {
-    const jobNumber = await this.generateJobNumber()
-    logger.info({ jobNumber, input }, 'Creating production job')
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      try {
+        const jobNumber = await this.generateJobNumber()
+        logger.info({ jobNumber, input }, 'Creating production job')
 
-    const parentRolls = await prisma.roll.findMany({
-      where: {
-        id: { in: input.rollIds },
-        status: { in: ['AVAILABLE', 'IN_PRODUCTION'] }
-      },
-      include: { material: true }
-    })
-
-    if (parentRolls.length !== input.rollIds.length) {
-      throw new AppError(400, 'INVALID_ROLLS', 'Some rolls are not available for production')
-    }
-
-    const material = input.materialOverride
-      ? await prisma.material.findFirst({
-          where: { category: 'PLAIN_ROLLS', subCategory: input.materialOverride }
-        }) || parentRolls[0]?.material
-      : parentRolls[0]?.material
-    if (!material) {
-      throw new AppError(400, 'INVALID_MATERIAL', 'Parent roll has no material assigned')
-    }
-
-    const newRolls = await (async function createRollsWithRetry(maxRetries = 3): Promise<any[]> {
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          return await prisma.$transaction(async (tx) => {
-            const lastRoll = await tx.roll.findFirst({
-              where: { rollNumber: { startsWith: 'PR' } },
-              orderBy: { rollNumber: 'desc' }
-            })
-            let rollCounter = lastRoll ? parseInt(lastRoll.rollNumber.replace(/^\D+/g, '')) || 0 : 0
-
-            const createdRolls = []
-
-            const primaryParentId = parentRolls.length === 1 ? parentRolls[0].id : null
-
-            for (const weight of input.printedRollWeights) {
-              rollCounter++
-              const newRoll = await tx.roll.create({
-                data: {
-                  rollNumber: `PR${String(rollCounter).padStart(5, '0')}`,
-                  materialId: material.id,
-                  weight: weight,
-                  remainingWeight: weight,
-                  status: 'AVAILABLE',
-                  receivedDate: dateFromInput(input.date),
-                  parentRollId: primaryParentId
-                }
-              })
-              createdRolls.push(newRoll)
-            }
-
-            for (const parentRoll of parentRolls) {
-              await tx.roll.update({
-                where: { id: parentRoll.id },
-                data: { status: 'IN_PRODUCTION' }
-              })
-            }
-
-            return createdRolls
+        return await prisma.$transaction(async (tx) => {
+          const parentRolls = await tx.roll.findMany({
+            where: {
+              id: { in: input.rollIds },
+              status: { in: ['AVAILABLE', 'IN_PRODUCTION'] }
+            },
+            include: { material: true }
           })
-        } catch (error: any) {
-          if (error?.code === 'P2002' && attempt < maxRetries) {
-            logger.warn({ attempt, maxRetries }, 'Roll number collision, retrying...')
-            continue
+
+          if (parentRolls.length !== input.rollIds.length) {
+            throw new AppError(400, 'INVALID_ROLLS', 'Some rolls are not available for production')
           }
-          throw error
-        }
-      }
-      throw new AppError(500, 'ROLL_CREATION_FAILED', 'Failed to create rolls after multiple attempts')
-    })()
 
-    const job = await prisma.productionJob.create({
-      data: {
-        jobNumber,
-        salesOrderId: input.salesOrderId,
-        customerId: input.customerId,
-        customerName: input.customerName,
-        machine: input.machine,
-        materialOverride: input.materialOverride,
-        wasteWeight: input.wasteWeight ?? 0,
-        rollWaste: input.rollWaste ?? {},
-        rollConsumption: input.rollConsumption ?? {},
-        notes: input.notes,
-        parentRollIds: input.rollIds,
-        status: 'IN_PRODUCTION',
-        startDate: dateFromInput(input.date),
-        printedRolls: {
-          create: newRolls.map((newRoll) => ({
-            rollId: newRoll.id,
-            weightUsed: newRoll.weight,
-            wasteWeight: 0,
-            status: 'IN_STOCK'
-          }))
-        }
-      },
-      include: {
-        salesOrder: true,
-        printedRolls: {
-          include: { roll: true }
-        }
-      }
-    })
+          // Atomically claim parent rolls — only AVAILABLE ones, count guards against concurrent claims
+          const claimResult = await tx.roll.updateMany({
+            where: { id: { in: input.rollIds }, status: 'AVAILABLE' },
+            data: { status: 'IN_PRODUCTION' }
+          })
+          if (claimResult.count !== input.rollIds.length) {
+            throw new AppError(400, 'INVALID_ROLLS', 'Some rolls were already taken by another job')
+          }
 
-    return job
-    } catch (error: any) {
-      logger.error({ error, input }, 'Error in createJob')
-      throw error
+          const material = input.materialOverride
+            ? await tx.material.findFirst({
+                where: { category: 'PLAIN_ROLLS', subCategory: input.materialOverride }
+              }) || parentRolls[0]?.material
+            : parentRolls[0]?.material
+          if (!material) {
+            throw new AppError(400, 'INVALID_MATERIAL', 'Parent roll has no material assigned')
+          }
+
+          // Create printed rolls with retry on P2002 (rollNumber collision)
+          const newRolls = await createRolls(tx, input.printedRollWeights, input.date, material.id, parentRolls.length === 1 ? parentRolls[0].id : null)
+
+          const job = await tx.productionJob.create({
+            data: {
+              jobNumber,
+              salesOrderId: input.salesOrderId,
+              customerId: input.customerId,
+              customerName: input.customerName,
+              machine: input.machine,
+              materialOverride: input.materialOverride,
+              wasteWeight: input.wasteWeight ?? 0,
+              rollWaste: input.rollWaste ?? {},
+              rollConsumption: input.rollConsumption ?? {},
+              notes: input.notes,
+              parentRollIds: input.rollIds,
+              status: 'IN_PRODUCTION',
+              startDate: dateFromInput(input.date),
+              printedRolls: {
+                create: newRolls.map((newRoll) => ({
+                  rollId: newRoll.id,
+                  weightUsed: newRoll.weight,
+                  wasteWeight: 0,
+                  status: 'IN_STOCK'
+                }))
+              }
+            },
+            include: {
+              salesOrder: true,
+              printedRolls: {
+                include: { roll: true }
+              }
+            }
+          })
+
+          return job
+        })
+      } catch (error: any) {
+        if (error?.code === 'P2002' && attempt < 8) {
+          logger.warn({ attempt }, 'Job number or roll number collision, retrying...')
+          await new Promise(r => setTimeout(r, attempt * 50))
+          continue
+        }
+        logger.error({ error, input }, 'Error in createJob')
+        throw error
+      }
     }
+    throw new AppError(500, 'JOB_CREATION_FAILED', 'Failed to create job after multiple attempts')
   },
 
   async addPrintedRolls(jobId: string, weights: number[]) {
@@ -336,6 +334,15 @@ export const productionService = {
     }
 
     await prisma.$transaction(async (tx) => {
+      // Atomically claim the job — prevent concurrent completeJob calls
+      const claimResult = await tx.productionJob.updateMany({
+        where: { id: jobId, status: 'IN_PRODUCTION' },
+        data: { status: 'COMPLETED', endDate: dateFromInput(date) }
+      })
+      if (claimResult.count === 0) {
+        throw new AppError(400, 'INVALID_OPERATION', 'Job already completed')
+      }
+
       for (const update of parentRollUpdates) {
         await tx.roll.update({
           where: { id: update.id },
@@ -493,17 +500,16 @@ export const productionService = {
         })
         if (salesOrder) {
           const unitPrice = Number(salesOrder.unitPrice)
-          const totalAmount = actualWeight * unitPrice
           
           await tx.salesOrder.update({
             where: { id: job.salesOrderId },
             data: {
               status: 'READY',
-              quantityProduced: actualWeight,
-              totalAmount
+              quantityProduced: { increment: actualWeight },
+              totalAmount: { increment: actualWeight * unitPrice }
             }
           })
-          logger.info({ salesOrderId: job.salesOrderId, actualWeight, totalAmount }, 'Sales order updated to READY after production completion')
+          logger.info({ salesOrderId: job.salesOrderId, actualWeight }, 'Sales order updated to READY after production completion')
         }
       }
 
@@ -665,45 +671,24 @@ export const productionService = {
       const weightsChanged = JSON.stringify(existingWeights) !== JSON.stringify(input.printedRollWeights)
       
       if (weightsChanged) {
-        await prisma.printedRoll.deleteMany({ where: { productionJobId: jobId } })
-        
-        if (job.printedRolls.length === 0) {
-          throw new AppError(400, 'INVALID', 'Job has no printed rolls')
-        }
         const material = job.printedRolls[0]?.roll?.material
         if (!material) {
           throw new AppError(400, 'INVALID_MATERIAL', 'No material found for this job')
         }
-        
-        const lastRoll = await prisma.roll.findFirst({
-          where: { rollNumber: { startsWith: 'PR' } },
-          orderBy: { rollNumber: 'desc' }
-        })
-        let rollCounter = lastRoll ? parseInt(lastRoll.rollNumber.replace(/^\D+/g, '')) || 0 : 0
-  
-        const newRolls = []
-        for (const weight of input.printedRollWeights) {
-          rollCounter++
-          const newRoll = await prisma.roll.create({
-            data: {
-              rollNumber: `PR${String(rollCounter).padStart(5, '0')}`,
-              materialId: material.id,
-              weight: weight,
-              remainingWeight: weight,
-              status: 'AVAILABLE',
-              receivedDate: new Date()
-            }
+
+        await prisma.$transaction(async (tx) => {
+          await tx.printedRoll.deleteMany({ where: { productionJobId: jobId } })
+
+          const newRolls = await createRolls(tx, input.printedRollWeights!, input.date, material.id, null)
+
+          await tx.printedRoll.createMany({
+            data: newRolls.map((newRoll, idx) => ({
+              productionJobId: jobId,
+              rollId: newRoll.id,
+              weightUsed: newRoll.weight,
+              wasteWeight: idx === 0 ? (input.wasteWeight ?? 0) : 0
+            }))
           })
-          newRolls.push(newRoll)
-        }
-        
-        await prisma.printedRoll.createMany({
-          data: newRolls.map((newRoll, idx) => ({
-            productionJobId: jobId,
-            rollId: newRoll.id,
-            weightUsed: newRoll.weight,
-            wasteWeight: idx === 0 ? (input.wasteWeight ?? 0) : 0
-          }))
         })
       }
     }
@@ -724,19 +709,13 @@ export const productionService = {
   },
 
   async deleteJob(jobId: string) {
-    const job = await prisma.productionJob.findUnique({
-      where: { id: jobId }
-    })
-    if (!job) throw new AppError(404, 'NOT_FOUND', 'Production job not found')
-    if (job.status === 'COMPLETED') throw new AppError(400, 'INVALID_OPERATION', 'Cannot delete completed job')
-
-    // Get printed rolls before deletion to restore inventory
-    const printedRolls = await prisma.printedRoll.findMany({
-      where: { productionJobId: jobId }
-    })
-    const numPrintedRolls = printedRolls.length
-
     return prisma.$transaction(async (tx) => {
+      const job = await tx.productionJob.findUnique({
+        where: { id: jobId }
+      })
+      if (!job) throw new AppError(404, 'NOT_FOUND', 'Production job not found')
+      if (job.status === 'COMPLETED') throw new AppError(400, 'INVALID_OPERATION', 'Cannot delete completed job')
+
       // Restore parent rolls to AVAILABLE
       if (job.parentRollIds && job.parentRollIds.length > 0) {
         await tx.roll.updateMany({
@@ -745,10 +724,15 @@ export const productionService = {
         })
       }
 
+      // Get printed rolls to restore cores
+      const printedRolls = await tx.printedRoll.findMany({
+        where: { productionJobId: jobId }
+      })
+
       // Restore cores if production had started
-      if (numPrintedRolls > 0) {
+      if (printedRolls.length > 0) {
         await inventoryService.recordCoreChange(
-          numPrintedRolls,
+          printedRolls.length,
           'CORE_RECOVERY',
           `Job ${job.jobNumber} deleted`,
           undefined,
@@ -759,8 +743,11 @@ export const productionService = {
       // Delete printed rolls
       await tx.printedRoll.deleteMany({ where: { productionJobId: jobId } })
 
-      // Delete production job
-      await tx.productionJob.delete({ where: { id: jobId } })
+      // Delete production job (use deleteMany to avoid P2025 race)
+      const deleted = await tx.productionJob.deleteMany({ where: { id: jobId } })
+      if (deleted.count === 0) {
+        throw new AppError(404, 'NOT_FOUND', 'Production job was already deleted')
+      }
 
       // Sync back to sales order
       if (job.salesOrderId) {
@@ -799,8 +786,8 @@ export const productionService = {
     const value = Number(roll.remainingWeight) * costPrice
 
     await prisma.$transaction(async (tx) => {
-      await tx.roll.update({
-        where: { id: rollId },
+      const updateResult = await tx.roll.updateMany({
+        where: { id: rollId, status: { notIn: ['CONSUMED', 'RETURNED', 'WASTED'] } },
         data: {
           status: 'CONSUMED',
           remainingWeight: 0,
@@ -808,6 +795,9 @@ export const productionService = {
           disposedById: userId
         }
       })
+      if (updateResult.count === 0) {
+        throw new AppError(400, 'INVALID', 'Roll already consumed, disposed, or returned')
+      }
 
       await inventoryService.recordCoreChange(1, 'CORE_RECOVERY', roll.rollNumber, userId, tx)
 
@@ -1058,21 +1048,23 @@ export const productionService = {
 
     await prisma.$transaction(async (tx) => {
       const current = await tx.roll.findUnique({ where: { id: rollId } })
-      if (!current || current.status !== 'AVAILABLE') {
-        throw new AppError(400, 'INVALID', 'Only AVAILABLE rolls can be disposed')
-      }
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Roll not found')
 
       const isPartiallyConsumed = Number(current.remainingWeight) < Number(current.weight)
+      const targetStatus = isPartiallyConsumed ? 'CONSUMED' : 'WASTED'
 
-      await tx.roll.update({
-        where: { id: rollId },
+      const updateResult = await tx.roll.updateMany({
+        where: { id: rollId, status: { notIn: ['CONSUMED', 'RETURNED', 'WASTED'] } },
         data: {
-          status: isPartiallyConsumed ? 'CONSUMED' : 'WASTED',
+          status: targetStatus,
           disposedAt: dateFromInput(date),
           disposedById: userId,
           disposalReason: reason
         }
       })
+      if (updateResult.count === 0) {
+        throw new AppError(400, 'INVALID', 'Only AVAILABLE rolls can be disposed')
+      }
 
       const scrapAccount = await financeService.getAccountIdByCode('5300')
       const inventoryAccount = await financeService.getAccountIdByCode('1300')
@@ -1112,21 +1104,23 @@ export const productionService = {
 
     await prisma.$transaction(async (tx) => {
       const current = await tx.roll.findUnique({ where: { id: rollId } })
-      if (!current || current.status !== 'AVAILABLE') {
-        throw new AppError(400, 'INVALID', 'Only AVAILABLE rolls can be returned')
-      }
+      if (!current) throw new AppError(404, 'NOT_FOUND', 'Roll not found')
 
       const isPartiallyConsumed = Number(current.remainingWeight) < Number(current.weight)
+      const targetStatus = isPartiallyConsumed ? 'CONSUMED' : 'RETURNED'
 
-      await tx.roll.update({
-        where: { id: rollId },
+      const updateResult = await tx.roll.updateMany({
+        where: { id: rollId, status: { notIn: ['CONSUMED', 'RETURNED', 'WASTED'] } },
         data: {
-          status: isPartiallyConsumed ? 'CONSUMED' : 'RETURNED',
+          status: targetStatus,
           disposedAt: dateFromInput(date),
           disposedById: userId,
           disposalReason: 'Returned to supplier'
         }
       })
+      if (updateResult.count === 0) {
+        throw new AppError(400, 'INVALID', 'Only AVAILABLE rolls can be returned')
+      }
 
       const apAccount = await financeService.getAccountIdByCode('2000')
       const inventoryAccount = await financeService.getAccountIdByCode('1300')
@@ -1177,17 +1171,19 @@ export const productionService = {
 
     const value = data.qty * costPrice
 
-    const today = new Date()
-    const prefix = `RL-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}-`
-    const lastRoll = await prisma.roll.findFirst({
-      where: { rollNumber: { startsWith: prefix } },
-      orderBy: { rollNumber: 'desc' }
-    })
-    const newRollNumber = lastRoll
-      ? `${prefix}${String(parseInt(lastRoll.rollNumber.replace(prefix, '')) + 1).padStart(4, '0')}`
-      : `${prefix}0001`
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const today = new Date()
+      const prefix = `RL-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}-`
+      const lastRoll = await prisma.roll.findFirst({
+        where: { rollNumber: { startsWith: prefix } },
+        orderBy: { rollNumber: 'desc' }
+      })
+      const newRollNumber = lastRoll
+        ? `${prefix}${String(parseInt(lastRoll.rollNumber.replace(prefix, '')) + 1).padStart(4, '0')}`
+        : `${prefix}0001`
 
-    await prisma.$transaction(async (tx) => {
+      try {
+        await prisma.$transaction(async (tx) => {
       await tx.printedRoll.update({
         where: { id: printedRollId },
         data: {
@@ -1263,75 +1259,95 @@ export const productionService = {
           ]
         }, tx)
       }
-    })
+        })
 
-    return { success: true }
+        return { success: true }
+      } catch (error: any) {
+        if (error?.code === 'P2002' && attempt < 3) {
+          continue
+        }
+        throw error
+      }
+    }
+    throw new AppError(500, 'ROLL_CREATION_FAILED', 'Failed to create roll after multiple attempts')
   },
 
   async receiveReplacement(rollId: string, userId?: string, date?: string) {
-    const roll = await prisma.roll.findUnique({
-      where: { id: rollId },
-      include: { material: true }
-    })
-    if (!roll) throw new AppError(404, 'NOT_FOUND', 'Roll not found')
-    if (roll.status !== 'RETURNED') throw new AppError(400, 'INVALID', 'Only RETURNED rolls can be replaced')
-    if (roll.replacementReceived) throw new AppError(400, 'INVALID', 'Replacement already received for this roll')
-
-    const costPrice = roll.material.costPrice ? Number(roll.material.costPrice) : null
-    if (costPrice === null) throw new AppError(400, 'INVALID', 'Set a cost price for this material first')
-
-    const value = Number(roll.remainingWeight) * costPrice
-
-    const today = new Date()
-    const prefix = `RL-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}-`
-    const lastRoll = await prisma.roll.findFirst({
-      where: { rollNumber: { startsWith: prefix } },
-      orderBy: { rollNumber: 'desc' }
-    })
-    const newRollNumber = lastRoll
-      ? `${prefix}${String(parseInt(lastRoll.rollNumber.replace(prefix, '')) + 1).padStart(4, '0')}`
-      : `${prefix}0001`
-
-    await prisma.$transaction(async (tx) => {
-      const newRoll = await tx.roll.create({
-        data: {
-          rollNumber: newRollNumber,
-          materialId: roll.materialId,
-          weight: roll.remainingWeight,
-          remainingWeight: roll.remainingWeight,
-          status: 'AVAILABLE',
-          notes: `Replacement for returned roll ${roll.rollNumber}`
-        }
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const today = new Date()
+      const prefix = `RL-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}-`
+      const lastRoll = await prisma.roll.findFirst({
+        where: { rollNumber: { startsWith: prefix } },
+        orderBy: { rollNumber: 'desc' }
       })
+      const newRollNumber = lastRoll
+        ? `${prefix}${String(parseInt(lastRoll.rollNumber.replace(prefix, '')) + 1).padStart(4, '0')}`
+        : `${prefix}0001`
 
-      await tx.roll.update({
-        where: { id: rollId },
-        data: {
-          replacementReceived: true,
-          notes: roll.notes
-            ? `${roll.notes} | Replacement: ${newRollNumber}`
-            : `Replacement received: ${newRollNumber}`
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const roll = await tx.roll.findUnique({
+            where: { id: rollId },
+            include: { material: true }
+          })
+          if (!roll) throw new AppError(404, 'NOT_FOUND', 'Roll not found')
+          if (roll.status !== 'RETURNED') throw new AppError(400, 'INVALID', 'Only RETURNED rolls can be replaced')
+          if (roll.replacementReceived) throw new AppError(400, 'INVALID', 'Replacement already received for this roll')
+
+          const costPrice = roll.material.costPrice ? Number(roll.material.costPrice) : null
+          if (costPrice === null) throw new AppError(400, 'INVALID', 'Set a cost price for this material first')
+          const value = Number(roll.remainingWeight) * costPrice
+
+          const newRoll = await tx.roll.create({
+            data: {
+              rollNumber: newRollNumber,
+              materialId: roll.materialId,
+              weight: roll.remainingWeight,
+              remainingWeight: roll.remainingWeight,
+              status: 'AVAILABLE',
+              notes: `Replacement for returned roll ${roll.rollNumber}`
+            }
+          })
+
+          const updateResult = await tx.roll.updateMany({
+            where: { id: rollId, replacementReceived: false },
+            data: {
+              replacementReceived: true,
+              notes: roll.notes
+                ? `${roll.notes} | Replacement: ${newRollNumber}`
+                : `Replacement received: ${newRollNumber}`
+            }
+          })
+          if (updateResult.count === 0) {
+            throw new AppError(400, 'INVALID', 'Replacement already received for this roll')
+          }
+
+          const inventoryAccount = await financeService.getAccountIdByCode('1300')
+          const apAccount = await financeService.getAccountIdByCode('2000')
+
+          await financeService.postJournalEntry({
+            description: `Replacement roll ${newRollNumber} for returned roll ${roll.rollNumber}`,
+            sourceModule: 'ADJUSTMENT',
+            sourceId: rollId,
+            reference: newRollNumber,
+            postedById: userId,
+            date,
+            lines: [
+              { accountId: inventoryAccount, debit: value, credit: 0, memo: `Replacement - ${newRollNumber}` },
+              { accountId: apAccount, debit: 0, credit: value, memo: `Replacement for returned roll ${roll.rollNumber}` }
+            ]
+          }, tx)
+
+          return { success: true, rollNumber: newRollNumber }
+        })
+      } catch (error: any) {
+        if (error?.code === 'P2002' && attempt < 3) {
+          continue
         }
-      })
-
-      const inventoryAccount = await financeService.getAccountIdByCode('1300')
-      const apAccount = await financeService.getAccountIdByCode('2000')
-
-      await financeService.postJournalEntry({
-        description: `Replacement roll ${newRollNumber} for returned roll ${roll.rollNumber}`,
-        sourceModule: 'ADJUSTMENT',
-        sourceId: rollId,
-        reference: newRollNumber,
-        postedById: userId,
-        date,
-        lines: [
-          { accountId: inventoryAccount, debit: value, credit: 0, memo: `Replacement - ${newRollNumber}` },
-          { accountId: apAccount, debit: 0, credit: value, memo: `Replacement for returned roll ${roll.rollNumber}` }
-        ]
-      }, tx)
-    })
-
-    return { success: true, rollNumber: newRollNumber }
+        throw error
+      }
+    }
+    throw new AppError(500, 'ROLL_CREATION_FAILED', 'Failed to create replacement roll after multiple attempts')
   },
 
   async archiveOldPrintedRolls(userId?: string) {

@@ -23,7 +23,7 @@ salesOrderRouter.post('/orders', mutationLimiter, requirePermission('sales_order
 salesOrderRouter.patch('/orders/:id', requirePermission('sales_order:edit'), validateRequest(updateOrderSchema), salesOrderController.updateOrder)
 salesOrderRouter.patch('/orders/:id/approve', requirePermission('sales_order:approve'), salesOrderController.approveOrder)
 salesOrderRouter.patch('/orders/:id/start-production', requirePermission('production:create'), validateRequest(startProductionSchema), salesOrderController.startProduction)
-salesOrderRouter.patch('/orders/:id/cancel', requirePermission('sales_order:delete'), salesOrderController.cancelOrder)
+salesOrderRouter.patch('/orders/:id/cancel', mutationLimiter, requirePermission('sales_order:delete'), salesOrderController.cancelOrder)
 salesOrderRouter.patch('/orders/:id/ready', requirePermission('sales_order:edit'), salesOrderController.markReady)
 salesOrderRouter.patch('/orders/:id/pickup', mutationLimiter, requirePermission('sales_order:pickup'), validateRequest(recordPickupSchema), salesOrderController.recordPickup)
 
@@ -34,7 +34,7 @@ salesOrderRouter.get('/payments/order/:salesOrderId', requirePermission('sales_o
 salesOrderRouter.get('/payments/customer/:customerId', requirePermission('sales_order:read'), paymentController.getPaymentsByCustomer)
 
 // Invoices
-salesOrderRouter.post('/invoices', requirePermission('sales_order:payment'), validateRequest(createInvoiceSchema), invoiceController.createInvoice)
+salesOrderRouter.post('/invoices', mutationLimiter, requirePermission('sales_order:payment'), validateRequest(createInvoiceSchema), invoiceController.createInvoice)
 salesOrderRouter.get('/invoices', requirePermission('sales_order:read'), invoiceController.getInvoices)
 salesOrderRouter.get('/invoices/:id', requirePermission('sales_order:read'), invoiceController.getInvoice)
 salesOrderRouter.patch('/invoices/:id/issue', requirePermission('sales_order:edit'), invoiceController.issueInvoice)

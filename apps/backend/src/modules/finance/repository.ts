@@ -71,32 +71,7 @@ export const financeRepository = {
     return `${prefix}${String(lastNum + 1).padStart(4, '0')}`
   },
 
-  async createJournalEntry(data: {
-    entryNumber: string
-    date: Date
-    description: string
-    sourceModule: string
-    sourceId?: string
-    reference?: string
-    postedById?: string
-    lines: { accountId: string; debit: Prisma.Decimal; credit: Prisma.Decimal; memo?: string }[]
-  }) {
-    return prisma.journalEntry.create({
-      data: {
-        entryNumber: data.entryNumber,
-        date: data.date,
-        description: data.description,
-        sourceModule: data.sourceModule as any,
-        sourceId: data.sourceId,
-        reference: data.reference,
-        postedById: data.postedById,
-        lines: {
-          create: data.lines
-        }
-      },
-      include: { lines: { include: { account: true } } }
-    })
-  },
+  
 
   async getJournalEntries(options?: {
     dateFrom?: Date

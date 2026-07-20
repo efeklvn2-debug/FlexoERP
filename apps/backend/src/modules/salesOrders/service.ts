@@ -181,39 +181,45 @@ export const salesOrderService = {
       throw new AppError(400, 'INVALID', 'Can only cancel pending, approved, or MRP pending orders')
     }
 
-    // Refund any deposits
-    if (Number(order.depositPaid) > 0) {
-      await paymentRepository.create({
-        salesOrderId: id,
-        customerId: order.customerId,
-        transactionType: 'REFUND',
-        paymentMethod: 'CASH',
-        amount: order.depositPaid,
-        receivedById: userId,
-        notes: `Refund for cancelled order ${order.orderNumber}`
-      })
-    }
+    let lockedOrder: any = null
 
     const updated = await prisma.$transaction(async (tx) => {
+      // Atomic status guard: only cancel if not already cancelled.
+      // Uses updateMany + count check instead of read-then-write to prevent
+      // double-cancellation in PostgreSQL Read Committed isolation.
+      const updateResult = await tx.salesOrder.updateMany({
+        where: { id, status: { not: 'CANCELLED' } },
+        data: { status: 'CANCELLED', cancelledAt: dateFromInput(date) }
+      })
+      if (updateResult.count === 0) {
+        throw new AppError(409, 'CONFLICT', 'Order was already cancelled')
+      }
+
+      lockedOrder = await tx.salesOrder.findUnique({ where: { id } })
+
+      // Refund any deposits (inside transaction so refund and cancel are atomic)
+      if (lockedOrder && Number(lockedOrder.depositPaid) > 0) {
+        await paymentRepository.create({
+          salesOrderId: id,
+          customerId: lockedOrder.customerId,
+          transactionType: 'REFUND',
+          paymentMethod: 'CASH',
+          amount: lockedOrder.depositPaid,
+          receivedById: userId,
+          notes: `Refund for cancelled order ${lockedOrder.orderNumber}`
+        }, tx)
+      }
+
       // Re-attribute PAYMENT transactions linked to this order as standalone deposits
       // so the customer retains credit (cancelled order is excluded from balances).
-      // DEPOSIT transactions are already handled by the refund logic above.
       await tx.paymentTransaction.updateMany({
         where: { salesOrderId: id, transactionType: 'PAYMENT' },
         data: { salesOrderId: null, transactionType: 'DEPOSIT' }
       })
 
-      const updatedOrder = await tx.salesOrder.update({
-        where: { id },
-        data: {
-          status: 'CANCELLED',
-          cancelledAt: dateFromInput(date)
-        }
-      })
-
       logger.info({ orderId: id }, 'Sales order cancelled')
 
-      return updatedOrder
+      return lockedOrder
     })
 
     return updated
@@ -282,71 +288,87 @@ export const salesOrderService = {
       throw new AppError(400, 'INVALID', 'Order is not ready for pickup')
     }
 
-    // Resolve quantity from selected rolls, or fall back to order defaults
-    let selectedRolls: any[] = []
-    let quantity = 0
-
-    if (rollIds && rollIds.length > 0) {
-      // Validate rolls belong to this order's production job
-      const productionJob = await prisma.productionJob.findUnique({
-        where: { id: order.productionJobId! },
-        include: { printedRolls: true }
-      })
-      if (!productionJob) {
-        throw new AppError(400, 'INVALID', 'No production job found for this order')
-      }
-
-      const validRollIds = new Set(productionJob.printedRolls.map(pr => pr.id))
-      for (const rid of rollIds) {
-        if (!validRollIds.has(rid)) {
-          throw new AppError(400, 'INVALID', `Roll ${rid} does not belong to this order's production job`)
-        }
-      }
-
-      selectedRolls = productionJob.printedRolls.filter(pr => rollIds.includes(pr.id))
-
-      // Validate all selected rolls are available
-      for (const roll of selectedRolls) {
-        if (roll.status !== 'IN_STOCK') {
-          throw new AppError(400, 'INVALID', `Roll ${roll.id} is not available for pickup (status: ${roll.status})`)
-        }
-      }
-
-      quantity = selectedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed || 0), 0)
-      if (quantity <= 0) {
-        throw new AppError(400, 'INVALID', 'Selected rolls have zero weight')
-      }
-    } else {
-      // No roll selection ΓÇö use default quantity (backward compat for manual orders)
-      quantity = Number(order.quantityOrdered)
-    }
-
-    const currentDelivered = Number(order.quantityDelivered) || 0
-    const newDelivered = currentDelivered + quantity
-    const quantityOrdered = Number(order.quantityOrdered)
-    const fullyDelivered = newDelivered >= quantityOrdered
+    // Hoist quantity for use outside transaction (createInvoice call)
+    let pickupQuantity = 0
 
     const result = await prisma.$transaction(async (tx) => {
-      if (selectedRolls.length > 0) {
-        // Only mark the selected rolls as picked up
-        await tx.printedRoll.updateMany({
-          where: { id: { in: selectedRolls.map(pr => pr.id) } },
+      // Lock the order row to serialize concurrent pickups
+      await tx.$queryRaw`SELECT "id" FROM "SalesOrder" WHERE "id" = ${id} FOR UPDATE`
+
+      // Re-read order inside transaction to get latest state
+      const lockedOrder = await tx.salesOrder.findUnique({ where: { id } })
+      if (!lockedOrder) {
+        throw new AppError(404, 'NOT_FOUND', 'Sales order not found')
+      }
+      if (lockedOrder.status !== 'READY' && lockedOrder.status !== 'PICKED_UP') {
+        throw new AppError(400, 'INVALID', 'Order is not ready for pickup')
+      }
+
+      // Resolve quantity from selected rolls, or fall back to order defaults
+      let selectedRolls: any[] = []
+      let quantity = 0
+
+      if (rollIds && rollIds.length > 0) {
+        const productionJob = await tx.productionJob.findUnique({
+          where: { id: lockedOrder.productionJobId! },
+          include: { printedRolls: true }
+        })
+        if (!productionJob) {
+          throw new AppError(400, 'INVALID', 'No production job found for this order')
+        }
+
+        const validRollIds = new Set(productionJob.printedRolls.map(pr => pr.id))
+        for (const rid of rollIds) {
+          if (!validRollIds.has(rid)) {
+            throw new AppError(400, 'INVALID', `Roll ${rid} does not belong to this order's production job`)
+          }
+        }
+
+        selectedRolls = productionJob.printedRolls.filter(pr => rollIds.includes(pr.id))
+
+        // Validate all selected rolls are available (atomic inside tx)
+        for (const roll of selectedRolls) {
+          if (roll.status !== 'IN_STOCK') {
+            throw new AppError(400, 'INVALID', `Roll ${roll.id} is not available for pickup (status: ${roll.status})`)
+          }
+        }
+
+        quantity = selectedRolls.reduce((sum, pr) => sum + Number(pr.weightUsed || 0), 0)
+        if (quantity <= 0) {
+          throw new AppError(400, 'INVALID', 'Selected rolls have zero weight')
+        }
+
+        // Atomically mark rolls as picked up — only if still IN_STOCK
+        const updateResult = await tx.printedRoll.updateMany({
+          where: { id: { in: selectedRolls.map(pr => pr.id) }, status: 'IN_STOCK' },
           data: {
-          status: 'PICKED_UP',
-            customerId: order.customerId,
+            status: 'PICKED_UP',
+            customerId: lockedOrder.customerId,
             pickedUpAt: dateFromInput(date)
           }
         })
+        if (updateResult.count < selectedRolls.length) {
+          throw new AppError(409, 'CONFLICT', 'Some selected rolls were already picked up by another request')
+        }
+      } else {
+        // No roll selection — use default quantity (backward compat for manual orders)
+        quantity = Number(lockedOrder.quantityOrdered)
+      }
 
+      pickupQuantity = quantity
+      const quantityOrdered = Number(lockedOrder.quantityOrdered)
+      const deliveredAfter = Number(lockedOrder.quantityDelivered) + quantity
+      const fullyDelivered = deliveredAfter >= quantityOrdered
+
+      if (selectedRolls.length > 0) {
         // =====================================================
         // RECOGNIZE DEFERRED COGS (Move from 1330 to 5000)
         // =====================================================
         const cogsAccountId = await financeService.getAccountIdByCode('5000')
         const deferredCogsAccountId = await financeService.getAccountIdByCode('1330')
 
-        // Get the full production job to compute COGS
         const productionJob = await tx.productionJob.findUnique({
-          where: { id: order.productionJobId! },
+          where: { id: lockedOrder.productionJobId! },
           include: { printedRolls: true }
         })
 
@@ -390,7 +412,6 @@ export const salesOrderService = {
             }
           }
 
-          // Prorate COGS by actual selected weight vs total printed weight
           const cogsRatio = totalPrintedWeight > 0
             ? quantity / totalPrintedWeight
             : 1
@@ -400,10 +421,10 @@ export const salesOrderService = {
 
           if (cogsAmount > 0) {
             await financeService.postJournalEntry({
-              description: `Recognize COGS - SO ${order.orderNumber}`,
+              description: `Recognize COGS - SO ${lockedOrder.orderNumber}`,
               sourceModule: 'SALES',
-              sourceId: order.id,
-              reference: order.orderNumber,
+              sourceId: lockedOrder.id,
+              reference: lockedOrder.orderNumber,
               date,
               lines: [
                 { accountId: cogsAccountId, debit: cogsAmount, credit: 0, memo: 'COGS recognized on delivery' },
@@ -411,7 +432,7 @@ export const salesOrderService = {
               ]
             }, tx)
 
-            logger.info({ orderId: order.id, orderNumber: order.orderNumber, cogsAmount }, 'Deferred COGS recognized on pickup')
+            logger.info({ orderId: lockedOrder.id, orderNumber: lockedOrder.orderNumber, cogsAmount }, 'Deferred COGS recognized on pickup')
           }
         }
       }
@@ -437,7 +458,7 @@ export const salesOrderService = {
         where: { id },
         data: {
           status: fullyDelivered ? 'COMPLETED' : 'PICKED_UP',
-          quantityDelivered: newDelivered,
+          quantityDelivered: { increment: quantity },
           completedAt: fullyDelivered ? dateFromInput(date) : undefined,
           packingBagsQuantity: packingBags && packingBags > 0
             ? { increment: packingBags }
@@ -456,18 +477,19 @@ export const salesOrderService = {
           packingBagMaterial.id,
           packingBags,
           'SALE',
-          `Sales Order ${order.orderNumber}`,
-          userId
+          `Sales Order ${lockedOrder.orderNumber}`,
+          userId,
+          tx
         )
 
         const cogsId = await financeService.getAccountIdByCode('5000')
         const packingBagInventoryId = await financeService.getAccountIdByCode('1510')
 
         await financeService.postJournalEntry({
-          description: `COGS - Packing Bags SO ${order.orderNumber}`,
+          description: `COGS - Packing Bags SO ${lockedOrder.orderNumber}`,
           sourceModule: 'SALES',
-          sourceId: order.id,
-          reference: order.orderNumber,
+          sourceId: lockedOrder.id,
+          reference: lockedOrder.orderNumber,
           date,
           lines: [
             { accountId: cogsId, debit: bagCostAmount, credit: 0, memo: 'COGS - Packing Bags' },
@@ -482,7 +504,7 @@ export const salesOrderService = {
       const settings = await tx.settings.findUnique({ where: { id: 'default' } })
       const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
 
-      const deliveryValue = quantity * Number(order.unitPrice)
+      const deliveryValue = quantity * Number(lockedOrder.unitPrice)
       const bagValue = bagRevenueAmount
       const totalRevenue = deliveryValue + bagValue
 
@@ -511,22 +533,22 @@ export const salesOrderService = {
 
       if (lines.length > 1) {
         await financeService.postJournalEntry({
-          description: `Pickup & Revenue - SO ${order.orderNumber}`,
+          description: `Pickup & Revenue - SO ${lockedOrder.orderNumber}`,
           sourceModule: 'SALES',
-          sourceId: order.id,
-          reference: order.orderNumber,
+          sourceId: lockedOrder.id,
+          reference: lockedOrder.orderNumber,
           date,
           lines
         }, tx)
       }
 
-      logger.info({ orderId: id, quantity, totalDelivered: newDelivered, fullyDelivered, packingBags, rollCount: selectedRolls.length }, 'Sales order pickup recorded')
+      logger.info({ orderId: id, quantity, totalDelivered: deliveredAfter, fullyDelivered, packingBags, rollCount: selectedRolls.length }, 'Sales order pickup recorded')
 
       return updated
     })
 
     try {
-      await invoiceService.createInvoice({ salesOrderId: id, quantityDelivered: quantity, date })
+      await invoiceService.createInvoice({ salesOrderId: id, quantityDelivered: pickupQuantity, date })
     } catch (err) {
       logger.error({ err, orderId: id }, 'Failed to create invoice after pickup')
     }
@@ -606,7 +628,7 @@ export const salesOrderService = {
       balanceDue -= advancePaymentApplied
     }
 
-    const invoiceNumber = await invoiceRepository.getNextInvoiceNumber()
+    const invoiceNumber = await invoiceRepository.generateUniqueInvoiceNumber()
 
     let invoice
     try {
@@ -775,7 +797,7 @@ export const salesOrderService = {
     const totalAmountWithVat = subtotal
 
     const orderNumber = await salesOrderRepository.generateUniqueOrderNumber()
-    const invoiceNumber = await invoiceRepository.getNextInvoiceNumber()
+    const invoiceNumber = await invoiceRepository.generateUniqueInvoiceNumber()
 
     // Compute available deposit if requested
     let depositToApply = 0
@@ -1202,7 +1224,7 @@ export const paymentService = {
         })
       }
 
-      // Update sales order if linked (skip if revenuePortion is 0 ΓÇö no change needed)
+      // Update sales order if linked (skip if revenuePortion is 0 — no change needed)
       if (input.salesOrderId && revenuePortion > 0) {
         const order = await tx.salesOrder.findUnique({
           where: { id: input.salesOrderId }
@@ -1216,14 +1238,13 @@ export const paymentService = {
             paymentStatus = 'DEPOSIT_COMPLETE'
           }
 
-          const newBalancePaid = Number(order.balancePaid) + revenuePortion
           const orderUpdateData: any = {
-            totalPaid: newPaid,
-            balancePaid: newBalancePaid,
+            totalPaid: { increment: revenuePortion },
+            balancePaid: { increment: revenuePortion },
             paymentStatus: paymentStatus as any
           }
           if (input.transactionType === 'DEPOSIT') {
-            orderUpdateData.depositPaid = new Prisma.Decimal(String(Number(order.depositPaid) + Number(input.amount)))
+            orderUpdateData.depositPaid = { increment: Number(input.amount) }
           }
           if (paymentStatus === 'FULLY_PAID' && order.status === 'PICKED_UP' && Number(order.quantityDelivered) >= Number(order.quantityOrdered)) {
             orderUpdateData.status = 'COMPLETED'
@@ -1241,19 +1262,13 @@ export const paymentService = {
             orderBy: { createdAt: 'desc' }
           })
           if (linkedInvoice) {
-            const prevAmountPaid = Number(linkedInvoice.amountPaid) || 0
-            const newInvoiceAmountPaid = prevAmountPaid + revenuePortion
-            // Decrement the old balanceDue by this payment's revenuePortion.
-            // This is correct regardless of whether depositApplied/previousPayments
-            // are already included in amountPaid (new invoices) or stored separately (old).
-            const newInvoiceBalanceDue = Math.max(0, (Number(linkedInvoice.balanceDue) || 0) - revenuePortion)
-            const newInvoiceStatus = newInvoiceBalanceDue <= 0 ? 'PAID' : newInvoiceAmountPaid > 0 ? 'PARTIAL' : linkedInvoice.status
+            const newInvoiceStatus = (Number(linkedInvoice.balanceDue) - revenuePortion) <= 0 ? 'PAID' : 'PARTIAL'
 
             await tx.invoice.update({
               where: { id: linkedInvoice.id },
               data: {
-                amountPaid: new Prisma.Decimal(String(newInvoiceAmountPaid)),
-                balanceDue: new Prisma.Decimal(String(newInvoiceBalanceDue)),
+                amountPaid: { increment: revenuePortion },
+                balanceDue: { decrement: revenuePortion },
                 status: newInvoiceStatus as any,
                 ...(newInvoiceStatus === 'PAID' ? { paidAt: dateFromInput(input.date) } : {})
               }

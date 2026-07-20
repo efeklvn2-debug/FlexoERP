@@ -669,8 +669,9 @@ export const paymentRepository = {
     sellerName?: string
     coresQuantity?: number
     receivedById?: string
-  }) {
-    return prisma.paymentTransaction.create({
+  }, tx?: Prisma.TransactionClient) {
+    const db = tx || prisma
+    return db.paymentTransaction.create({
       data: {
         salesOrderId: data.salesOrderId,
         customerId: data.customerId,
@@ -733,21 +734,30 @@ export const paymentRepository = {
 }
 
 export const invoiceRepository = {
-  async getNextInvoiceNumber() {
-    const year = new Date().getFullYear()
-    const prefix = `INV-${year}-`
-    
-    const lastInvoice = await prisma.invoice.findFirst({
-      where: { invoiceNumber: { startsWith: prefix } },
-      orderBy: { invoiceNumber: 'desc' }
-    })
-    
-    if (!lastInvoice) {
-      return `${prefix}0001`
+  async generateUniqueInvoiceNumber() {
+    const maxRetries = 5
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const year = new Date().getFullYear()
+      const prefix = `INV-${year}-`
+
+      const lastInvoice = await prisma.invoice.findFirst({
+        where: { invoiceNumber: { startsWith: prefix } },
+        orderBy: { invoiceNumber: 'desc' }
+      })
+
+      const invoiceNumber = lastInvoice
+        ? `${prefix}${String(parseInt(lastInvoice.invoiceNumber.replace(prefix, '')) + 1).padStart(4, '0')}`
+        : `${prefix}0001`
+
+      const exists = await prisma.invoice.findUnique({
+        where: { invoiceNumber },
+        select: { id: true }
+      })
+      if (!exists) {
+        return invoiceNumber
+      }
     }
-    
-    const lastNum = parseInt(lastInvoice.invoiceNumber.replace(prefix, ''))
-    return `${prefix}${String(lastNum + 1).padStart(4, '0')}`
+    throw new AppError(500, 'GENERATION_FAILED', 'Failed to generate unique invoice number')
   },
 
   async create(data: {

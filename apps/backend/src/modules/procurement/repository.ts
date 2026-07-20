@@ -132,17 +132,10 @@ export const procurementRepository = {
     return convertPO(po)
   },
 
-  async updateLineItemReceivedQty(lineItemId: string, qty: number): Promise<void> {
-    await prisma.pOLineItem.update({
-      where: { id: lineItemId },
-      data: { receivedQty: { increment: qty } }
-    })
-  },
-
-  async createRollsFromWeights(purchaseOrderId: string, materialId: string, weights: number[], receivedDate?: Date): Promise<Roll[]> {
+  async createRollsFromWeights(purchaseOrderId: string, materialId: string, weights: number[], receivedDate?: Date, txClient?: Prisma.TransactionClient): Promise<Roll[]> {
     const createdRolls: Roll[] = []
     
-    await prisma.$transaction(async (tx) => {
+    const doCreate = async (tx: Prisma.TransactionClient) => {
       const today = receivedDate || new Date()
       const prefix = `RL-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}-`
       
@@ -173,7 +166,13 @@ export const procurementRepository = {
         
         createdRolls.push(convertRoll(roll))
       }
-    })
+    }
+
+    if (txClient) {
+      await doCreate(txClient)
+    } else {
+      await prisma.$transaction(doCreate)
+    }
     
     logger.info({ count: createdRolls.length, purchaseOrderId }, 'Rolls created from weights')
     return createdRolls
@@ -186,10 +185,6 @@ export const procurementRepository = {
       include: { rolls: { include: { material: true } }, items: { include: { material: true } } }
     })
     return convertPO(po)
-  },
-
-  async deletePO(id: string): Promise<void> {
-    await prisma.purchaseOrder.delete({ where: { id } })
   },
 
   // Roll methods

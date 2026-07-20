@@ -426,7 +426,7 @@ model MaterialIssue {
 
 model Supplier {
   id        String    @id @default(cuid())
-  name      String
+  name      String    @unique
   code      String    @unique
   email     String?
   phone     String?

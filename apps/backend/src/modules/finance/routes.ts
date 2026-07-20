@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { financeController } from './controller'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
 import { validateRequest } from '../../middleware/validation'
-import { sensitiveLimiter, heavyLimiter, reportLimiter } from '../../middleware/rateLimiters'
+import { sensitiveLimiter, heavyLimiter, reportLimiter, mutationLimiter } from '../../middleware/rateLimiters'
 import { createAccountSchema, postJournalEntrySchema, postOpeningBalancesSchema } from './validation'
 
 export const financeRouter = Router()
@@ -16,7 +16,7 @@ financeRouter.post('/accounts', requirePermission('finance:manage_accounts'), va
 
 financeRouter.get('/journal', reportLimiter, requirePermission('finance:read'), financeController.getJournalEntries)
 financeRouter.get('/journal/:id', requirePermission('finance:read'), financeController.getJournalEntryById)
-financeRouter.post('/journal', requirePermission('finance:write'), validateRequest(postJournalEntrySchema), financeController.postJournalEntry)
+financeRouter.post('/journal', mutationLimiter, requirePermission('finance:write'), validateRequest(postJournalEntrySchema), financeController.postJournalEntry)
 financeRouter.post('/journal/:id/reverse', sensitiveLimiter, requirePermission('finance:write'), financeController.reverseJournalEntry)
 
 financeRouter.get('/balances', requirePermission('finance:read'), financeController.getAllAccountBalances)
@@ -29,7 +29,7 @@ financeRouter.get('/vat', requirePermission('finance:read'), financeController.g
 financeRouter.get('/profit', requirePermission('finance:read'), financeController.getProfitSummary)
 
 financeRouter.get('/deferred-cogs', requirePermission('finance:read'), financeController.getDeferredCogsSummary)
-financeRouter.post('/deferred-cogs/:id/recognize', requirePermission('finance:write'), financeController.recognizeDeferredCogs)
+financeRouter.post('/deferred-cogs/:id/recognize', mutationLimiter, requirePermission('finance:write'), financeController.recognizeDeferredCogs)
 
 financeRouter.post('/seed', heavyLimiter, requirePermission('finance:manage_accounts'), financeController.seedAccounts)
 financeRouter.post('/opening-balances', heavyLimiter, requirePermission('finance:write'), validateRequest(postOpeningBalancesSchema), financeController.postOpeningBalances)

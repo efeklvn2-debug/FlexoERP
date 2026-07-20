@@ -35,29 +35,40 @@ export const procurementService = {
   },
 
   async createPO(input: PurchaseOrderInput, userId?: string): Promise<PurchaseOrder> {
-    const poNumber = await procurementRepository.generatePONumber()
-    logger.info({ poNumber, supplier: input.supplier, items: input.items.length }, 'Creating purchase order with line items')
-    
     const totalAmount = input.items.reduce((sum, item) => {
       return sum + (Number(item.totalWeight) * Number(item.unitPrice))
     }, 0)
 
-    return procurementRepository.createPOWithItems({
-      poNumber,
-      supplier: input.supplier,
-      expectedDate: input.expectedDate ? dateFromInput(input.expectedDate) : undefined,
-      issuedDate: input.issuedDate ? dateFromInput(input.issuedDate) : undefined,
-      notes: input.notes,
-      createdById: userId,
-      totalAmount,
-      items: input.items.map(item => ({
-        materialId: item.materialId,
-        quantity: item.quantity,
-        totalWeight: item.totalWeight,
-        unitPrice: item.unitPrice,
-        rollWeights: item.rollWeights || []
-      }))
-    })
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const poNumber = await procurementRepository.generatePONumber()
+        logger.info({ poNumber, supplier: input.supplier, items: input.items.length }, 'Creating purchase order with line items')
+
+        return await procurementRepository.createPOWithItems({
+          poNumber,
+          supplier: input.supplier,
+          expectedDate: input.expectedDate ? dateFromInput(input.expectedDate) : undefined,
+          issuedDate: input.issuedDate ? dateFromInput(input.issuedDate) : undefined,
+          notes: input.notes,
+          createdById: userId,
+          totalAmount,
+          items: input.items.map(item => ({
+            materialId: item.materialId,
+            quantity: item.quantity,
+            totalWeight: item.totalWeight,
+            unitPrice: item.unitPrice,
+            rollWeights: item.rollWeights || []
+          }))
+        })
+      } catch (error: any) {
+        if (error?.code === 'P2002' && attempt < 3) {
+          logger.warn({ attempt }, 'PO number collision, retrying...')
+          continue
+        }
+        throw error
+      }
+    }
+    throw new AppError(500, 'PO_CREATION_FAILED', 'Failed to create PO after multiple attempts')
   },
 
   async updatePO(id: string, input: UpdatePOInput): Promise<PurchaseOrder> {
@@ -148,61 +159,78 @@ export const procurementService = {
   },
 
   async deletePO(id: string): Promise<void> {
-    const existing = await procurementRepository.findPOById(id)
-    if (!existing) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
-    if (existing.status !== 'PENDING') {
+    const deleted = await prisma.purchaseOrder.deleteMany({
+      where: { id, status: 'PENDING' }
+    })
+    if (deleted.count === 0) {
+      const existing = await procurementRepository.findPOById(id)
+      if (!existing) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
       throw new AppError(400, 'INVALID_OPERATION', 'Can only delete pending purchase orders')
     }
-    
-    logger.info({ poId: id }, 'Deleting purchase order')
-    await procurementRepository.deletePO(id)
+    logger.info({ poId: id }, 'Purchase order deleted')
   },
 
   async receivePO(poId: string, userId?: string, date?: string): Promise<{ po: PurchaseOrder; rolls: Roll[] }> {
-    const po = await procurementRepository.findPOById(poId)
-    if (!po) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
-    if (po.status === 'RECEIVED') throw new AppError(400, 'INVALID_OPERATION', 'PO already fully received')
-    if (po.status === 'CANCELLED') throw new AppError(400, 'INVALID_OPERATION', 'PO is cancelled')
+    return prisma.$transaction(async (tx) => {
+      // Lock the PO row to serialize concurrent receives
+      await tx.$queryRaw`SELECT "id" FROM "PurchaseOrder" WHERE "id" = ${poId} FOR UPDATE`
 
-    logger.info({ poId, lineItems: po.items?.length }, 'Receiving purchase order - handling different category types')
+      const poData = await tx.purchaseOrder.findUnique({
+        where: { id: poId },
+        include: { rolls: { include: { material: true } }, items: { include: { material: true } } }
+      })
+      const po = poData ? convertPO(poData) : null
+      if (!po) throw new AppError(404, 'NOT_FOUND', 'Purchase order not found')
+      if (po.status === 'RECEIVED') throw new AppError(400, 'INVALID_OPERATION', 'PO already fully received')
+      if (po.status === 'CANCELLED') throw new AppError(400, 'INVALID_OPERATION', 'PO is cancelled')
 
-    const allRolls: Roll[] = []
+      logger.info({ poId, lineItems: po.items?.length }, 'Receiving purchase order - handling different category types')
 
-    for (const lineItem of po.items || []) {
-      const material = await prisma.material.findUnique({ where: { id: lineItem.materialId } })
-      if (!material) continue
+      const allRolls: Roll[] = []
 
-      if (material.category === 'PLAIN_ROLLS') {
-        const rollWeights = (lineItem.rollWeights as number[] || []).length > 0 
-          ? lineItem.rollWeights as number[]
-          : Array(lineItem.quantity).fill(Number(lineItem.totalWeight) / lineItem.quantity)
+      for (const lineItem of po.items || []) {
+        const material = await tx.material.findUnique({ where: { id: lineItem.materialId } })
+        if (!material) continue
 
-        const rolls = await procurementRepository.createRollsFromWeights(
+        if (material.category === 'PLAIN_ROLLS') {
+          const rollWeights = (lineItem.rollWeights as number[] || []).length > 0 
+            ? lineItem.rollWeights as number[]
+            : Array(lineItem.quantity).fill(Number(lineItem.totalWeight) / lineItem.quantity)
+
+          const rolls = await procurementRepository.createRollsFromWeights(
+            poId,
+            lineItem.materialId,
+            rollWeights,
+            date ? dateFromInput(date) : undefined,
+            tx
+          )
+          allRolls.push(...rolls)
+        }
+
+        await inventoryService.addStock(
+          lineItem.materialId, 
+          material.category === 'PACKAGING' ? lineItem.quantity : Number(lineItem.totalWeight), 
+          `PO ${po.poNumber} received`, 
           poId,
-          lineItem.materialId,
-          rollWeights,
-          date ? dateFromInput(date) : undefined
+          userId,
+          tx
         )
-        allRolls.push(...rolls)
+
+        await tx.pOLineItem.update({
+          where: { id: lineItem.id },
+          data: { receivedQty: { increment: lineItem.quantity } }
+        })
       }
 
-      await inventoryService.addStock(
-        lineItem.materialId, 
-        material.category === 'PACKAGING' ? lineItem.quantity : Number(lineItem.totalWeight), 
-        `PO ${po.poNumber} received`, 
-        poId
-      )
+      const updatedPO = await tx.purchaseOrder.update({
+        where: { id: poId },
+        data: { status: 'RECEIVED', receivedDate: dateFromInput(date) },
+        include: { rolls: { include: { material: true } }, items: { include: { material: true } } }
+      })
 
-      await procurementRepository.updateLineItemReceivedQty(lineItem.id, lineItem.quantity)
-    }
-
-    const updatedPO = await procurementRepository.updatePO(poId, {
-      status: 'RECEIVED',
-      receivedDate: dateFromInput(date)
+      logger.info({ poId, rollsCreated: allRolls.length }, 'PO received successfully')
+      return { po: convertPO(updatedPO), rolls: allRolls }
     })
-
-    logger.info({ poId, rollsCreated: allRolls.length }, 'PO received successfully')
-    return { po: updatedPO, rolls: allRolls }
   },
 
   // Rolls
@@ -217,34 +245,75 @@ export const procurementService = {
   },
 
   async createRoll(input: RollInput): Promise<Roll> {
-    const rollNumber = await procurementRepository.generateRollNumber()
-    logger.info({ rollNumber, materialId: input.materialId }, 'Creating roll')
-    return procurementRepository.createRoll({
-      rollNumber,
-      materialId: input.materialId,
-      purchaseOrderId: input.purchaseOrderId,
-      weight: input.weight,
-      width: input.width,
-      length: input.length,
-      coreSize: input.coreSize,
-      notes: input.notes
-    })
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const rollNumber = await procurementRepository.generateRollNumber()
+        logger.info({ rollNumber, materialId: input.materialId }, 'Creating roll')
+        return await procurementRepository.createRoll({
+          rollNumber,
+          materialId: input.materialId,
+          purchaseOrderId: input.purchaseOrderId,
+          weight: input.weight,
+          width: input.width,
+          length: input.length,
+          coreSize: input.coreSize,
+          notes: input.notes
+        })
+      } catch (error: any) {
+        if (error?.code === 'P2002' && attempt < 3) {
+          logger.warn({ attempt }, 'Roll number collision, retrying...')
+          continue
+        }
+        throw error
+      }
+    }
+    throw new AppError(500, 'ROLL_CREATION_FAILED', 'Failed to create roll after multiple attempts')
   },
 
   async createMultipleRolls(materialId: string, count: number, weights: number[], purchaseOrderId?: string): Promise<Roll[]> {
-    const rolls = []
-    for (let i = 0; i < count; i++) {
-      const rollNumber = await procurementRepository.generateRollNumber()
-      rolls.push({
-        rollNumber,
-        materialId,
-        purchaseOrderId,
-        weight: weights[i],
-        notes: ''
-      })
-    }
     logger.info({ count, materialId }, 'Creating multiple rolls')
-    return procurementRepository.createRolls(rolls)
+
+    return prisma.$transaction(async (tx) => {
+      const today = new Date()
+      const prefix = `RL-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}-`
+      const lastRoll = await tx.roll.findFirst({
+        where: { rollNumber: { startsWith: prefix } },
+        orderBy: { rollNumber: 'desc' }
+      })
+      let startNumber = lastRoll ? parseInt(lastRoll.rollNumber.replace(prefix, '')) : 0
+
+      const rollData: Array<{
+        rollNumber: string; materialId: string; purchaseOrderId?: string;
+        weight: number; remainingWeight: number; status: any;
+        receivedDate: Date; notes: string
+      }> = []
+
+      for (let i = 0; i < count; i++) {
+        startNumber++
+        const rollNumber = `${prefix}${String(startNumber).padStart(4, '0')}`
+        rollData.push({
+          rollNumber, materialId, purchaseOrderId,
+          weight: weights[i] || 0,
+          remainingWeight: weights[i] || 0,
+          status: 'AVAILABLE',
+          receivedDate: today,
+          notes: ''
+        })
+      }
+
+      const created = await tx.roll.createManyAndReturn({
+        data: rollData as any,
+        include: { material: true }
+      })
+      return created.map((r: any) => ({
+        ...r,
+        weight: Number(r.weight),
+        remainingWeight: Number(r.remainingWeight),
+        width: r.width ? Number(r.width) : undefined,
+        length: r.length ? Number(r.length) : undefined,
+        purchaseOrderId: r.purchaseOrderId || undefined
+      }))
+    })
   },
 
   // Supplier Invoices
@@ -347,8 +416,7 @@ export const procurementService = {
     if (po.status !== 'RECEIVED') throw new AppError(400, 'INVALID_OPERATION', 'Purchase order must be received before creating a supplier invoice')
 
     const supplier = await supplierService.findOrCreateByName(po.supplier)
-    const finalInvoiceNumber = invoiceNumber || await generateSupplierInvoiceNumber()
-    logger.info({ poId, invoiceNumber: finalInvoiceNumber, amount, supplierId: supplier.id }, 'Creating supplier invoice')
+    logger.info({ poId, amount, supplierId: supplier.id }, 'Creating supplier invoice')
 
     const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
     const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
@@ -378,117 +446,125 @@ export const procurementService = {
 
     const jeDateStr = typeof date === 'string' ? date : date instanceof Date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : undefined
 
-    const inv = await prisma.$transaction(async (tx) => {
-      const createdInvoice = await tx.supplierInvoice.create({
-        data: {
-          poId,
-          supplierId: supplier.id,
-          invoiceNumber: finalInvoiceNumber,
-          date: typeof date === 'string' ? dateFromInput(date) : date,
-          amount,
-          status: 'PENDING',
-          amountPaid: 0
-        },
-        include: {
-          po: true,
-          supplier: true,
-          payments: true
-        }
-      })
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const finalInvoiceNumber = invoiceNumber || await generateSupplierInvoiceNumber()
 
-      const rawMaterialAccountId = await financeService.getAccountIdByCode('1300')
-      const packagingAccountId = await financeService.getAccountIdByCode('1510')
-      const vatInputId = await financeService.getAccountIdByCode('1400')
-      const apAccountId = await financeService.getAccountIdByCode('2000')
-
-      const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = []
-
-      if (rawMaterialExclusive > 0) {
-        lines.push({ accountId: rawMaterialAccountId, debit: rawMaterialExclusive, credit: 0, memo: 'Raw material inventory (excl. VAT)' })
-      }
-      if (packagingExclusive > 0) {
-        lines.push({ accountId: packagingAccountId, debit: packagingExclusive, credit: 0, memo: 'Packaging inventory (excl. VAT)' })
-      }
-      if (totalVat > 0) {
-        lines.push({ accountId: vatInputId, debit: totalVat, credit: 0, memo: 'Input VAT on purchase' })
-      }
-      lines.push({ accountId: apAccountId, debit: 0, credit: amount, memo: `Supplier invoice ${finalInvoiceNumber}` })
-
-      logger.info({ lines, totalVat, rawMaterialExclusive, packagingExclusive, amount }, 'Posting procurement journal entry')
-
-      await financeService.postJournalEntry({
-        description: `Supplier Invoice ${finalInvoiceNumber} - ${po.supplier}`,
-        sourceModule: 'PROCUREMENT',
-        sourceId: createdInvoice.id,
-        reference: finalInvoiceNumber,
-        date: jeDateStr,
-        lines
-      }, tx)
-
-      logger.info({ invoiceNumber: finalInvoiceNumber, invoiceId: createdInvoice.id }, 'Procurement journal entry posted successfully')
-
-      // Update material costPrice from PO item prices
-      for (const item of poItems) {
-        const material = await tx.material.findUnique({ where: { id: item.materialId } })
-        if (material && material.category !== 'PACKAGING' && Number(item.unitPrice) > 0) {
-          await tx.material.update({
-            where: { id: item.materialId },
-            data: { costPrice: item.unitPrice }
+        const inv = await prisma.$transaction(async (tx) => {
+          const createdInvoice = await tx.supplierInvoice.create({
+            data: {
+              poId,
+              supplierId: supplier.id,
+              invoiceNumber: finalInvoiceNumber,
+              date: typeof date === 'string' ? dateFromInput(date) : date,
+              amount,
+              status: 'PENDING',
+              amountPaid: 0
+            },
+            include: {
+              po: true,
+              supplier: true,
+              payments: true
+            }
           })
-          logger.info({ materialId: item.materialId, costPrice: item.unitPrice }, 'Material costPrice updated from supplier invoice')
+
+          const rawMaterialAccountId = await financeService.getAccountIdByCode('1300')
+          const packagingAccountId = await financeService.getAccountIdByCode('1510')
+          const vatInputId = await financeService.getAccountIdByCode('1400')
+          const apAccountId = await financeService.getAccountIdByCode('2000')
+
+          const lines: { accountId: string; debit: number; credit: number; memo?: string }[] = []
+
+          if (rawMaterialExclusive > 0) {
+            lines.push({ accountId: rawMaterialAccountId, debit: rawMaterialExclusive, credit: 0, memo: 'Raw material inventory (excl. VAT)' })
+          }
+          if (packagingExclusive > 0) {
+            lines.push({ accountId: packagingAccountId, debit: packagingExclusive, credit: 0, memo: 'Packaging inventory (excl. VAT)' })
+          }
+          if (totalVat > 0) {
+            lines.push({ accountId: vatInputId, debit: totalVat, credit: 0, memo: 'Input VAT on purchase' })
+          }
+          lines.push({ accountId: apAccountId, debit: 0, credit: amount, memo: `Supplier invoice ${finalInvoiceNumber}` })
+
+          logger.info({ lines, totalVat, rawMaterialExclusive, packagingExclusive, amount }, 'Posting procurement journal entry')
+
+          await financeService.postJournalEntry({
+            description: `Supplier Invoice ${finalInvoiceNumber} - ${po.supplier}`,
+            sourceModule: 'PROCUREMENT',
+            sourceId: createdInvoice.id,
+            reference: finalInvoiceNumber,
+            date: jeDateStr,
+            lines
+          }, tx)
+
+          logger.info({ invoiceNumber: finalInvoiceNumber, invoiceId: createdInvoice.id }, 'Procurement journal entry posted successfully')
+
+          // Update material costPrice from PO item prices
+          for (const item of poItems) {
+            const material = await tx.material.findUnique({ where: { id: item.materialId } })
+            if (material && material.category !== 'PACKAGING' && Number(item.unitPrice) > 0) {
+              await tx.material.update({
+                where: { id: item.materialId },
+                data: { costPrice: item.unitPrice }
+              })
+              logger.info({ materialId: item.materialId, costPrice: item.unitPrice }, 'Material costPrice updated from supplier invoice')
+            }
+          }
+
+          return createdInvoice
+        })
+
+        return {
+          id: inv.id,
+          poId: inv.poId,
+          purchaseOrder: inv.po ? {
+            id: inv.po.id,
+            poNumber: inv.po.poNumber,
+            supplier: inv.po.supplier,
+            status: inv.po.status,
+            totalAmount: Number(inv.po.totalAmount),
+            createdAt: inv.po.createdAt,
+            updatedAt: inv.po.updatedAt
+          } : undefined,
+          supplierId: inv.supplierId,
+          supplier: inv.supplier ? {
+            id: inv.supplier.id,
+            name: inv.supplier.name
+          } : undefined,
+          invoiceNumber: inv.invoiceNumber,
+          date: inv.date,
+          amount: Number(inv.amount),
+          status: inv.status,
+          amountPaid: Number(inv.amountPaid),
+          createdAt: inv.createdAt,
+          payments: []
         }
+      } catch (error: any) {
+        if (error?.code === 'P2002' && attempt < 3) {
+          logger.warn({ attempt }, 'Supplier invoice number collision, retrying...')
+          continue
+        }
+        throw error
       }
-
-      return createdInvoice
-    })
-
-    return {
-      id: inv.id,
-      poId: inv.poId,
-      purchaseOrder: inv.po ? {
-        id: inv.po.id,
-        poNumber: inv.po.poNumber,
-        supplier: inv.po.supplier,
-        status: inv.po.status,
-        totalAmount: Number(inv.po.totalAmount),
-        createdAt: inv.po.createdAt,
-        updatedAt: inv.po.updatedAt
-      } : undefined,
-      supplierId: inv.supplierId,
-      supplier: inv.supplier ? {
-        id: inv.supplier.id,
-        name: inv.supplier.name
-      } : undefined,
-      invoiceNumber: inv.invoiceNumber,
-      date: inv.date,
-      amount: Number(inv.amount),
-      status: inv.status,
-      amountPaid: Number(inv.amountPaid),
-      createdAt: inv.createdAt,
-      payments: []
     }
+    throw new AppError(500, 'INVOICE_CREATION_FAILED', 'Failed to create supplier invoice after multiple attempts')
   },
 
   async addPayment(supplierInvoiceId: string, amount: number, date: string | Date, paymentMethod: 'Cash' | 'Bank Transfer', reference?: string, notes?: string): Promise<PaymentMade> {
-    const inv = await prisma.supplierInvoice.findUnique({
-      where: { id: supplierInvoiceId },
-      include: { po: true, supplier: true }
-    })
-    if (!inv) throw new AppError(404, 'NOT_FOUND', 'Supplier invoice not found')
-
-    const remainingBalance = Number(inv.amount) - Number(inv.amountPaid)
-    if (amount > remainingBalance) {
-      throw new AppError(400, 'INVALID_AMOUNT', `Payment N${amount} exceeds remaining balance N${remainingBalance}`)
-    }
-
-    const newAmountPaid = Number(inv.amountPaid) + amount
-    const newStatus = newAmountPaid >= Number(inv.amount) ? 'PAID' : newAmountPaid > 0 ? 'PARTIAL' : 'PENDING'
-
-    logger.info({ supplierInvoiceId, amount, newStatus, paymentMethod }, 'Recording payment to supplier invoice')
-
     const payJeDateStr = typeof date === 'string' ? date : date instanceof Date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : undefined
 
     const result = await prisma.$transaction(async (tx) => {
+      const inv = await tx.supplierInvoice.findUnique({
+        where: { id: supplierInvoiceId },
+        include: { po: true, supplier: true }
+      })
+      if (!inv) throw new AppError(404, 'NOT_FOUND', 'Supplier invoice not found')
+
+      const remainingBalance = Number(inv.amount) - Number(inv.amountPaid)
+      if (amount > remainingBalance) {
+        throw new AppError(400, 'INVALID_AMOUNT', `Payment N${amount} exceeds remaining balance N${remainingBalance}`)
+      }
+
       const payment = await tx.paymentMade.create({
         data: {
           supplierInvoiceId,
@@ -500,12 +576,17 @@ export const procurementService = {
         }
       })
 
+      // Atomic increment — prevents lost payments from concurrent writes
+      const updated = await tx.supplierInvoice.update({
+        where: { id: supplierInvoiceId },
+        data: { amountPaid: { increment: amount } }
+      })
+
+      const newAmountPaid = Number(updated.amountPaid)
+      const newStatus = newAmountPaid >= Number(updated.amount) ? 'PAID' : 'PARTIAL'
       await tx.supplierInvoice.update({
         where: { id: supplierInvoiceId },
-        data: {
-          amountPaid: newAmountPaid,
-          status: newStatus
-        }
+        data: { status: newStatus }
       })
 
       const cashAccountCode = paymentMethod === 'Cash' ? '1000' : '1100'

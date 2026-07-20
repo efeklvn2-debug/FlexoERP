@@ -1,4 +1,5 @@
 import { prisma } from '../../database'
+import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 
 const logger = createChildLogger('settings:service')
@@ -148,23 +149,25 @@ export const settingsService = {
     const now = new Date()
     const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
-    await prisma.overheadRateHistory.upsert({
-      where: { month: monthStr },
-      create: {
-        month: monthStr,
-        ratePerKg: rate,
-        createdBy: userId || null
-      },
-      update: {
-        ratePerKg: rate,
-        createdBy: userId || null
-      }
-    })
+    await prisma.$transaction(async (tx) => {
+      await tx.overheadRateHistory.upsert({
+        where: { month: monthStr },
+        create: {
+          month: monthStr,
+          ratePerKg: rate,
+          createdBy: userId || null
+        },
+        update: {
+          ratePerKg: rate,
+          createdBy: userId || null
+        }
+      })
 
-    await prisma.settings.upsert({
-      where: { id: 'default' },
-      update: { overheadRatePerKg: rate },
-      create: { id: 'default', overheadRatePerKg: rate }
+      await tx.settings.upsert({
+        where: { id: 'default' },
+        update: { overheadRatePerKg: rate },
+        create: { id: 'default', overheadRatePerKg: rate }
+      })
     })
 
     return rate
@@ -239,21 +242,30 @@ export const settingsService = {
   },
 
   async createInkColor(data: { name: string; mapping: string }): Promise<any> {
-    const color = await prisma.inkColor.create({ data: { name: data.name, mapping: data.mapping } })
-    const existingMat = await prisma.material.findFirst({ where: { subCategory: data.mapping, category: 'INK_SOLVENTS' } })
-    if (!existingMat) {
-      await prisma.material.create({
-        data: {
-          code: `INK-${data.name.toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
-          name: `${data.name} Ink`,
-          category: 'INK_SOLVENTS',
-          subCategory: data.mapping,
-          unitOfMeasure: 'kg',
-          isActive: true
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const color = await tx.inkColor.create({ data: { name: data.name, mapping: data.mapping } })
+        const existingMat = await tx.material.findFirst({ where: { subCategory: data.mapping, category: 'INK_SOLVENTS' } })
+        if (!existingMat) {
+          await tx.material.create({
+            data: {
+              code: `INK-${data.name.toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
+              name: `${data.name} Ink`,
+              category: 'INK_SOLVENTS',
+              subCategory: data.mapping,
+              unitOfMeasure: 'kg',
+              isActive: true
+            }
+          })
         }
+        return color
       })
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        throw new AppError(400, 'DUPLICATE', 'Ink color with this name or mapping already exists')
+      }
+      throw error
     }
-    return color
   },
 
   async updateInkColor(id: string, data: { name?: string; mapping?: string }): Promise<any> {

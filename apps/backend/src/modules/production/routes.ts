@@ -19,9 +19,9 @@ productionRouter.post('/:id/printed-rolls', requirePermission('production:create
 productionRouter.post('/:id/complete', mutationLimiter, requirePermission('production:complete'), productionController.completeJob)
 productionRouter.delete('/:id', requirePermission('production:delete'), productionController.deleteJob)
 
-productionRouter.post('/parent-roll/:id/dispose', authenticate, loadUser, requirePermission('inventory:dispose'), productionController.disposeRoll)
-productionRouter.post('/parent-roll/:id/return', authenticate, loadUser, requirePermission('inventory:adjust'), productionController.returnRoll)
-productionRouter.post('/parent-roll/:id/consume', authenticate, loadUser, requirePermission('inventory:dispose'), productionController.markRollConsumed)
+productionRouter.post('/parent-roll/:id/dispose', mutationLimiter, authenticate, loadUser, requirePermission('inventory:dispose'), productionController.disposeRoll)
+productionRouter.post('/parent-roll/:id/return', mutationLimiter, authenticate, loadUser, requirePermission('inventory:adjust'), productionController.returnRoll)
+productionRouter.post('/parent-roll/:id/consume', mutationLimiter, authenticate, loadUser, requirePermission('inventory:dispose'), productionController.markRollConsumed)
 productionRouter.post('/parent-roll/:id/receive-replacement', authenticate, loadUser, requirePermission('inventory:adjust'), productionController.receiveReplacement)
 productionRouter.post('/printed-roll/:id/customer-return', authenticate, loadUser, requirePermission('sales_order:pickup'), productionController.customerReturnRoll)
 productionRouter.post('/printed-rolls/archive', authenticate, loadUser, requirePermission('production:delete'), productionController.archiveOldPrintedRolls)

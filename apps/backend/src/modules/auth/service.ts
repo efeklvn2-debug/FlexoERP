@@ -6,6 +6,7 @@ import { generateAccessToken, generateRefreshToken, verifyToken, extractJwtFromR
 import { Role } from '@flexoprint/types'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
+import { prisma } from '../../database'
 
 const logger = createChildLogger('auth:service')
 
@@ -87,29 +88,30 @@ export const authService = {
   },
 
   async register(input: RegisterInput): Promise<UserResponse> {
-    const existingUser = await authRepository.findUserByUsername(input.username)
-
-    if (existingUser) {
-      throw new AppError(409, 'USER_EXISTS', 'Username already taken')
-    }
-
     const passwordHash = await bcrypt.hash(input.password, 12)
 
-    const user = await authRepository.createUser({
-      username: input.username,
-      passwordHash,
-      role: (input.role ?? Role.OPERATOR) as Role
-    })
+    try {
+      const user = await authRepository.createUser({
+        username: input.username,
+        passwordHash,
+        role: (input.role ?? Role.OPERATOR) as Role
+      })
 
-    logger.info({ userId: user.id, username: user.username }, 'User registered')
+      logger.info({ userId: user.id, username: user.username }, 'User registered')
 
-    return {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      isActive: user.isActive,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt
+      return {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        throw new AppError(409, 'USER_EXISTS', 'Username already taken')
+      }
+      throw error
     }
   },
 
@@ -158,14 +160,17 @@ export const authService = {
   },
 
   async updateUser(id: string, input: UpdateUserInput) {
+    const updated = await prisma.user.updateMany({
+      where: { id },
+      data: input as any
+    })
+    if (updated.count === 0) throw new AppError(404, 'NOT_FOUND', 'User not found')
     const user = await authRepository.findUserById(id)
-    if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found')
-    const updated = await authRepository.updateUser(id, input)
     return {
-      id: updated.id,
-      username: updated.username,
-      role: updated.role,
-      isActive: updated.isActive
+      id: user!.id,
+      username: user!.username,
+      role: user!.role,
+      isActive: user!.isActive
     }
   },
 

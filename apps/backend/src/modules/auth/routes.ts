@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import { authController } from './controller'
 import { validateRequest } from '../../middleware/validation'
-import { authLimiter } from '../../middleware/rateLimiters'
+import { authLimiter, registerLimiter } from '../../middleware/rateLimiters'
 import { loginSchema, refreshTokenSchema, registerSchema, updateUserSchema, setRolePermissionsSchema, setUserPermissionOverridesSchema } from './validation'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
 
@@ -33,6 +33,7 @@ authRouter.post(
 
 authRouter.post(
   '/register',
+  registerLimiter,
   validateRequest(registerSchema),
   authenticate,
   loadUser,

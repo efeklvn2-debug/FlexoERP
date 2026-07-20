@@ -259,23 +259,28 @@ export const inventoryService = {
     }, tx)
   },
 
-  async recordPackingBagChange(materialId: string, quantity: number, type: 'PURCHASE' | 'SALE', reference?: string, userId?: string): Promise<StockMovement | null> {
-    const material = await inventoryRepository.findMaterialById(materialId)
-    if (!material) {
-      throw new AppError(404, 'NOT_FOUND', 'Packing bag material not found')
+  async recordPackingBagChange(materialId: string, quantity: number, type: 'PURCHASE' | 'SALE', reference?: string, userId?: string, tx?: Prisma.TransactionClient): Promise<StockMovement | null> {
+    const execute = async (client: Prisma.TransactionClient) => {
+      const material = await inventoryRepository.findMaterialById(materialId)
+      if (!material) {
+        throw new AppError(404, 'NOT_FOUND', 'Packing bag material not found')
+      }
+
+      const stock = await inventoryRepository.getOrCreateStock(materialId, 'MAIN', client)
+
+      return inventoryRepository.createStockMovement({
+        materialId,
+        stockId: stock.id,
+        type: type === 'PURCHASE' ? 'IN' : 'OUT',
+        quantity: Math.abs(quantity),
+        reference,
+        notes: `${type === 'PURCHASE' ? 'Purchase' : 'Sale'}: ${Math.abs(quantity)} ${material.unitOfMeasure}`,
+        createdById: userId
+      }, client)
     }
 
-    const stock = await inventoryRepository.getOrCreateStock(materialId, 'MAIN')
-    
-    return inventoryRepository.createStockMovement({
-      materialId,
-      stockId: stock.id,
-      type: type === 'PURCHASE' ? 'IN' : 'OUT',
-      quantity: Math.abs(quantity),
-      reference,
-      notes: `${type === 'PURCHASE' ? 'Purchase' : 'Sale'}: ${Math.abs(quantity)} ${material.unitOfMeasure}`,
-      createdById: userId
-    })
+    if (tx) return execute(tx)
+    return prisma.$transaction(execute)
   },
 
   async getCoreStock(): Promise<{ stock: number; movements: StockMovement[] }> {

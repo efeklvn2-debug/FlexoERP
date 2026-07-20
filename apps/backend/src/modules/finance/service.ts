@@ -8,11 +8,16 @@ import { dateFromInput, dateStartOfDay, dateEndOfDay } from '../../utils/dates'
 const logger = createChildLogger('finance:service')
 
 const ACCOUNT_CACHE: Map<string, Account> = new Map()
+let cacheTimestamp = 0
+const CACHE_TTL_MS = 60_000
 
 async function loadAccountCache() {
-  if (ACCOUNT_CACHE.size === 0) {
+  const now = Date.now()
+  if (ACCOUNT_CACHE.size === 0 || now - cacheTimestamp > CACHE_TTL_MS) {
+    ACCOUNT_CACHE.clear()
     const accounts = await prisma.account.findMany({ where: { isActive: true } })
     accounts.forEach(acc => ACCOUNT_CACHE.set(acc.code, acc))
+    cacheTimestamp = now
   }
 }
 
@@ -68,24 +73,28 @@ export const financeService = {
     isVatEnabled?: boolean
     description?: string
   }) {
-    const existing = await financeRepository.findAccountByCode(input.code)
-    if (existing) {
-      throw new AppError(400, 'DUPLICATE', `Account code ${input.code} already exists`)
-    }
-
     if (input.parentId) {
       const parent = await financeRepository.findAccountById(input.parentId)
       if (!parent) throw new AppError(400, 'INVALID', 'Parent account not found')
     }
 
-    return financeRepository.createAccount({
-      code: input.code,
-      name: input.name,
-      type: input.type,
-      parentId: input.parentId,
-      isVatEnabled: input.isVatEnabled,
-      description: input.description
-    })
+    try {
+      const account = await financeRepository.createAccount({
+        code: input.code,
+        name: input.name,
+        type: input.type,
+        parentId: input.parentId,
+        isVatEnabled: input.isVatEnabled,
+        description: input.description
+      })
+      ACCOUNT_CACHE.set(account.code, account as any)
+      return account
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        throw new AppError(400, 'DUPLICATE', `Account code ${input.code} already exists`)
+      }
+      throw error
+    }
   },
 
   async postJournalEntry(input: {
@@ -123,12 +132,10 @@ export const financeService = {
     const entryDate = dateFromInput(date)
     await this.validateJournalDate(entryDate, db)
 
-    const entryNumber = await financeRepository.getNextEntryNumber(db)
-
-    const createEntry = async (client: Prisma.TransactionClient) => {
+    const createEntry = async (client: Prisma.TransactionClient, number: string) => {
       const entry = await client.journalEntry.create({
         data: {
-          entryNumber,
+          entryNumber: number,
           date: entryDate,
           description,
           sourceModule: sourceModule as any,
@@ -152,10 +159,25 @@ export const financeService = {
     }
 
     if (tx) {
-      return createEntry(tx)
+      const entryNumber = await financeRepository.getNextEntryNumber(tx)
+      return createEntry(tx, entryNumber)
     }
 
-    return prisma.$transaction(async (dbTx) => createEntry(dbTx))
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        return await prisma.$transaction(async (dbTx) => {
+          const entryNumber = await financeRepository.getNextEntryNumber(dbTx)
+          return createEntry(dbTx, entryNumber)
+        })
+      } catch (error: any) {
+        if (error?.code === 'P2002' && attempt < 3) {
+          logger.warn({ attempt }, 'Entry number collision, retrying...')
+          continue
+        }
+        throw error
+      }
+    }
+    throw new AppError(500, 'ENTRY_CREATION_FAILED', 'Failed to create journal entry after multiple attempts')
   },
 
   async getJournalEntries(options?: {
@@ -580,122 +602,152 @@ export const financeService = {
   },
 
   async recognizeDeferredCogs(orderId: string, userId?: string) {
-    const order = await prisma.salesOrder.findUnique({
-      where: { id: orderId },
-      include: {
-        customer: true,
-        productionJob: true
+    return prisma.$transaction(async (tx) => {
+      const order = await tx.salesOrder.findUnique({
+        where: { id: orderId },
+        include: {
+          customer: true,
+          productionJob: true
+        }
+      })
+
+      if (!order) {
+        throw new AppError(404, 'NOT_FOUND', 'Sales order not found')
+      }
+
+      if (order.status !== 'READY' && order.status !== 'PICKED_UP') {
+        throw new AppError(400, 'INVALID', 'Order must be READY or PICKED_UP to recognize COGS')
+      }
+
+      if (!order.productionJobId || !order.productionJob) {
+        throw new AppError(400, 'INVALID', 'Order has no production job')
+      }
+
+      // Guard against duplicate COGS recognition
+      const existingCogs = await tx.journalEntry.findFirst({
+        where: {
+          sourceModule: 'SALES',
+          sourceId: orderId,
+          description: { startsWith: 'Recognize COGS' }
+        }
+      })
+      if (existingCogs) {
+        throw new AppError(400, 'DUPLICATE', `COGS already recognized for order ${order.orderNumber} (${existingCogs.entryNumber})`)
+      }
+
+      // Read cost snapshot from ProductionJob (saved at completion)
+      const job = order.productionJob
+      let totalDeferredCost = Number(job.materialCost || 0)
+        + Number((job as any).consumablesCost || 0)
+        + Number(job.overheadCost || 0)
+
+      // Fallback for pre-fix jobs where costs were never saved
+      if (!totalDeferredCost) {
+        const totalPrintedWeight = Number(order.quantityProduced) || 0
+
+        // Get parent rolls for material cost
+        if (job.parentRollIds && job.parentRollIds.length > 0) {
+          const parentRolls = await tx.roll.findMany({
+            where: { id: { in: job.parentRollIds } },
+            include: { material: true }
+          })
+
+          const parentMaterial = parentRolls[0]?.material
+          const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
+          totalDeferredCost += totalPrintedWeight * costPerKg
+        }
+
+        // Add consumables and overhead
+        const settings = await tx.settings.findUnique({ where: { id: 'default' } })
+        if (settings) {
+          const inkRate = Number(settings.inkConsumptionRate) || 0.2
+          const ipaRate = Number(settings.ipaConsumptionRate) || 0.1
+          const butanolRate = Number(settings.butanolConsumptionRate) || 0.1
+
+          const consumableMaterials = await tx.material.findMany({ where: { category: 'INK_SOLVENTS', isActive: true } })
+          const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
+          const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
+          const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
+          const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
+
+          const inkMats = consumableMaterials.filter(m => m.subCategory !== 'IPA' && m.subCategory !== 'Butanol')
+          const avgInkCostPrice = inkMats.length > 0
+            ? inkMats.reduce((sum, m) => sum + (Number(m.costPrice) || 0), 0) / inkMats.length
+            : 0
+
+          totalDeferredCost += totalPrintedWeight * inkRate * avgInkCostPrice
+            + totalPrintedWeight * ipaRate * ipaCostPerLiter
+            + totalPrintedWeight * butanolRate * butanolCostPerLiter
+
+          const overheadRate = Number(settings.overheadRatePerKg) || 0
+          totalDeferredCost += totalPrintedWeight * overheadRate
+        }
+      }
+
+      if (totalDeferredCost <= 0) {
+        throw new AppError(400, 'INVALID', 'No deferred COGS to recognize')
+      }
+
+      const cogsAccountId = await this.getAccountIdByCode('5000')
+      const deferredCogsAccountId = await this.getAccountIdByCode('1330')
+
+      const entry = await this.postJournalEntry({
+        description: `Recognize COGS - SO ${order.orderNumber}`,
+        sourceModule: 'SALES',
+        sourceId: order.id,
+        reference: order.orderNumber,
+        postedById: userId,
+        lines: [
+          { accountId: cogsAccountId, debit: totalDeferredCost, credit: 0, memo: 'COGS recognized on delivery' },
+          { accountId: deferredCogsAccountId, debit: 0, credit: totalDeferredCost, memo: 'Deferred COGS cleared' }
+        ]
+      }, tx)
+
+      logger.info({ orderId, orderNumber: order.orderNumber, amount: totalDeferredCost }, 'Deferred COGS manually recognized')
+
+      return {
+        success: true,
+        amount: totalDeferredCost,
+        journalEntry: entry
       }
     })
-
-    if (!order) {
-      throw new AppError(404, 'NOT_FOUND', 'Sales order not found')
-    }
-
-    if (order.status !== 'READY' && order.status !== 'PICKED_UP') {
-      throw new AppError(400, 'INVALID', 'Order must be READY or PICKED_UP to recognize COGS')
-    }
-
-    if (!order.productionJobId || !order.productionJob) {
-      throw new AppError(400, 'INVALID', 'Order has no production job')
-    }
-
-    // Read cost snapshot from ProductionJob (saved at completion)
-    const job = order.productionJob
-    let totalDeferredCost = Number(job.materialCost || 0)
-      + Number((job as any).consumablesCost || 0)
-      + Number(job.overheadCost || 0)
-
-    // Fallback for pre-fix jobs where costs were never saved
-    if (!totalDeferredCost) {
-      const totalPrintedWeight = Number(order.quantityProduced) || 0
-
-      // Get parent rolls for material cost
-      if (job.parentRollIds && job.parentRollIds.length > 0) {
-        const parentRolls = await prisma.roll.findMany({
-          where: { id: { in: job.parentRollIds } },
-          include: { material: true }
-        })
-
-        const parentMaterial = parentRolls[0]?.material
-        const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
-        totalDeferredCost += totalPrintedWeight * costPerKg
-      }
-
-      // Add consumables and overhead
-      const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
-      if (settings) {
-        const inkRate = Number(settings.inkConsumptionRate) || 0.2
-        const ipaRate = Number(settings.ipaConsumptionRate) || 0.1
-        const butanolRate = Number(settings.butanolConsumptionRate) || 0.1
-
-        const consumableMaterials = await prisma.material.findMany({ where: { category: 'INK_SOLVENTS', isActive: true } })
-        const ipaMat = consumableMaterials.find(m => m.subCategory === 'IPA')
-        const butanolMat = consumableMaterials.find(m => m.subCategory === 'Butanol')
-        const ipaCostPerLiter = ipaMat?.costPrice ? Number(ipaMat.costPrice) : 60
-        const butanolCostPerLiter = butanolMat?.costPrice ? Number(butanolMat.costPrice) : 60
-
-        // Average costPrice of ink materials (exclude IPA/Butanol)
-        const inkMats = consumableMaterials.filter(m => m.subCategory !== 'IPA' && m.subCategory !== 'Butanol')
-        const avgInkCostPrice = inkMats.length > 0
-          ? inkMats.reduce((sum, m) => sum + (Number(m.costPrice) || 0), 0) / inkMats.length
-          : 0
-
-        totalDeferredCost += totalPrintedWeight * inkRate * avgInkCostPrice
-          + totalPrintedWeight * ipaRate * ipaCostPerLiter
-          + totalPrintedWeight * butanolRate * butanolCostPerLiter
-
-        const overheadRate = Number(settings.overheadRatePerKg) || 0
-        totalDeferredCost += totalPrintedWeight * overheadRate
-      }
-    }
-
-    if (totalDeferredCost <= 0) {
-      throw new AppError(400, 'INVALID', 'No deferred COGS to recognize')
-    }
-
-    const cogsAccountId = await this.getAccountIdByCode('5000')
-    const deferredCogsAccountId = await this.getAccountIdByCode('1330')
-
-    const entry = await this.postJournalEntry({
-      description: `Recognize COGS - SO ${order.orderNumber}`,
-      sourceModule: 'SALES',
-      sourceId: order.id,
-      reference: order.orderNumber,
-      postedById: userId,
-      lines: [
-        { accountId: cogsAccountId, debit: totalDeferredCost, credit: 0, memo: 'COGS recognized on delivery' },
-        { accountId: deferredCogsAccountId, debit: 0, credit: totalDeferredCost, memo: 'Deferred COGS cleared' }
-      ]
-    })
-
-    logger.info({ orderId, orderNumber: order.orderNumber, amount: totalDeferredCost }, 'Deferred COGS manually recognized')
-
-    return {
-      success: true,
-      amount: totalDeferredCost,
-      journalEntry: entry
-    }
   },
 
   async reverseJournalEntry(entryId: string, userId?: string) {
-    const entry = await this.getJournalEntryById(entryId)
-    if (!entry) throw new AppError(404, 'NOT_FOUND', 'Journal entry not found')
+    return prisma.$transaction(async (tx) => {
+      const entry = await tx.journalEntry.findUnique({
+        where: { id: entryId },
+        include: { lines: true }
+      })
+      if (!entry) throw new AppError(404, 'NOT_FOUND', 'Journal entry not found')
 
-    const reversedLines = entry.lines.map(l => ({
-      accountId: l.accountId,
-      debit: Number(l.credit),
-      credit: Number(l.debit),
-      memo: `Reversal: ${l.memo || ''}`
-    }))
+      // Guard against double reversal
+      const existingReversal = await tx.journalEntry.findFirst({
+        where: {
+          sourceModule: entry.sourceModule,
+          sourceId: entry.sourceId,
+          description: { startsWith: `Reversal of ${entry.entryNumber}` }
+        }
+      })
+      if (existingReversal) {
+        throw new AppError(400, 'ALREADY_REVERSED', `Entry ${entry.entryNumber} was already reversed (${existingReversal.entryNumber})`)
+      }
 
-    return this.postJournalEntry({
-      description: `Reversal of ${entry.entryNumber} - ${entry.description}`,
-      sourceModule: entry.sourceModule,
-      sourceId: entry.sourceId || undefined,
-      reference: entry.reference || undefined,
-      postedById: userId,
-      lines: reversedLines
+      const reversedLines = entry.lines.map(l => ({
+        accountId: l.accountId,
+        debit: Number(l.credit),
+        credit: Number(l.debit),
+        memo: `Reversal: ${l.memo || ''}`
+      }))
+
+      return this.postJournalEntry({
+        description: `Reversal of ${entry.entryNumber} - ${entry.description}`,
+        sourceModule: entry.sourceModule,
+        sourceId: entry.sourceId || undefined,
+        reference: entry.reference || undefined,
+        postedById: userId,
+        lines: reversedLines
+      }, tx)
     })
   },
 
@@ -709,45 +761,35 @@ export const financeService = {
       throw new AppError(400, 'INVALID', 'At least one account line is required')
     }
 
-    let totalAssetDebits = 0
-    let totalLiabilityEquityCredits = 0
-    const assetLines: { account: any; amount: number }[] = []
-    const liabilityEquityLines: { account: any; amount: number }[] = []
-
-    for (const line of lines) {
-      if (line.amount < 0) {
-        throw new AppError(400, 'INVALID', 'Amount must be non-negative')
-      }
-      const account = await prisma.account.findUnique({ where: { id: line.accountId } })
-      if (!account) throw new AppError(404, 'NOT_FOUND', `Account ${line.accountId} not found`)
-
-      if (account.type === 'ASSET') {
-        totalAssetDebits += line.amount
-        assetLines.push({ account, amount: line.amount })
-      } else if (account.type === 'LIABILITY' || account.type === 'EQUITY') {
-        totalLiabilityEquityCredits += line.amount
-        liabilityEquityLines.push({ account, amount: line.amount })
-      } else {
-        throw new AppError(400, 'INVALID', `Account ${account.code} (${account.type}) cannot have an opening balance. Only ASSET, LIABILITY, and EQUITY accounts are allowed.`)
-      }
-    }
-
-    const difference = totalAssetDebits - totalLiabilityEquityCredits
     return prisma.$transaction(async (tx) => {
-      for (const { account, amount } of assetLines) {
-        await tx.account.update({
-          where: { id: account.id },
-          data: { openingBalance: amount }
-        })
+      let totalAssetDebits = 0
+      let totalLiabilityEquityCredits = 0
+
+      for (const line of lines) {
+        if (line.amount < 0) {
+          throw new AppError(400, 'INVALID', 'Amount must be non-negative')
+        }
+        const account = await tx.account.findUnique({ where: { id: line.accountId } })
+        if (!account) throw new AppError(404, 'NOT_FOUND', `Account ${line.accountId} not found`)
+
+        if (account.type === 'ASSET') {
+          totalAssetDebits += line.amount
+          await tx.account.update({
+            where: { id: account.id },
+            data: { openingBalance: line.amount }
+          })
+        } else if (account.type === 'LIABILITY' || account.type === 'EQUITY') {
+          totalLiabilityEquityCredits += line.amount
+          await tx.account.update({
+            where: { id: account.id },
+            data: { openingBalance: -line.amount }
+          })
+        } else {
+          throw new AppError(400, 'INVALID', `Account ${account.code} (${account.type}) cannot have an opening balance. Only ASSET, LIABILITY, and EQUITY accounts are allowed.`)
+        }
       }
 
-      for (const { account, amount } of liabilityEquityLines) {
-        await tx.account.update({
-          where: { id: account.id },
-          data: { openingBalance: -amount }
-        })
-      }
-
+      const difference = totalAssetDebits - totalLiabilityEquityCredits
       const entryDate = dateFromInput(date as any)
 
       logger.info({ accountsUpdated: lines.length, difference, date: entryDate }, 'Opening balances posted')

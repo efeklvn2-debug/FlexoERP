@@ -2,6 +2,7 @@ import { supplierRepository } from './repository'
 import { Supplier } from './types'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
+import { prisma } from '../../database'
 
 const logger = createChildLogger('suppliers:service')
 
@@ -23,31 +24,57 @@ export const supplierService = {
   },
 
   async findOrCreateByName(name: string): Promise<Supplier> {
-    let supplier = await supplierRepository.findByName(name)
-    if (!supplier) {
-      const code = generateCode(name)
-      supplier = await supplierRepository.create({ name, code })
-      logger.info({ name, code }, 'Auto-created supplier')
-    }
-    return supplier
+    return prisma.$transaction(async (tx) => {
+      let supplier = await tx.supplier.findFirst({ where: { name } })
+      if (!supplier) {
+        const code = generateCode(name)
+        supplier = await tx.supplier.create({ data: { name, code } })
+        logger.info({ name, code }, 'Auto-created supplier')
+      }
+      return { ...supplier, isActive: supplier.isActive } as any as Supplier
+    })
   },
 
   async create(input: { name: string; email?: string; phone?: string; address?: string; notes?: string }): Promise<Supplier> {
-    const existing = await supplierRepository.findByName(input.name)
-    if (existing) throw new AppError(400, 'DUPLICATE', 'Supplier with this name already exists')
+    return prisma.$transaction(async (tx) => {
+      const existing = await tx.supplier.findFirst({ where: { name: input.name } })
+      if (existing) throw new AppError(400, 'DUPLICATE', 'Supplier with this name already exists')
 
-    const code = generateCode(input.name)
-    logger.info({ ...input, code }, 'Creating supplier')
-    return supplierRepository.create({ ...input, code })
+      const code = generateCode(input.name)
+      logger.info({ ...input, code }, 'Creating supplier')
+
+      try {
+        return await tx.supplier.create({ data: { ...input, code } }) as unknown as Supplier
+      } catch (error: any) {
+        if (error?.code === 'P2002') {
+          const fields: string[] = error?.meta?.target || error?.meta?.fields || []
+          if (fields.includes('name')) {
+            throw new AppError(400, 'DUPLICATE', 'Supplier with this name already exists')
+          }
+          // Code collision (extremely rare with random suffix) — retry once
+          const retryCode = generateCode(input.name)
+          return await tx.supplier.create({ data: { ...input, code: retryCode } }) as unknown as Supplier
+        }
+        throw error
+      }
+    })
   },
 
   async update(id: string, input: { name?: string; email?: string; phone?: string; address?: string; notes?: string; isActive?: boolean }): Promise<Supplier> {
-    await this.getById(id)
-    return supplierRepository.update(id, input)
+    const updated = await prisma.supplier.updateMany({
+      where: { id },
+      data: input as any
+    })
+    if (updated.count === 0) throw new AppError(404, 'NOT_FOUND', 'Supplier not found')
+    return supplierRepository.findById(id) as unknown as Promise<Supplier>
   },
 
   async deactivate(id: string): Promise<Supplier> {
-    await this.getById(id)
-    return supplierRepository.deactivate(id)
+    const updated = await prisma.supplier.updateMany({
+      where: { id, isActive: true },
+      data: { isActive: false }
+    })
+    if (updated.count === 0) throw new AppError(404, 'NOT_FOUND', 'Supplier not found or already inactive')
+    return supplierRepository.findById(id) as unknown as Promise<Supplier>
   }
 }
