@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import { useNotification } from '../contexts/NotificationContext'
 import { Layout } from '../components/Layout'
 import { authApi, UserListItem, PermissionInfo, UserOverride, RoleInfo } from '../api/auth'
+import { auditApi, AuditLogEntry } from '../api/audit'
 
-type Tab = 'users' | 'roles' | 'overrides'
+type Tab = 'users' | 'roles' | 'overrides' | 'activity'
 
 function groupByModule(perms: PermissionInfo[]): Record<string, PermissionInfo[]> {
   return perms.reduce((acc, p) => {
@@ -46,9 +47,19 @@ export function AdminPage() {
   const [newOverridePermId, setNewOverridePermId] = useState('')
   const [newOverrideGranted, setNewOverrideGranted] = useState(true)
 
+  // Activity tab
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
+  const [auditTotal, setAuditTotal] = useState(0)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditPage, setAuditPage] = useState(0)
+  const [auditFilters, setAuditFilters] = useState({ action: '', entityType: '', userId: '' })
+  const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const pageSize = 50
+
   useEffect(() => {
     if (activeTab === 'users') loadUsers()
     if (activeTab === 'roles') { loadRoles(); loadAllPermissions() }
+    if (activeTab === 'activity') loadAuditLogs(0)
   }, [activeTab])
 
   const loadUsers = async () => {
@@ -102,6 +113,41 @@ export function AdminPage() {
       notify.error(err.message || 'Failed to load overrides')
     }
     setOverrideLoading(false)
+  }
+
+  const loadAuditLogs = async (page: number, filters = auditFilters) => {
+    setAuditLoading(true)
+    try {
+      const res = await auditApi.list({
+        ...filters,
+        limit: pageSize,
+        offset: page * pageSize
+      })
+      const data = (res.data as any)?.data
+      if (data) {
+        setAuditLogs(data.items || [])
+        setAuditTotal(data.total || 0)
+        setAuditPage(page)
+      } else {
+        const errData = (res as any).error
+        notify.error(errData?.message || 'Failed to load audit logs')
+      }
+    } catch (err: any) {
+      notify.error(err.message || 'Failed to load audit logs')
+    }
+    setAuditLoading(false)
+  }
+
+  const applyAuditFilters = () => {
+    setExpandedRow(null)
+    loadAuditLogs(0, auditFilters)
+  }
+
+  const clearAuditFilters = () => {
+    const cleared = { action: '', entityType: '', userId: '' }
+    setAuditFilters(cleared)
+    setExpandedRow(null)
+    loadAuditLogs(0, cleared)
   }
 
   // ── User edit ────────────────────────────────────────────────
@@ -185,7 +231,7 @@ export function AdminPage() {
   }
 
   const groupedPerms = groupByModule(allPermissions)
-  const tabLabels: Record<Tab, string> = { users: 'Users', roles: 'Roles', overrides: 'Overrides' }
+  const tabLabels: Record<Tab, string> = { users: 'Users', roles: 'Roles', overrides: 'Overrides', activity: 'Activity Log' }
 
   return (
     <Layout>
@@ -394,6 +440,145 @@ export function AdminPage() {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Activity Log Tab ──────────────────────────────────── */}
+        {activeTab === 'activity' && (
+          <div className="space-y-4">
+            {/* Filters */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Action</label>
+                  <input
+                    type="text"
+                    value={auditFilters.action}
+                    onChange={e => setAuditFilters({ ...auditFilters, action: e.target.value })}
+                    placeholder="e.g. sales_order.approve"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Entity Type</label>
+                  <input
+                    type="text"
+                    value={auditFilters.entityType}
+                    onChange={e => setAuditFilters({ ...auditFilters, entityType: e.target.value })}
+                    placeholder="e.g. SalesOrder"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">User ID</label>
+                  <input
+                    type="text"
+                    value={auditFilters.userId}
+                    onChange={e => setAuditFilters({ ...auditFilters, userId: e.target.value })}
+                    placeholder="exact user id"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={applyAuditFilters}
+                    className="px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+                  >
+                    Apply
+                  </button>
+                  <button
+                    onClick={clearAuditFilters}
+                    className="px-3 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+              {auditLoading ? (
+                <div className="p-8 text-center text-slate-500">Loading audit logs...</div>
+              ) : auditLogs.length === 0 ? (
+                <div className="p-8 text-center text-slate-500">No audit entries found</div>
+              ) : (
+                <>
+                  <div className="p-4 border-b border-slate-200 text-sm text-slate-600">
+                    Showing {auditLogs.length} of {auditTotal} entries
+                  </div>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-200">
+                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Timestamp</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">User</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Action</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Description</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Entity</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">IP</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLogs.map(log => {
+                        const isExpanded = expandedRow === log.id
+                        return (
+                          <>
+                            <tr
+                              key={log.id}
+                              className={`border-b border-slate-100 cursor-pointer hover:bg-slate-50 ${isExpanded ? 'bg-slate-50' : ''}`}
+                              onClick={() => setExpandedRow(isExpanded ? null : log.id)}
+                            >
+                              <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">
+                                {new Date(log.createdAt).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-slate-700">{log.username || '—'}</td>
+                              <td className="px-4 py-3 text-xs font-mono text-slate-700">{log.action}</td>
+                              <td className="px-4 py-3 text-sm text-slate-700 max-w-md truncate" title={log.description}>
+                                {log.description}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                                {log.entityType}{log.entityId ? ` · ${log.entityId.slice(0, 8)}` : ''}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-slate-400">{log.ipAddress || '—'}</td>
+                            </tr>
+                            {isExpanded && log.metadata && (
+                              <tr key={`${log.id}-meta`} className="bg-slate-50">
+                                <td colSpan={6} className="px-4 py-3">
+                                  <div className="text-xs text-slate-500 mb-1 font-medium">Metadata:</div>
+                                  <pre className="text-xs bg-white border border-slate-200 rounded p-3 overflow-auto max-h-48">
+                                    {JSON.stringify(log.metadata, null, 2)}
+                                  </pre>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  {/* Pagination */}
+                  <div className="p-4 border-t border-slate-200 flex items-center justify-between">
+                    <button
+                      onClick={() => loadAuditLogs(auditPage - 1)}
+                      disabled={auditPage === 0}
+                      className="px-3 py-1.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-40"
+                    >
+                      ← Prev
+                    </button>
+                    <span className="text-sm text-slate-600">
+                      Page {auditPage + 1} of {Math.max(1, Math.ceil(auditTotal / pageSize))}
+                    </span>
+                    <button
+                      onClick={() => loadAuditLogs(auditPage + 1)}
+                      disabled={(auditPage + 1) * pageSize >= auditTotal}
+                      className="px-3 py-1.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-40"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 

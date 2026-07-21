@@ -4,12 +4,21 @@ import { LoginInput, RefreshTokenInput } from './validation'
 import { AuthenticatedRequest, getUserEffectivePermissions } from '../../middleware/auth'
 import { sendError } from '../../middleware/errorHandler'
 import { Role } from '@flexoprint/types'
+import { auditService } from '../audit'
 
 export const authController = {
   async login(req: Request, res: Response, next: NextFunction) {
     try {
       const input = req.body as LoginInput
       const result = await authService.login(input)
+      auditService.record({
+        userId: result.user.id,
+        action: 'auth.login',
+        entityType: 'User',
+        entityId: result.user.id,
+        description: `User ${result.user.username} logged in`,
+        ipAddress: req.ip
+      })
       res.status(200).json({ data: result })
     } catch (error) {
       sendError(res, error, 'auth.login')
@@ -30,6 +39,14 @@ export const authController = {
     try {
       const input = req.body
       const user = await authService.register(input)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'auth.register',
+        entityType: 'User',
+        entityId: user.id,
+        description: `Created user ${user.username} with role ${user.role}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: user })
     } catch (error) {
       sendError(res, error, 'auth.register')
@@ -94,6 +111,14 @@ export const authController = {
   async updateUser(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const result = await authService.updateUser(req.params.id, req.body)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'auth.update_user',
+        entityType: 'User',
+        entityId: req.params.id,
+        description: `Updated user ${req.params.id}: ${JSON.stringify(req.body)}`,
+        ipAddress: req.ip
+      })
       res.json({ data: result })
     } catch (error) {
       sendError(res, error, 'auth.updateUser')
@@ -132,6 +157,14 @@ export const authController = {
   async setRolePermissions(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const result = await authService.setRolePermissions(req.params.role as Role, req.body)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'auth.set_role_permissions',
+        entityType: 'Role',
+        entityId: req.params.role,
+        description: `Updated permissions for role ${req.params.role} (${req.body.permissionIds?.length ?? 0} perms)`,
+        ipAddress: req.ip
+      })
       res.json({ data: result })
     } catch (error) {
       sendError(res, error, 'auth.setRolePermissions')
@@ -150,6 +183,14 @@ export const authController = {
   async setUserPermissionOverrides(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const result = await authService.setUserPermissionOverrides(req.params.id, req.body)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'auth.set_user_overrides',
+        entityType: 'User',
+        entityId: req.params.id,
+        description: `Updated permission overrides for user ${req.params.id} (${req.body.overrides?.length ?? 0} overrides)`,
+        ipAddress: req.ip
+      })
       res.json({ data: result })
     } catch (error) {
       sendError(res, error, 'auth.setUserPermissionOverrides')
@@ -159,6 +200,14 @@ export const authController = {
   async deleteUserPermissionOverride(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       await authService.deleteUserPermissionOverride(req.params.id, req.params.permId)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'auth.delete_user_override',
+        entityType: 'User',
+        entityId: req.params.id,
+        description: `Removed permission override ${req.params.permId} from user ${req.params.id}`,
+        ipAddress: req.ip
+      })
       res.status(204).send()
     } catch (error) {
       sendError(res, error, 'auth.deleteUserPermissionOverride')

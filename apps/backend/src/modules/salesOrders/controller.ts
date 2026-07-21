@@ -4,6 +4,7 @@ import { generateInvoicePdf, generateReceiptPdf } from './pdf-service'
 import { receiptRepository } from './repository'
 import { logger } from '../../logger'
 import { sendError } from '../../middleware/errorHandler'
+import { auditService } from '../audit'
 
 export const salesOrderController = {
   async getOrders(req: Request, res: Response) {
@@ -34,6 +35,14 @@ export const salesOrderController = {
   async createOrder(req: Request, res: Response) {
     try {
       const order = await salesOrderService.createOrder(req.body, (req as any).user?.id)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'sales_order.create',
+        entityType: 'SalesOrder',
+        entityId: order.id,
+        description: `Created ${order.orderNumber} for ${order.customer?.name || 'customer'} — ₦${Number(order.totalAmount).toLocaleString()}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: order })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.createOrder')
@@ -55,6 +64,14 @@ export const salesOrderController = {
       const { id } = req.params
       const { date } = req.body
       const order = await salesOrderService.approveOrder(id, (req as any).user?.id, date)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'sales_order.approve',
+        entityType: 'SalesOrder',
+        entityId: order.id,
+        description: `Approved ${order.orderNumber}`,
+        ipAddress: req.ip
+      })
       res.json({ data: order })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.approveOrder')
@@ -76,6 +93,14 @@ export const salesOrderController = {
       const { id } = req.params
       const { date } = req.body
       const order = await salesOrderService.cancelOrder(id, (req as any).user?.id, date)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'sales_order.cancel',
+        entityType: 'SalesOrder',
+        entityId: order.id,
+        description: `Cancelled ${order.orderNumber}`,
+        ipAddress: req.ip
+      })
       res.json({ data: order })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.cancelOrder')
@@ -97,6 +122,14 @@ export const salesOrderController = {
       const { id } = req.params
       const { rollIds, packingBags, packingBagPrice, date } = req.body
       const order = await salesOrderService.recordPickup(id, (req as any).user?.id, rollIds, packingBags, packingBagPrice, date)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'sales_order.pickup',
+        entityType: 'SalesOrder',
+        entityId: order.id,
+        description: `Recorded pickup for ${order.orderNumber} (${rollIds?.length || 0} rolls, ${packingBags || 0} bags)`,
+        ipAddress: req.ip
+      })
       res.json({ data: order })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.recordPickup')
@@ -125,6 +158,14 @@ export const salesOrderController = {
   async createCustomer(req: Request, res: Response) {
     try {
       const customer = await salesOrderService.createCustomer(req.body, (req as any).user?.id)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'customer.create',
+        entityType: 'Customer',
+        entityId: customer.id,
+        description: `Created customer ${customer.name}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: customer })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.createCustomer')
@@ -135,6 +176,14 @@ export const salesOrderController = {
     try {
       const { customerId } = req.params
       const customer = await salesOrderService.updateCustomer(customerId, req.body)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'customer.update',
+        entityType: 'Customer',
+        entityId: customerId,
+        description: `Updated customer ${customer.name}`,
+        ipAddress: req.ip
+      })
       res.json({ data: customer })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.updateCustomer')
@@ -189,6 +238,15 @@ export const salesOrderController = {
         return res.status(400).json({ error: 'Amount must be a non-zero number' })
       }
       const result = await salesOrderService.adjustDeposit(customerId, amount, userId)
+      auditService.record({
+        userId,
+        action: 'sales_order.adjust_deposit',
+        entityType: 'Customer',
+        entityId: customerId,
+        description: `Adjusted deposit by ₦${amount.toLocaleString()} for customer ${customerId}`,
+        metadata: { amount },
+        ipAddress: req.ip
+      })
       res.json({ data: result })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.adjustDeposit')
@@ -227,6 +285,15 @@ export const paymentController = {
   async recordPayment(req: Request, res: Response) {
     try {
       const payment = await paymentService.recordPayment(req.body, (req as any).user?.id)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'payment.record',
+        entityType: 'Payment',
+        entityId: (payment as any)?.payment?.id || (payment as any)?.id,
+        description: `Recorded payment of ₦${Number(req.body.amount || 0).toLocaleString()}${req.body.salesOrderId ? ` for order ${req.body.salesOrderId}` : ''}`,
+        metadata: { amount: req.body.amount, method: req.body.paymentMethod, salesOrderId: req.body.salesOrderId },
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: payment })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.recordPayment')
@@ -273,6 +340,14 @@ export const invoiceController = {
   async createInvoice(req: Request, res: Response) {
     try {
       const invoice = await invoiceService.createInvoice(req.body, (req as any).user?.id)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'invoice.create',
+        entityType: 'Invoice',
+        entityId: invoice.id,
+        description: `Created invoice ${invoice.invoiceNumber} for ₦${Number(invoice.totalAmount).toLocaleString()}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: invoice })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.createInvoice')
@@ -318,6 +393,15 @@ export const invoiceController = {
       const { id } = req.params
       const { amount, date, reference, notes, paymentMethod } = req.body
       const payment = await invoiceService.addPayment(id, amount, date, reference, notes, paymentMethod)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'invoice.payment',
+        entityType: 'Invoice',
+        entityId: id,
+        description: `Recorded payment of ₦${Number(amount || 0).toLocaleString()} against invoice ${id}`,
+        metadata: { amount, paymentMethod },
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: payment })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.addPayment')
@@ -341,6 +425,14 @@ export const coreBuybackController = {
   async recordCoreBuyback(req: Request, res: Response) {
     try {
       const buyback = await coreBuybackService.recordCoreBuyback(req.body, (req as any).user?.id)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'core_buyback.record',
+        entityType: 'CoreBuyback',
+        entityId: buyback.id,
+        description: `Recorded core buyback: ${req.body.quantity} cores for ₦${Number(req.body.totalAmount || 0).toLocaleString()}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: buyback })
     } catch (error: any) {
       sendError(res, error, 'salesOrders.recordCoreBuyback')
@@ -376,6 +468,16 @@ export const coreBuybackController = {
         userId,
         applyDeposit,
         date
+      })
+
+      auditService.record({
+        userId,
+        action: 'packing_bag.sell',
+        entityType: 'Customer',
+        entityId: customerId,
+        description: `Sold ${quantity} packing bags at ₦${Number(unitPrice || 0).toLocaleString()}/unit to customer ${customerId}`,
+        metadata: { quantity, unitPrice, paymentMethod },
+        ipAddress: req.ip
       })
 
       res.status(201).json({ data: result })

@@ -10,10 +10,10 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico'],
       manifest: {
-        name: 'FlexoPrint ERP',
-        short_name: 'FlexoPrint',
-        description: 'FlexoPrint Operations ERP System',
-        theme_color: '#1e40af',
+        name: 'phlexERP',
+        short_name: 'phlexERP',
+        description: 'Print shop operations ERP',
+        theme_color: '#020617',
         icons: [
           {
             src: 'pwa-192x192.png',

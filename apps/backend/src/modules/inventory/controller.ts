@@ -4,6 +4,7 @@ import { dateFromInput } from '../../utils/dates'
 import { MaterialInput, StockMovementInput } from './validation'
 import { AuthenticatedRequest } from '../../middleware/auth'
 import { AppError, sendError } from '../../middleware/errorHandler'
+import { auditService } from '../audit'
 
 export const inventoryController = {
   async getSubCategories(req: Request, res: Response, next: NextFunction) {
@@ -41,6 +42,14 @@ export const inventoryController = {
       const input = req.body as MaterialInput
       const userId = req.user?.id
       const material = await inventoryService.createMaterial(input, userId)
+      auditService.record({
+        userId,
+        action: 'material.create',
+        entityType: 'Material',
+        entityId: material.id,
+        description: `Created material ${material.code} ${material.name} (${material.category})`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: material })
     } catch (error) {
       sendError(res, error, 'inventory.createMaterial')
@@ -52,6 +61,15 @@ export const inventoryController = {
       const input = req.body as Partial<MaterialInput>
       const userId = req.user?.id
       const material = await inventoryService.updateMaterial(req.params.id, input, userId)
+      auditService.record({
+        userId,
+        action: 'material.update',
+        entityType: 'Material',
+        entityId: req.params.id,
+        description: `Updated material ${material.code} ${material.name}`,
+        metadata: { fields: Object.keys(input) },
+        ipAddress: req.ip
+      })
       res.json({ data: material })
     } catch (error) {
       sendError(res, error, 'inventory.updateMaterial')
@@ -61,6 +79,14 @@ export const inventoryController = {
   async archiveMaterial(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const material = await inventoryService.archiveMaterial(req.params.id)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'material.archive',
+        entityType: 'Material',
+        entityId: req.params.id,
+        description: `Archived material ${material.code} ${material.name}`,
+        ipAddress: req.ip
+      })
       res.json({ data: material })
     } catch (error) {
       sendError(res, error, 'inventory.archiveMaterial')
@@ -70,6 +96,14 @@ export const inventoryController = {
   async restoreMaterial(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const material = await inventoryService.restoreMaterial(req.params.id)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'material.restore',
+        entityType: 'Material',
+        entityId: req.params.id,
+        description: `Restored material ${material.code} ${material.name}`,
+        ipAddress: req.ip
+      })
       res.json({ data: material })
     } catch (error) {
       sendError(res, error, 'inventory.restoreMaterial')
@@ -89,6 +123,15 @@ export const inventoryController = {
     try {
       const { newQuantity, reason } = req.body
       const material = await inventoryService.adjustStock(req.params.id, newQuantity, reason)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'inventory.adjust_stock',
+        entityType: 'Material',
+        entityId: req.params.id,
+        description: `Adjusted stock of ${material.code} ${material.name} to ${newQuantity}${reason ? ` — ${reason}` : ''}`,
+        metadata: { newQuantity, reason },
+        ipAddress: req.ip
+      })
       res.json({ data: material })
     } catch (error) {
       sendError(res, error, 'inventory.adjustStock')
@@ -155,6 +198,15 @@ export const inventoryController = {
       }
 
       const result = await inventoryService.initializeStock(materials, date || dateFromInput(), userId)
+      auditService.record({
+        userId,
+        action: 'inventory.initialize_stock',
+        entityType: 'Material',
+        entityId: null,
+        description: `Initialized stock for ${materials.length} materials`,
+        metadata: { count: materials.length },
+        ipAddress: req.ip
+      })
       res.json({ data: result })
     } catch (error) {
       sendError(res, error, 'inventory.initializeStock')

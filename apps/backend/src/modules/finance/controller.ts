@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { financeService } from './service'
 import { logger } from '../../logger'
 import { sendError } from '../../middleware/errorHandler'
+import { auditService } from '../audit'
 
 export const financeController = {
   async getAccounts(req: Request, res: Response) {
@@ -35,6 +36,14 @@ export const financeController = {
   async createAccount(req: Request, res: Response) {
     try {
       const account = await financeService.createAccount(req.body)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'finance.create_account',
+        entityType: 'Account',
+        entityId: account.id,
+        description: `Created account ${account.code} ${account.name} (${account.type})`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: account })
     } catch (error: any) {
       sendError(res, error, 'finance.createAccount')
@@ -46,6 +55,15 @@ export const financeController = {
       const entry = await financeService.postJournalEntry({
         ...req.body,
         postedById: (req as any).user?.id
+      })
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'journal.post',
+        entityType: 'JournalEntry',
+        entityId: entry.id,
+        description: `Posted ${entry.entryNumber}: ${entry.description || '(no description)'}`,
+        metadata: { entryNumber: entry.entryNumber, sourceModule: entry.sourceModule },
+        ipAddress: req.ip
       })
       res.status(201).json({ data: entry })
     } catch (error: any) {
@@ -186,6 +204,14 @@ export const financeController = {
       const { id } = req.params
       const userId = (req as any).user?.id
       const entry = await financeService.reverseJournalEntry(id, userId)
+      auditService.record({
+        userId,
+        action: 'journal.reverse',
+        entityType: 'JournalEntry',
+        entityId: id,
+        description: `Reversed journal entry ${id}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: entry })
     } catch (error: any) {
       sendError(res, error, 'finance.reverseJournalEntry')

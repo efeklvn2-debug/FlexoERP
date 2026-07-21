@@ -74,6 +74,7 @@ async function main() {
     { name: 'supplier:create',           description: 'Add suppliers',                           module: 'suppliers' },
     { name: 'supplier:edit',             description: 'Edit supplier details',                   module: 'suppliers' },
     { name: 'report:read',               description: 'View reports',                            module: 'reports' },
+    { name: 'audit:read',                description: 'View audit log of user and business actions', module: 'audit' },
     { name: 'pricing:read',              description: 'View price lists',                        module: 'pricing' },
     { name: 'pricing:write',             description: 'Set and update price lists',              module: 'pricing' },
   ] as const
@@ -95,7 +96,7 @@ async function main() {
   const rolePerms: Record<Role, string[]> = {
     ADMIN: permDefs.map(p => p.name),
     MANAGER: permDefs.filter(p => p.name !== 'auth:manage_users').map(p => p.name),
-    OPERATOR: permDefs.filter(p => p.name !== 'auth:manage_users').map(p => p.name),
+    OPERATOR: permDefs.filter(p => p.name !== 'auth:manage_users' && p.name !== 'audit:read').map(p => p.name),
     VIEWER: [
       'auth:read',
       'sales_order:read',

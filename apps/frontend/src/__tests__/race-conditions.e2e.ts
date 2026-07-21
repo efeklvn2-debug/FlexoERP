@@ -211,8 +211,7 @@ async function testConcurrentDeleteJob() {
   await delay(30)
   const p2 = apiDelete(`/production/${delId}`)
 
-  const [r1, r2] = await Promise.all([p1, p2])
-  const e1 = r1?.error
+  const [, r2] = await Promise.all([p1, p2])
   const e2 = r2?.error
   assert(!!e2, `Second delete blocked (${e2?.code || 'expected error'})`)
   if (e2) assert(e2.code === 'NOT_FOUND' || e2.code === 'INVALID_OPERATION',

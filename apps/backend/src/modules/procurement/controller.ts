@@ -3,6 +3,7 @@ import { procurementService } from './service'
 import { PurchaseOrderInput, RollInput, ReceivePOInput, AddLineItemInput, UpdatePOInput } from './validation'
 import { AuthenticatedRequest } from '../../middleware/auth'
 import { sendError } from '../../middleware/errorHandler'
+import { auditService } from '../audit'
 
 export const procurementController = {
   // Purchase Orders
@@ -26,6 +27,14 @@ export const procurementController = {
     try {
       const input = req.body as PurchaseOrderInput
       const po = await procurementService.createPO(input, req.user?.id)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'purchase_order.create',
+        entityType: 'PurchaseOrder',
+        entityId: po.id,
+        description: `Created ${po.poNumber} — ₦${Number(po.totalAmount).toLocaleString()}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: po })
     } catch (error) { sendError(res, error, 'procurement.createPO') }
   },
@@ -57,6 +66,14 @@ export const procurementController = {
   async deletePO(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       await procurementService.deletePO(req.params.id)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'purchase_order.delete',
+        entityType: 'PurchaseOrder',
+        entityId: req.params.id,
+        description: `Deleted purchase order ${req.params.id}`,
+        ipAddress: req.ip
+      })
       res.status(204).send()
     } catch (error) { sendError(res, error, 'procurement.deletePO') }
   },
@@ -65,6 +82,14 @@ export const procurementController = {
     try {
       const { date } = req.body
       const result = await procurementService.receivePO(req.params.id, req.user?.id, date)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'purchase_order.receive',
+        entityType: 'PurchaseOrder',
+        entityId: req.params.id,
+        description: `Received purchase order ${req.params.id}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: result })
     } catch (error) { sendError(res, error, 'procurement.receivePO') }
   },
@@ -122,6 +147,14 @@ export const procurementController = {
     try {
       const { poId, date, amount, invoiceNumber } = req.body
       const invoice = await procurementService.createSupplierInvoice(poId, date, amount, invoiceNumber)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'supplier_invoice.create',
+        entityType: 'SupplierInvoice',
+        entityId: invoice.id,
+        description: `Created supplier invoice ${invoice.invoiceNumber || invoice.id} for ₦${Number(amount || 0).toLocaleString()}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: invoice })
     } catch (error) { sendError(res, error, 'procurement.createSupplierInvoice') }
   },
@@ -130,6 +163,15 @@ export const procurementController = {
     try {
       const { amount, date, paymentMethod, reference, notes } = req.body
       const payment = await procurementService.addPayment(req.params.id, amount, date, paymentMethod, reference, notes)
+      auditService.record({
+        userId: req.user?.id,
+        action: 'supplier_invoice.payment',
+        entityType: 'SupplierInvoice',
+        entityId: req.params.id,
+        description: `Paid ₦${Number(amount || 0).toLocaleString()} against supplier invoice ${req.params.id}`,
+        metadata: { amount, paymentMethod },
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: payment })
     } catch (error) { sendError(res, error, 'procurement.addPayment') }
   }

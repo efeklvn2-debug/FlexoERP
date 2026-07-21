@@ -14,6 +14,7 @@ import { pricingRouter } from './modules/pricing'
 import { financeRouter } from './modules/finance'
 import { salesOrderRouter } from './modules/salesOrders'
 import { reportsRouter } from './modules/reports'
+import { auditRouter } from './modules/audit'
 import { honeypotMiddleware } from './middleware/honeypot'
 import { idempotencyMiddleware } from './middleware/idempotency'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler'
@@ -70,6 +71,7 @@ export function createApp() {
   app.use('/api/finance', financeRouter)
   app.use('/api/sales-orders', salesOrderRouter)
   app.use('/api/reports', reportsRouter)
+  app.use('/api/audit', auditRouter)
 
   app.use(notFoundHandler)
   app.use(errorHandler)

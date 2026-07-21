@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { productionService, productionJobSchema } from './service'
 import { logger } from '../../logger'
 import { sendError } from '../../middleware/errorHandler'
+import { auditService } from '../audit'
 
 export const productionController = {
   async getJobs(req: Request, res: Response) {
@@ -80,6 +81,14 @@ export const productionController = {
       }
 
       const job = await productionService.createJob(parseResult.data)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'production.create',
+        entityType: 'ProductionJob',
+        entityId: job.id,
+        description: `Created production job for order ${parseResult.data.salesOrderId}`,
+        ipAddress: req.ip
+      })
       res.status(201).json({ data: job })
     } catch (error: any) {
       sendError(res, error, 'production.createJob')
@@ -122,6 +131,15 @@ export const productionController = {
       const { id } = req.params
       const { date, consumedRollIds } = req.body
       const job = await productionService.completeJob(id, date, consumedRollIds)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'production.complete',
+        entityType: 'ProductionJob',
+        entityId: id,
+        description: `Completed production job ${id}${consumedRollIds?.length ? ` (marked ${consumedRollIds.length} rolls consumed)` : ''}`,
+        metadata: { consumedRollIds },
+        ipAddress: req.ip
+      })
       res.json({ data: job })
     } catch (error: any) {
       sendError(res, error, 'production.completeJob')
@@ -134,6 +152,14 @@ export const productionController = {
       const { date } = req.body
       const userId = (req as any).user?.id
       const result = await productionService.markRollConsumed(id, userId, date)
+      auditService.record({
+        userId,
+        action: 'production.mark_consumed',
+        entityType: 'Roll',
+        entityId: id,
+        description: `Marked roll ${id} as consumed`,
+        ipAddress: req.ip
+      })
       res.json(result)
     } catch (error: any) {
       sendError(res, error, 'production.markRollConsumed')
@@ -156,6 +182,15 @@ export const productionController = {
       const { reason, date } = req.body
       if (!reason) return res.status(400).json({ error: 'Reason is required' })
       const result = await productionService.disposeRoll(id, reason, (req as any).user?.id, date)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'roll.dispose',
+        entityType: 'Roll',
+        entityId: id,
+        description: `Disposed roll ${id}: ${reason}`,
+        metadata: { reason },
+        ipAddress: req.ip
+      })
       res.json(result)
     } catch (error: any) {
       sendError(res, error, 'production.disposeRoll')
@@ -167,6 +202,14 @@ export const productionController = {
       const { id } = req.params
       const { date } = req.body
       const result = await productionService.returnRoll(id, (req as any).user?.id, date)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'roll.return',
+        entityType: 'Roll',
+        entityId: id,
+        description: `Returned roll ${id} to inventory`,
+        ipAddress: req.ip
+      })
       res.json(result)
     } catch (error: any) {
       sendError(res, error, 'production.returnRoll')
@@ -182,6 +225,15 @@ export const productionController = {
       }
       if (qty <= 0) return res.status(400).json({ error: 'qty must be positive' })
       const result = await productionService.customerReturnRoll(id, { qty, reason, condition, refundMethod, userId: (req as any).user?.id, date })
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'roll.customer_return',
+        entityType: 'Roll',
+        entityId: id,
+        description: `Customer return: roll ${id}, qty ${qty}, reason: ${reason}`,
+        metadata: { qty, reason, condition, refundMethod },
+        ipAddress: req.ip
+      })
       res.json(result)
     } catch (error: any) {
       sendError(res, error, 'production.customerReturnRoll')
@@ -193,6 +245,14 @@ export const productionController = {
       const { id } = req.params
       const { date } = req.body
       const result = await productionService.receiveReplacement(id, (req as any).user?.id, date)
+      auditService.record({
+        userId: (req as any).user?.id,
+        action: 'roll.receive_replacement',
+        entityType: 'Roll',
+        entityId: id,
+        description: `Received replacement for roll ${id}`,
+        ipAddress: req.ip
+      })
       res.json(result)
     } catch (error: any) {
       sendError(res, error, 'production.receiveReplacement')

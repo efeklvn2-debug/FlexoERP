@@ -93,6 +93,7 @@ export type Permission =
   | 'supplier:create'
   | 'supplier:edit'
   | 'report:read'
+  | 'audit:read'
   | 'pricing:read'
   | 'pricing:write'
 
