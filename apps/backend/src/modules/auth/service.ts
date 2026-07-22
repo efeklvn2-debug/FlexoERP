@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 import { authRepository } from './repository'
-import { LoginInput, RegisterInput, UpdateUserInput, SetRolePermissionsInput, SetUserPermissionOverridesInput } from './validation'
+import { LoginInput, RegisterInput, UpdateUserInput, SetRolePermissionsInput, SetUserPermissionOverridesInput, ChangePasswordInput } from './validation'
 import { LoginResult, UserResponse, AuthTokens } from './types'
 import { generateAccessToken, generateRefreshToken, verifyToken, extractJwtFromRefreshToken } from '../../middleware/auth'
 import { Role } from '@flexoprint/types'
@@ -22,6 +22,10 @@ export const authService = {
       throw new AppError(401, 'ACCOUNT_INACTIVE', 'Account is inactive')
     }
 
+    if (user.role !== 'SUPER_ADMIN' && (!user.tenant || !user.tenant.isActive)) {
+      throw new AppError(403, 'TENANT_INACTIVE', 'Your organization is inactive')
+    }
+
     const isValidPassword = await bcrypt.compare(input.password, user.passwordHash)
 
     if (!isValidPassword) {
@@ -30,16 +34,18 @@ export const authService = {
 
     await authRepository.deleteUserRefreshTokens(user.id)
 
-    const accessToken = generateAccessToken(user.id, user.role)
-    const refreshToken = generateRefreshToken(user.id, user.role)
+    const tenantId = user.tenantId ?? undefined
+    const accessToken = generateAccessToken(user.id, user.role, tenantId)
+    const refreshToken = generateRefreshToken(user.id, user.role, tenantId)
 
     await authRepository.createRefreshToken({
       token: refreshToken,
       userId: user.id,
+      tenantId,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     })
 
-    logger.info({ userId: user.id, username: user.username }, 'User logged in')
+    logger.info({ userId: user.id, username: user.username, tenantId }, 'User logged in')
 
     return {
       user: {
@@ -48,8 +54,11 @@ export const authService = {
         role: user.role,
         isActive: user.isActive,
         createdAt: user.createdAt,
-        updatedAt: user.updatedAt
-      },
+        updatedAt: user.updatedAt,
+        tenantId: user.tenantId,
+        tenantName: user.tenant?.name,
+        tenantSlug: user.tenant?.slug,
+      } as any,
       tokens: {
         accessToken,
         refreshToken
@@ -72,12 +81,14 @@ export const authService = {
 
     await authRepository.deleteRefreshToken(refreshToken)
 
-    const accessToken = generateAccessToken(payload.userId, payload.role)
-    const newRefreshToken = generateRefreshToken(payload.userId, payload.role)
+    const tenantId = (payload as any).tenantId
+    const accessToken = generateAccessToken(payload.userId, payload.role, tenantId)
+    const newRefreshToken = generateRefreshToken(payload.userId, payload.role, tenantId)
 
     await authRepository.createRefreshToken({
       token: newRefreshToken,
       userId: payload.userId,
+      tenantId,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     })
 
@@ -87,14 +98,15 @@ export const authService = {
     }
   },
 
-  async register(input: RegisterInput): Promise<UserResponse> {
+  async register(input: RegisterInput, tenantId: string): Promise<UserResponse> {
     const passwordHash = await bcrypt.hash(input.password, 12)
 
     try {
       const user = await authRepository.createUser({
         username: input.username,
         passwordHash,
-        role: (input.role ?? Role.OPERATOR) as Role
+        role: (input.role ?? Role.OPERATOR) as Role,
+        tenantId,
       })
 
       logger.info({ userId: user.id, username: user.username }, 'User registered')
@@ -225,5 +237,19 @@ export const authService = {
     const user = await authRepository.findUserById(userId)
     if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found')
     await authRepository.deleteUserPermissionOverride(userId, permissionId)
+  },
+
+  async changePassword(userId: string, input: ChangePasswordInput): Promise<void> {
+    const user = await authRepository.findUserById(userId)
+    if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found')
+
+    const isValid = await bcrypt.compare(input.currentPassword, user.passwordHash)
+    if (!isValid) throw new AppError(400, 'INVALID_PASSWORD', 'Current password is incorrect')
+
+    const passwordHash = await bcrypt.hash(input.newPassword, 12)
+    await authRepository.updateUser(userId, { passwordHash })
+
+    await authRepository.deleteUserRefreshTokens(userId)
+    logger.info({ userId }, 'Password changed')
   }
 }

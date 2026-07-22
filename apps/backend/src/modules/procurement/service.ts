@@ -9,6 +9,7 @@ import { financeService } from '../finance/service'
 import { decomposeInclusive } from '../../lib/vat-utils'
 import { dateFromInput } from '../../utils/dates'
 import { supplierService } from '../suppliers/service'
+import { getCurrentTenantId } from '../../context'
 
 const logger = createChildLogger('procurement:service')
 
@@ -94,7 +95,7 @@ export const procurementService = {
               totalWeight: item.totalWeight,
               unitPrice: item.unitPrice,
               rollWeights: item.rollWeights || []
-            }
+            } as any
           })
         }
         const updated = await tx.purchaseOrder.update({
@@ -135,7 +136,7 @@ export const procurementService = {
         totalWeight: input.totalWeight,
         unitPrice: input.unitPrice,
         rollWeights: input.rollWeights || []
-      }
+      } as any
     })
 
     const po = await procurementRepository.findPOById(poId)
@@ -173,7 +174,7 @@ export const procurementService = {
   async receivePO(poId: string, userId?: string, date?: string): Promise<{ po: PurchaseOrder; rolls: Roll[] }> {
     return prisma.$transaction(async (tx) => {
       // Lock the PO row to serialize concurrent receives
-      await tx.$queryRaw`SELECT "id" FROM "PurchaseOrder" WHERE "id" = ${poId} FOR UPDATE`
+      await tx.$queryRaw`SELECT "id" FROM "PurchaseOrder" WHERE "id" = ${poId} AND "tenantId" = ${getCurrentTenantId()} FOR UPDATE`
 
       const poData = await tx.purchaseOrder.findUnique({
         where: { id: poId },
@@ -418,7 +419,7 @@ export const procurementService = {
     const supplier = await supplierService.findOrCreateByName(po.supplier)
     logger.info({ poId, amount, supplierId: supplier.id }, 'Creating supplier invoice')
 
-    const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+    const settings = await prisma.settings.findFirst()
     const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
     const { exclusive: totalExclusive, vat: totalVat } = decomposeInclusive(amount, vatRate)
 
@@ -460,7 +461,7 @@ export const procurementService = {
               amount,
               status: 'PENDING',
               amountPaid: 0
-            },
+            } as any,
             include: {
               po: true,
               supplier: true,
@@ -573,7 +574,7 @@ export const procurementService = {
           reference,
           notes,
           paymentMethod
-        }
+        } as any
       })
 
       // Atomic increment — prevents lost payments from concurrent writes

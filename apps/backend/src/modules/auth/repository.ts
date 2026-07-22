@@ -9,7 +9,8 @@ const logger = createChildLogger('auth:repository')
 export const authRepository = {
   async findUserByUsername(username: string): Promise<UserEntity | null> {
     const user = await prisma.user.findUnique({
-      where: { username }
+      where: { username },
+      include: { tenant: { select: { id: true, name: true, slug: true, isActive: true } } }
     })
     return user as UserEntity | null
   },
@@ -32,12 +33,14 @@ export const authRepository = {
     username: string
     passwordHash: string
     role?: Role
+    tenantId: string
   }): Promise<UserEntity> {
     const user = await prisma.user.create({
       data: {
         username: data.username,
         passwordHash: data.passwordHash,
-        role: data.role || Role.OPERATOR
+        role: data.role || Role.OPERATOR,
+        tenantId: data.tenantId,
       }
     })
     logger.info({ userId: user.id }, 'User created')
@@ -62,11 +65,20 @@ export const authRepository = {
   async createRefreshToken(data: {
     token: string
     userId: string
+    tenantId?: string
     expiresAt: Date
   }): Promise<void> {
+    const createData: any = {
+      token: data.token,
+      userId: data.userId,
+      expiresAt: data.expiresAt,
+    }
+    if (data.tenantId) {
+      createData.tenantId = data.tenantId
+    }
     await prisma.refreshToken.upsert({
       where: { token: data.token },
-      create: data,
+      create: createData,
       update: { expiresAt: data.expiresAt }
     })
     logger.info({ userId: data.userId }, 'Refresh token created')

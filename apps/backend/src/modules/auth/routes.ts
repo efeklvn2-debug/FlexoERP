@@ -3,8 +3,9 @@ import { rateLimit } from 'express-rate-limit'
 import { authController } from './controller'
 import { validateRequest } from '../../middleware/validation'
 import { authLimiter, registerLimiter } from '../../middleware/rateLimiters'
-import { loginSchema, refreshTokenSchema, registerSchema, updateUserSchema, setRolePermissionsSchema, setUserPermissionOverridesSchema } from './validation'
+import { loginSchema, refreshTokenSchema, registerSchema, updateUserSchema, setRolePermissionsSchema, setUserPermissionOverridesSchema, changePasswordSchema } from './validation'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 
 export const authRouter = Router()
 
@@ -37,6 +38,7 @@ authRouter.post(
   validateRequest(registerSchema),
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   authController.register
 )
@@ -45,6 +47,7 @@ authRouter.post(
   '/logout',
   authenticate,
   loadUser,
+  tenantMiddleware,
   authController.logout
 )
 
@@ -52,6 +55,7 @@ authRouter.get(
   '/me',
   authenticate,
   loadUser,
+  tenantMiddleware,
   authController.me
 )
 
@@ -59,7 +63,17 @@ authRouter.get(
   '/permissions',
   authenticate,
   loadUser,
+  tenantMiddleware,
   authController.myPermissions
+)
+
+authRouter.patch(
+  '/password',
+  authenticate,
+  loadUser,
+  tenantMiddleware,
+  validateRequest(changePasswordSchema),
+  authController.changePassword
 )
 
 // ── Admin: User & Permission Management ─────────────────────────
@@ -68,6 +82,7 @@ authRouter.get(
   '/users',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   authController.listUsers
 )
@@ -76,6 +91,7 @@ authRouter.get(
   '/users/:id',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   authController.getUserDetail
 )
@@ -84,6 +100,7 @@ authRouter.patch(
   '/users/:id',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   validateRequest(updateUserSchema),
   authController.updateUser
@@ -93,6 +110,7 @@ authRouter.get(
   '/permissions/all',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   authController.listAllPermissions
 )
@@ -101,6 +119,7 @@ authRouter.get(
   '/roles',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   authController.listRoles
 )
@@ -109,6 +128,7 @@ authRouter.get(
   '/roles/:role/permissions',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   authController.getRolePermissions
 )
@@ -117,6 +137,7 @@ authRouter.put(
   '/roles/:role/permissions',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   validateRequest(setRolePermissionsSchema),
   authController.setRolePermissions
@@ -126,6 +147,7 @@ authRouter.get(
   '/users/:id/permissions',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   authController.getUserPermissionOverrides
 )
@@ -134,6 +156,7 @@ authRouter.put(
   '/users/:id/permissions',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   validateRequest(setUserPermissionOverridesSchema),
   authController.setUserPermissionOverrides
@@ -143,6 +166,7 @@ authRouter.delete(
   '/users/:id/permissions/:permId',
   authenticate,
   loadUser,
+  tenantMiddleware,
   requirePermission('auth:manage_users'),
   authController.deleteUserPermissionOverride
 )

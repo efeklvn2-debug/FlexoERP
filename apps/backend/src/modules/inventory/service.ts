@@ -1,4 +1,3 @@
-import { Prisma } from '@prisma/client'
 import { inventoryRepository } from './repository'
 import { MaterialInput, MaterialUpdateInput, StockMovementInput } from './validation'
 import { Material, MaterialWithStock, StockMovement } from './types'
@@ -6,6 +5,7 @@ import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { prisma } from '../../database'
 import { financeService } from '../finance/service'
+import { getCurrentTenantId } from '../../context'
 
 const logger = createChildLogger('inventory:service')
 
@@ -109,7 +109,7 @@ export const inventoryService = {
     await prisma.$executeRaw`
       UPDATE "Material"
       SET "notes" = ${newNotes}, "updatedAt" = NOW()
-      WHERE "id" = ${id}
+      WHERE "id" = ${id} AND "tenantId" = ${getCurrentTenantId()}
     `
 
     const updated = await inventoryRepository.findMaterialById(id)
@@ -182,7 +182,7 @@ export const inventoryService = {
     return inventoryRepository.getMaterialRolls(materialId)
   },
 
-  async addStock(materialId: string, quantity: number, notes?: string, reference?: string, userId?: string, tx?: Prisma.TransactionClient): Promise<StockMovement> {
+  async addStock(materialId: string, quantity: number, notes?: string, reference?: string, userId?: string, tx?: any): Promise<StockMovement> {
     const db = tx || prisma
     const material = await inventoryRepository.findMaterialById(materialId)
     if (!material) {
@@ -204,7 +204,7 @@ export const inventoryService = {
     }, tx)
   },
 
-  async recordCoreChange(quantity: number, type: 'PRODUCTION_OUT' | 'CORE_RECOVERY' | 'CORE_BUYBACK', reference?: string, userId?: string, tx?: Prisma.TransactionClient): Promise<StockMovement | null> {
+  async recordCoreChange(quantity: number, type: 'PRODUCTION_OUT' | 'CORE_RECOVERY' | 'CORE_BUYBACK', reference?: string, userId?: string, tx?: any): Promise<StockMovement | null> {
     const db = tx || prisma
 
     let coreMaterial = await db.material.findFirst({
@@ -225,7 +225,7 @@ export const inventoryService = {
           unitOfMeasure: 'pcs',
           minStock: 0,
           isActive: true
-        }
+        } as any
       })
     }
 
@@ -259,8 +259,8 @@ export const inventoryService = {
     }, tx)
   },
 
-  async recordPackingBagChange(materialId: string, quantity: number, type: 'PURCHASE' | 'SALE', reference?: string, userId?: string, tx?: Prisma.TransactionClient): Promise<StockMovement | null> {
-    const execute = async (client: Prisma.TransactionClient) => {
+  async recordPackingBagChange(materialId: string, quantity: number, type: 'PURCHASE' | 'SALE', reference?: string, userId?: string, tx?: any): Promise<StockMovement | null> {
+    const execute = async (client: any) => {
       const material = await inventoryRepository.findMaterialById(materialId)
       if (!material) {
         throw new AppError(404, 'NOT_FOUND', 'Packing bag material not found')

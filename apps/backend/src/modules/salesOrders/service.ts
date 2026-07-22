@@ -2,6 +2,7 @@
 import { Prisma } from '@prisma/client'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
+import { getCurrentTenantId } from '../../context'
 import { salesOrderRepository, paymentRepository, invoiceRepository, coreBuybackRepository, receiptRepository } from './repository'
 import { decomposeInclusive } from '../../lib/vat-utils'
 import { inventoryService } from '../inventory/service'
@@ -293,7 +294,7 @@ export const salesOrderService = {
 
     const result = await prisma.$transaction(async (tx) => {
       // Lock the order row to serialize concurrent pickups
-      await tx.$queryRaw`SELECT "id" FROM "SalesOrder" WHERE "id" = ${id} FOR UPDATE`
+      await tx.$queryRaw`SELECT "id" FROM "SalesOrder" WHERE "id" = ${id} AND "tenantId" = ${getCurrentTenantId()} FOR UPDATE`
 
       // Re-read order inside transaction to get latest state
       const lockedOrder = await tx.salesOrder.findUnique({ where: { id } })
@@ -390,7 +391,7 @@ export const salesOrderService = {
               const costPerKg = parentMaterial?.costPrice ? Number(parentMaterial.costPrice) : 0
               totalJobCostCalc += totalPrintedWeight * costPerKg
             }
-            const fbSettings = await tx.settings.findUnique({ where: { id: 'default' } })
+            const fbSettings = await tx.settings.findFirst()
             if (fbSettings) {
               const inkRate = Number(fbSettings.inkConsumptionRate) || 0.2
               const ipaRate = Number(fbSettings.ipaConsumptionRate) || 0.1
@@ -501,7 +502,7 @@ export const salesOrderService = {
       // =====================================================
       // RECOGNIZE REVENUE (Dr AR, Cr Revenue + VAT)
       // =====================================================
-      const settings = await tx.settings.findUnique({ where: { id: 'default' } })
+      const settings = await tx.settings.findFirst()
       const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
 
       const deliveryValue = quantity * Number(lockedOrder.unitPrice)
@@ -567,9 +568,7 @@ export const salesOrderService = {
       throw new AppError(400, 'INVALID', 'Order must be ready, picked up, or completed to generate invoice')
     }
 
-    const settings = await prisma.settings.findUnique({
-      where: { id: 'default' }
-    })
+    const settings = await prisma.settings.findFirst()
     const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
 
     const quantityDelivered = input.quantityDelivered || Number(order.quantityDelivered) || Number(order.quantityOrdered)
@@ -655,7 +654,7 @@ export const salesOrderService = {
             status: invoiceStatus as any,
             issuedAt: dateFromInput(input.date),
             ...(invoiceStatus === 'PAID' ? { paidAt: dateFromInput(input.date) } : {})
-          },
+          } as any,
           include: { customer: true, salesOrder: true }
         })
 
@@ -769,7 +768,7 @@ export const salesOrderService = {
             code: 'WALK-IN',
             isActive: true,
             paymentType: 'CASH'
-          }
+          } as any
         })
       }
       effectiveCustomerId = walkInCustomer.id
@@ -787,7 +786,7 @@ export const salesOrderService = {
       quantityInUnits: input.quantity
     }
 
-    const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+    const settings = await prisma.settings.findFirst()
     const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
     const subtotal = input.quantity * input.unitPrice
     const { exclusive: bagsExclusive, vat: vatAmount } = decomposeInclusive(subtotal, vatRate)
@@ -844,7 +843,7 @@ export const salesOrderService = {
             completedAt: dateFromInput(input.date),
             totalPaid: new Prisma.Decimal(String(totalAmountWithVat)),
             balancePaid: new Prisma.Decimal(String(totalAmountWithVat))
-          }
+          } as any
         })
 
         const invoice = await tx.invoice.create({
@@ -867,7 +866,7 @@ export const salesOrderService = {
             amountPaid: new Prisma.Decimal(String(totalAmountWithVat)),
             status: 'PAID' as any,
             paidAt: dateFromInput(input.date)
-          }
+          } as any
         })
 
         if (customerId && cashPaymentAmount > 0) {
@@ -881,7 +880,7 @@ export const salesOrderService = {
               notes: input.notes || `Packing bag sale: ${input.quantity} bags (Invoice ${invoiceNumber})`,
               receivedById: input.userId,
               salesOrderId: order.id
-            }
+            } as any
           })
         }
 
@@ -896,7 +895,7 @@ export const salesOrderService = {
               notes: `Deposit applied to packing bag sale: ${input.quantity} bags (Invoice ${invoiceNumber})`,
               receivedById: input.userId,
               salesOrderId: order.id
-            }
+            } as any
           })
         }
 
@@ -1074,7 +1073,7 @@ export const salesOrderService = {
           referenceNumber: refNumber,
           notes: `Deposit adjustment by user ${userId || 'system'}`,
           receivedById: userId
-        }
+        } as any
       })
 
       await financeService.postJournalEntry({
@@ -1202,7 +1201,7 @@ export const paymentService = {
             notes: input.notes,
             receivedById: userId,
             receivedAt: dateFromInput(input.date)
-          }
+          } as any
         })
       }
 
@@ -1220,7 +1219,7 @@ export const paymentService = {
             referenceNumber: depRef,
             notes: `Overpayment from payment ${input.referenceNumber || ''}`,
             receivedAt: dateFromInput(input.date)
-          }
+          } as any
         })
       }
 
@@ -1415,7 +1414,7 @@ export const invoiceService = {
             reference,
             notes,
             paymentMethod
-          }
+          } as any
         })
 
         await tx.invoice.update({
@@ -1482,7 +1481,7 @@ export const coreBuybackService = {
     paidAmount?: number
   }, userId?: string) {
     if (!input.ratePerCore) {
-      const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+      const settings = await prisma.settings.findFirst()
       input.ratePerCore = Number(settings?.coreDepositValue || 150)
     }
     const totalValue = input.coresQuantity * input.ratePerCore
@@ -1517,7 +1516,7 @@ export const coreBuybackService = {
             notes: `Core buyback: ${input.coresQuantity} cores (₦${totalValue.toLocaleString()})`,
             receivedById: userId,
             salesOrderId: null
-          }
+          } as any
         })
 
         await financeService.postJournalEntry({
@@ -1569,7 +1568,7 @@ export const coreBuybackService = {
           receivedById: userId,
           sellerName: input.sellerName,
           coresQuantity: input.coresQuantity
-        }
+        } as any
       })
 
       await financeService.postJournalEntry({

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { auditController } from './controller'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 import { reportLimiter } from '../../middleware/rateLimiters'
 
 export const auditRouter = Router()
@@ -8,6 +9,7 @@ export const auditRouter = Router()
 auditRouter.use(reportLimiter)
 auditRouter.use(authenticate)
 auditRouter.use(loadUser)
+auditRouter.use(tenantMiddleware)
 auditRouter.use(requirePermission('audit:read'))
 
 auditRouter.get('/', auditController.list)

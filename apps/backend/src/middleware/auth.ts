@@ -14,6 +14,7 @@ export interface AuthUser {
   id: string
   username: string
   role: Role
+  tenantId?: string
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -30,8 +31,8 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
   const token = authHeader.substring(7)
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { userId: string; role: string }
-    req.user = { id: payload.userId, username: '', role: payload.role as Role }
+    const payload = jwt.verify(token, JWT_SECRET) as { userId: string; role: string; tenantId?: string }
+    req.user = { id: payload.userId, username: '', role: payload.role as Role, tenantId: payload.tenantId }
     next()
   } catch {
     throw new AppError(401, 'UNAUTHORIZED', 'Invalid or expired token')
@@ -51,7 +52,8 @@ export async function loadUser(req: AuthenticatedRequest, res: Response, next: N
         id: true,
         username: true,
         role: true,
-        isActive: true
+        isActive: true,
+        tenantId: true,
       }
     })
 
@@ -62,7 +64,8 @@ export async function loadUser(req: AuthenticatedRequest, res: Response, next: N
     req.user = {
       id: user.id,
       username: user.username,
-      role: user.role as Role
+      role: user.role as Role,
+      tenantId: user.tenantId ?? undefined,
     }
     next()
   } catch (err) {
@@ -96,13 +99,13 @@ export async function getUserEffectivePermissions(userId: string, role: Role): P
   })
 
   return dbPerms
-    .filter(p => {
+    .filter((p: any) => {
       const roleMatch = p.rolePermissions.length > 0
-      const userOverride = p.userPermissions.find(u => u.userId === userId)
+      const userOverride = p.userPermissions.find((u: any) => u.userId === userId)
       if (userOverride) return userOverride.granted
       return roleMatch
     })
-    .map(p => p.name)
+    .map((p: any) => p.name)
 }
 
 export function requirePermission(permissionName: Permission) {
@@ -123,12 +126,16 @@ export function requirePermission(permissionName: Permission) {
   }
 }
 
-export function generateAccessToken(userId: string, role: string): string {
-  return jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: '15m' })
+export function generateAccessToken(userId: string, role: string, tenantId?: string): string {
+  const payload: any = { userId, role }
+  if (tenantId) payload.tenantId = tenantId
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' })
 }
 
-export function generateRefreshToken(userId: string, role: string): string {
-  const token = jwt.sign({ userId, role, type: 'refresh' }, JWT_SECRET, { expiresIn: '7d' })
+export function generateRefreshToken(userId: string, role: string, tenantId?: string): string {
+  const payload: any = { userId, role, type: 'refresh' }
+  if (tenantId) payload.tenantId = tenantId
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' })
   return token + ':' + crypto.randomUUID()
 }
 

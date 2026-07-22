@@ -4,10 +4,11 @@ import { validateRequest } from '../../middleware/validation'
 import { materialSchema, materialUpdateSchema, stockMovementSchema } from './validation'
 import { heavyLimiter, mutationLimiter } from '../../middleware/rateLimiters'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 
 export const inventoryRouter = Router()
 
-inventoryRouter.use(authenticate, loadUser)
+inventoryRouter.use(authenticate, loadUser, tenantMiddleware)
 
 inventoryRouter.get('/materials', requirePermission('inventory:read'), inventoryController.getAllMaterials)
 inventoryRouter.get('/materials/sub-categories', requirePermission('inventory:read'), inventoryController.getSubCategories)

@@ -16,6 +16,52 @@ enum Role {
   MANAGER
   OPERATOR
   VIEWER
+  SUPER_ADMIN
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users              User[]
+  refreshTokens      RefreshToken[]
+  auditLogs          AuditLog[]
+  idempotencyKeys    IdempotencyKey[]
+  orders             Order[]
+  orderItems         OrderItem[]
+  materials          Material[]
+  stocks             Stock[]
+  stockMovements     StockMovement[]
+  rolls              Roll[]
+  purchaseOrders     PurchaseOrder[]
+  poLineItems        POLineItem[]
+  productionJobs     ProductionJob[]
+  printedRolls       PrintedRoll[]
+  inkColors          InkColor[]
+  settings           Settings[]
+  overheadRateHistory OverheadRateHistory[]
+  materialIssues     MaterialIssue[]
+  suppliers          Supplier[]
+  supplierInvoices   SupplierInvoice[]
+  paymentMades       PaymentMade[]
+  accounts           Account[]
+  journalEntries     JournalEntry[]
+  journalLines       JournalLine[]
+  priceLists         PriceList[]
+  transactions       Transaction[]
+  customers          Customer[]
+  salesOrders        SalesOrder[]
+  paymentTransactions PaymentTransaction[]
+  receipts           Receipt[]
+  invoices           Invoice[]
+  paymentReceiveds   PaymentReceived[]
+  coreBuybacks       CoreBuyback[]
+
+  @@index([slug])
 }
 
 model User {
@@ -24,13 +70,18 @@ model User {
   passwordHash String
   role         Role           @default(OPERATOR)
   isActive     Boolean        @default(true)
-  archivedAt      DateTime?
-  createdAt       DateTime      @default(now())
+  archivedAt   DateTime?
+  createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
+  tenantId     String?
+  tenant       Tenant?        @relation(fields: [tenantId], references: [id])
   refreshTokens  RefreshToken[]
   receipts       Receipt[]
   userPermissions UserPermission[]
   auditLogs      AuditLog[]
+
+  @@unique([tenantId, username])
+  @@index([tenantId])
 }
 
 model RefreshToken {
@@ -40,6 +91,10 @@ model RefreshToken {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
 }
 
 model Permission {
@@ -80,8 +135,11 @@ model IdempotencyKey {
   id        String   @id
   response  Json
   createdAt DateTime @default(now())
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
 
   @@index([createdAt])
+  @@index([tenantId])
 }
 
 model BlockedIp {
@@ -101,11 +159,14 @@ model AuditLog {
   metadata    Json?
   ipAddress   String?
   createdAt   DateTime @default(now())
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
 
   @@index([userId, createdAt])
   @@index([entityType, entityId, createdAt])
   @@index([action, createdAt])
   @@index([createdAt])
+  @@index([tenantId])
 }
 
 enum OrderStatus {
@@ -120,7 +181,7 @@ enum OrderStatus {
 
 model Order {
   id           String      @id @default(cuid())
-  orderNumber  String      @unique
+  orderNumber  String      // SO-2026-0001 (per-tenant unique)
   customerId   String
   customer     Customer    @relation(fields: [customerId], references: [id])
   status       OrderStatus @default(PENDING)
@@ -131,10 +192,13 @@ model Order {
   updatedAt    DateTime    @updatedAt
   createdById  String?
   items        OrderItem[]
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
 
+  @@unique([tenantId, orderNumber])
   @@index([customerId])
   @@index([status])
-  @@index([orderNumber])
+  @@index([tenantId])
 }
 
 model OrderItem {
@@ -145,8 +209,11 @@ model OrderItem {
   quantity    Int
   unitPrice   Decimal @db.Decimal(12, 2)
   totalPrice  Decimal @db.Decimal(12, 2)
+  tenantId    String
+  tenant      Tenant  @relation(fields: [tenantId], references: [id])
 
   @@index([orderId])
+  @@index([tenantId])
 }
 
 enum MaterialCategory {
@@ -165,7 +232,7 @@ enum MovementType {
 
 model Material {
   id            String           @id @default(cuid())
-  code          String           @unique
+  code          String           // e.g., "PR25"
   name          String
   category      MaterialCategory
   subCategory   String?          // e.g., "25microns", "IPA", "Packing Bag"
@@ -180,13 +247,19 @@ model Material {
   isActive      Boolean          @default(true)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
+  tenantId      String
+  tenant        Tenant           @relation(fields: [tenantId], references: [id])
   stocks        Stock[]
   movements     StockMovement[]
   rolls         Roll[]
   poLineItems   POLineItem[]
   priceLists    PriceList[]
   materialIssues MaterialIssue[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
 }
+
 
 model Stock {
   id          String   @id @default(cuid())
@@ -196,10 +269,13 @@ model Stock {
     location    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
   movements   StockMovement[]
 
   @@unique([materialId, location])
   @@index([materialId])
+  @@index([tenantId])
 }
 
 model StockMovement {
@@ -214,9 +290,12 @@ model StockMovement {
   notes       String?
   createdAt   DateTime     @default(now())
   createdById String?
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
 
   @@index([materialId])
   @@index([createdAt])
+  @@index([tenantId])
 }
 
 enum RollStatus {
@@ -236,7 +315,7 @@ enum POStatus {
 
 model PurchaseOrder {
   id            String     @id @default(cuid())
-  poNumber      String     @unique
+  poNumber      String
   supplier      String
   supplierId    String?
   supplierRef   Supplier?  @relation(fields: [supplierId], references: [id])
@@ -249,12 +328,16 @@ model PurchaseOrder {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   createdById  String?
+  tenantId     String
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
   items        POLineItem[]
   rolls        Roll[]
   supplierInvoices SupplierInvoice[]
 
+  @@unique([tenantId, poNumber])
   @@index([poNumber])
   @@index([status])
+  @@index([tenantId])
 }
 
 model POLineItem {
@@ -269,13 +352,16 @@ model POLineItem {
   receivedQty     Int           @default(0)
   rollWeights     Decimal[]     @db.Decimal(10, 2) // individual roll weights (for tracking)
   createdAt       DateTime      @default(now())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
 
   @@index([purchaseOrderId])
+  @@index([tenantId])
 }
 
 model Roll {
   id             String     @id @default(cuid())
-  rollNumber     String     @unique
+  rollNumber     String
   materialId     String
   material       Material   @relation(fields: [materialId], references: [id])
   purchaseOrderId String?
@@ -297,17 +383,21 @@ model Roll {
   disposalReason String?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
+  tenantId      String
+  tenant        Tenant     @relation(fields: [tenantId], references: [id])
   productionJobs  PrintedRoll[]
 
+  @@unique([tenantId, rollNumber])
   @@index([materialId])
   @@index([status])
   @@index([rollNumber])
   @@index([parentRollId])
+  @@index([tenantId])
 }
 
 model ProductionJob {
    id                  String   @id @default(cuid())
-   jobNumber           String   @unique
+   jobNumber           String
    customerName        String?
    customerId          String?
    customer            Customer? @relation("CustomerProductionJobs", fields: [customerId], references: [id])
@@ -330,15 +420,19 @@ model ProductionJob {
    
    createdAt           DateTime @default(now())
    updatedAt           DateTime @updatedAt
+   tenantId            String
+   tenant              Tenant   @relation(fields: [tenantId], references: [id])
    printedRolls        PrintedRoll[]
    salesOrderId        String?  @unique // Reference to sales order for bidirectional navigation
    salesOrder          SalesOrder? @relation(fields: [salesOrderId], references: [id])
    materialIssues      MaterialIssue[]
- 
+  
+   @@unique([tenantId, jobNumber])
    @@index([jobNumber])
    @@index([status])
    @@index([salesOrderId])
    @@index([customerId])
+   @@index([tenantId])
 }
 
 model PrintedRoll {
@@ -360,11 +454,14 @@ model PrintedRoll {
   refundMethod    String?       // NONE, CREDIT_NOTE, CASH_REFUND (informational only)
   returnCondition String?       // SCRAP, RETURN_TO_SUPPLIER
   createdAt       DateTime      @default(now())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
 
   @@unique([productionJobId, rollId])
   @@index([rollId])
   @@index([status])
   @@index([customerId])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -373,17 +470,22 @@ model PrintedRoll {
 
 model InkColor {
   id        String   @id @default(cuid())
-  name      String   @unique       // Customer-facing name, e.g. "RoyalBlue"
-  mapping    String   @unique       // Material subCategory, e.g. "RoyalBlue-Ink"
+  name      String       // Customer-facing name, e.g. "RoyalBlue"
+  mapping    String       // Material subCategory, e.g. "RoyalBlue-Ink"
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
 
+  @@unique([tenantId, name])
+  @@unique([tenantId, mapping])
   @@index([isActive])
+  @@index([tenantId])
 }
 
 model Settings {
-  id                    String   @id @default("default")
+  id                    String   @id @default(cuid())
   coreWeight            Decimal  @default(0.7) @db.Decimal(5, 2)   // kg per plastic core
   rollWeight            Decimal  @default(15) @db.Decimal(5, 2)    // kg per roll
   inkConsumptionRate    Decimal  @default(0.7) @db.Decimal(5, 2)  // kg ink per kg printed
@@ -405,6 +507,11 @@ model Settings {
   receiptLogoUrl       String?  // Logo URL/data-URI for receipt print/PDF
   receiptFooter        String?  // Custom footer text on receipt print/PDF
   updatedAt            DateTime @updatedAt
+  tenantId             String
+  tenant               Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -417,8 +524,11 @@ model OverheadRateHistory {
   ratePerKg   Decimal  @db.Decimal(10, 2)
   createdAt   DateTime @default(now())
   createdBy   String?
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
   
-  @@unique([month])
+  @@unique([tenantId, month])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -435,8 +545,11 @@ model MaterialIssue {
   unitCost    Decimal  @db.Decimal(12, 2)
   totalCost   Decimal  @db.Decimal(12, 2)
   issuedAt    DateTime @default(now())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
   
   @@index([jobId])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -445,8 +558,8 @@ model MaterialIssue {
 
 model Supplier {
   id        String    @id @default(cuid())
-  name      String    @unique
-  code      String    @unique
+  name      String
+  code      String
   email     String?
   phone     String?
   address   String?
@@ -454,12 +567,17 @@ model Supplier {
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
 
   purchaseOrders PurchaseOrder[]
   invoices       SupplierInvoice[]
 
+  @@unique([tenantId, name])
+  @@unique([tenantId, code])
   @@index([name])
   @@index([code])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -487,11 +605,14 @@ model SupplierInvoice {
   notes           String?
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+  tenantId        String
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
   
   payments        PaymentMade[]
   
-  @@unique([invoiceNumber])
+  @@unique([tenantId, invoiceNumber])
   @@index([supplierId])
+  @@index([tenantId])
 }
 
 model PaymentMade {
@@ -504,8 +625,11 @@ model PaymentMade {
   reference           String?         // Cheque number, transfer ref, etc.
   notes               String?
   createdAt           DateTime        @default(now())
+  tenantId            String
+  tenant              Tenant          @relation(fields: [tenantId], references: [id])
   
   @@index([supplierInvoiceId])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -523,8 +647,8 @@ enum AccountType {
 
 model Account {
   id            String      @id @default(cuid())
-  code          String      @unique  // e.g., "1000", "1100", "4000"
-  name          String      @unique  // e.g., "Cash", "Accounts Receivable"
+  code          String      // e.g., "1000", "1100", "4000"
+  name          String      // e.g., "Cash", "Accounts Receivable"
   type          AccountType
   parentId      String?
   parent        Account?    @relation("AccountHierarchy", fields: [parentId], references: [id])
@@ -536,10 +660,15 @@ model Account {
   updatedAt     DateTime    @updatedAt
   journalLines  JournalLine[]
   openingBalance Decimal    @default(0) @db.Decimal(15, 2)  // Opening balance for new accounts
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
 
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
   @@index([code])
   @@index([type])
   @@index([parentId])
+  @@index([tenantId])
 }
 
 enum SourceModule {
@@ -555,7 +684,7 @@ enum SourceModule {
 
 model JournalEntry {
   id            String      @id @default(cuid())
-  entryNumber   String      @unique  // Auto-generated: JE-2026-0001
+  entryNumber   String      // Auto-generated: JE-2026-0001
   date          DateTime    @default(now())
   description   String
   sourceModule  SourceModule
@@ -565,11 +694,15 @@ model JournalEntry {
   postedAt      DateTime    @default(now())
   isPosted      Boolean     @default(true)  // Always true for auto-posted entries
   lines        JournalLine[]
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
 
+  @@unique([tenantId, entryNumber])
   @@index([entryNumber])
   @@index([date])
   @@index([sourceModule, sourceId])
   @@index([postedById])
+  @@index([tenantId])
 }
 
 model JournalLine {
@@ -581,9 +714,12 @@ model JournalLine {
   debit           Decimal     @default(0) @db.Decimal(15, 2)
   credit          Decimal     @default(0) @db.Decimal(15, 2)
   memo            String?
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
 
   @@index([journalEntryId])
   @@index([accountId])
+  @@index([tenantId])
 }
 
 model PriceList {
@@ -595,9 +731,12 @@ model PriceList {
   effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?
   createdAt     DateTime  @default(now())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
 
   @@unique([materialId, effectiveFrom])
   @@index([materialId])
+  @@index([tenantId])
 }
 
 model Transaction {
@@ -612,10 +751,13 @@ model Transaction {
   packingBags Decimal?  @default(0) @db.Decimal(15, 2) // For PICKUP
   amountPaid  Decimal? @db.Decimal(10, 2) // For PICKUP - amount paid at pickup
   createdAt   DateTime @default(now())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
 
   @@index([customerId])
   @@index([date])
   @@index([type])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -678,7 +820,7 @@ enum MTAPaymentType {
 model Customer {
   id        String    @id @default(cuid())
   name      String
-  code      String    @unique
+  code      String
   email     String?
   phone     String?
   address   String?
@@ -687,6 +829,8 @@ model Customer {
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
   
   // Payment Profile
   paymentType           MTAPaymentType @default(CREDIT)
@@ -707,11 +851,14 @@ model Customer {
   invoices             Invoice[]
    coreBuybacks          CoreBuyback[]
    productionJobOrders   ProductionJob[] @relation("CustomerProductionJobs")
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
 }
 
 model SalesOrder {
   id                    String           @id @default(cuid())
-  orderNumber           String           @unique  // SO-2026-0001
+  orderNumber           String           // SO-2026-0001
   customerId            String
   customer              Customer         @relation(fields: [customerId], references: [id])
   
@@ -755,14 +902,20 @@ model SalesOrder {
   // Soft delete
   isDeleted             Boolean         @default(false)
   
+  // Multi-tenant
+  tenantId              String
+  tenant                Tenant          @relation(fields: [tenantId], references: [id])
+  
   // Relations
   payments              PaymentTransaction[]
   invoices              Invoice[]
   
+  @@unique([tenantId, orderNumber])
   @@index([orderNumber])
   @@index([customerId])
   @@index([status])
   @@index([paymentStatus])
+  @@index([tenantId])
 }
 
 model PaymentTransaction {
@@ -788,12 +941,15 @@ model PaymentTransaction {
   receivedAt            DateTime  @default(now())
   createdAt             DateTime  @default(now())
   
+  tenantId              String
+  tenant                Tenant    @relation(fields: [tenantId], references: [id])
   receipts              Receipt[]
-
+ 
   @@index([salesOrderId])
   @@index([customerId])
   @@index([receivedAt])
   @@index([transactionType])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -802,7 +958,7 @@ model PaymentTransaction {
 
 model Receipt {
   id                    String   @id @default(cuid())
-  receiptNumber         String   @unique  // REC-YYYY-NNNN
+  receiptNumber         String   // REC-YYYY-NNNN
   paymentTransactionId  String
   paymentTransaction    PaymentTransaction @relation(fields: [paymentTransactionId], references: [id])
   customerName          String
@@ -812,15 +968,19 @@ model Receipt {
   generatedById         String
   generatedBy           User     @relation(fields: [generatedById], references: [id])
   generatedAt           DateTime @default(now())
+  tenantId              String
+  tenant                Tenant   @relation(fields: [tenantId], references: [id])
 
+  @@unique([tenantId, receiptNumber])
   @@index([receiptNumber])
   @@index([paymentTransactionId])
   @@index([generatedAt])
+  @@index([tenantId])
 }
 
 model Invoice {
   id                    String           @id @default(cuid())
-  invoiceNumber         String           @unique  // INV-2026-0001
+  invoiceNumber         String           // INV-2026-0001
   salesOrderId          String
   salesOrder            SalesOrder      @relation(fields: [salesOrderId], references: [id])
   customerId            String
@@ -857,12 +1017,16 @@ model Invoice {
   
   createdAt             DateTime        @default(now())
   
+  tenantId              String
+  tenant                Tenant          @relation(fields: [tenantId], references: [id])
   payments              PaymentReceived[]
   
+  @@unique([tenantId, invoiceNumber])
   @@index([invoiceNumber])
   @@index([salesOrderId])
   @@index([customerId])
   @@index([status])
+  @@index([tenantId])
 }
 
 // ============================================================================
@@ -879,8 +1043,11 @@ model PaymentReceived {
   notes           String?
   paymentMethod   String?    // Cash or Bank Transfer
   createdAt       DateTime   @default(now())
+  tenantId        String
+  tenant          Tenant     @relation(fields: [tenantId], references: [id])
   
   @@index([invoiceId])
+  @@index([tenantId])
 }
 
 model CoreBuyback {
@@ -907,7 +1074,10 @@ model CoreBuyback {
   notes                 String?
   
   createdAt             DateTime  @default(now())
+  tenantId              String
+  tenant                Tenant    @relation(fields: [tenantId], references: [id])
   
   @@index([customerId])
   @@index([date])
+  @@index([tenantId])
 }

@@ -31,7 +31,7 @@ export async function generateInvoicePdf(invoiceId: string): Promise<Buffer> {
 
   if (!invoice) throw new Error('Invoice not found')
 
-  const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+  const settings = await prisma.settings.findFirst()
   const vatRate = settings?.vatRate ? Number(settings.vatRate) : 7.5
   const businessTin = settings?.businessTin || ''
   const businessAddress = settings?.businessAddress || ''
@@ -203,7 +203,7 @@ export async function generateReceiptPdf(receiptId: string): Promise<Buffer> {
 
   if (!receipt) throw new Error('Receipt not found')
 
-  const settings = await prisma.settings.findUnique({ where: { id: 'default' } })
+  const settings = await prisma.settings.findFirst()
   const companyName = settings?.receiptCompanyName || settings?.invoiceCompanyName || 'FLEXOPRINT NIGERIA LTD'
   const businessAddress = settings?.businessAddress || ''
   const businessTin = settings?.businessTin || ''

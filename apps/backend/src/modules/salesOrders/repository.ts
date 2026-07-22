@@ -38,7 +38,7 @@ export const salesOrderRepository = {
   },
 
   async findByOrderNumber(orderNumber: string) {
-    return prisma.salesOrder.findUnique({
+    return prisma.salesOrder.findFirst({
       where: { orderNumber },
       include: {
         customer: true,
@@ -119,7 +119,7 @@ export const salesOrderRepository = {
     const maxRetries = 5
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const orderNumber = await this.getNextOrderNumber()
-      const exists = await prisma.salesOrder.findUnique({
+      const exists = await prisma.salesOrder.findFirst({
         where: { orderNumber },
         select: { id: true }
       })
@@ -170,7 +170,7 @@ export const salesOrderRepository = {
         expectedDeliveryDate: data.expectedDeliveryDate,
         totalPaid: data.totalPaid ? new Prisma.Decimal(String(data.totalPaid)) : undefined,
         balancePaid: data.balancePaid ? new Prisma.Decimal(String(data.balancePaid)) : undefined
-      },
+      } as any,
       include: {
         customer: true,
         payments: true,
@@ -284,7 +284,7 @@ export const salesOrderRepository = {
         notifyEmail: input.notifyEmail ?? true,
         notifyWhatsApp: input.notifyWhatsApp ?? true,
         isActive: true
-      }
+      } as any
     })
   },
 
@@ -669,7 +669,7 @@ export const paymentRepository = {
     sellerName?: string
     coresQuantity?: number
     receivedById?: string
-  }, tx?: Prisma.TransactionClient) {
+  }, tx?: any) {
     const db = tx || prisma
     return db.paymentTransaction.create({
       data: {
@@ -683,7 +683,7 @@ export const paymentRepository = {
         sellerName: data.sellerName,
         coresQuantity: data.coresQuantity,
         receivedById: data.receivedById
-      }
+      } as any
     })
   },
 
@@ -749,7 +749,7 @@ export const invoiceRepository = {
         ? `${prefix}${String(parseInt(lastInvoice.invoiceNumber.replace(prefix, '')) + 1).padStart(4, '0')}`
         : `${prefix}0001`
 
-      const exists = await prisma.invoice.findUnique({
+      const exists = await prisma.invoice.findFirst({
         where: { invoiceNumber },
         select: { id: true }
       })
@@ -795,7 +795,7 @@ export const invoiceRepository = {
         packingBagsSubtotal: new Prisma.Decimal(String(data.packingBagsSubtotal || 0)),
         packingBagsPaid: new Prisma.Decimal(String(data.packingBagsPaid || 0)),
         status: 'DRAFT' as any
-      },
+      } as any,
       include: {
         customer: true,
         salesOrder: { include: { customer: true } }
@@ -852,7 +852,7 @@ export const coreBuybackRepository = {
     paidAmount?: Prisma.Decimal | number
     recordedById?: string
     notes?: string
-  }, tx?: Prisma.TransactionClient) {
+  }, tx?: any) {
     const db = tx || prisma
     return db.coreBuyback.create({
       data: {
@@ -866,7 +866,7 @@ export const coreBuybackRepository = {
         paidAmount: data.paidAmount ? new Prisma.Decimal(String(data.paidAmount)) : new Prisma.Decimal('0'),
         recordedById: data.recordedById,
         notes: data.notes
-      }
+      } as any
     })
   },
 
@@ -923,7 +923,7 @@ export const receiptRepository = {
         paymentMethod: String(data.paymentMethod),
         referenceNumber: data.referenceNumber,
         generatedById: data.generatedById
-      }
+      } as any
     })
   },
 

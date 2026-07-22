@@ -6,8 +6,16 @@ export interface UserEntity {
   passwordHash: string
   role: Role
   isActive: boolean
+  archivedAt: Date | null
   createdAt: Date
   updatedAt: Date
+  tenantId: string | null
+  tenant?: {
+    id: string
+    name: string
+    slug: string
+    isActive: boolean
+  } | null
 }
 
 export interface UserResponse {
@@ -17,6 +25,9 @@ export interface UserResponse {
   isActive: boolean
   createdAt: Date
   updatedAt: Date
+  tenantId?: string | null
+  tenantName?: string
+  tenantSlug?: string
 }
 
 export interface AuthTokens {

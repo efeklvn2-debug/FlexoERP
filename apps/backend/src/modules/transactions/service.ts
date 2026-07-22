@@ -131,7 +131,7 @@ export const transactionService = {
           packingBags: packingBags ?? 0,
           amountPaid: amountPaid ?? 0,
           date: dateFromInput(date)
-        },
+        } as any,
         include: {
           customer: true
         }

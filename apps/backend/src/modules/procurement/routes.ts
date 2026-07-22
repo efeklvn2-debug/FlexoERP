@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { procurementController } from './controller'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 import { validateRequest } from '../../middleware/validation'
 import { mutationLimiter, bulkLimiter } from '../../middleware/rateLimiters'
 import {
@@ -11,7 +12,7 @@ import {
 
 export const procurementRouter = Router()
 
-procurementRouter.use(authenticate, loadUser)
+procurementRouter.use(authenticate, loadUser, tenantMiddleware)
 
 // Purchase Orders
 procurementRouter.get('/purchase-orders', requirePermission('procurement:read'), procurementController.getAllPOs)

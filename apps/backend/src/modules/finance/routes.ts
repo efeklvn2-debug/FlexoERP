@@ -1,13 +1,14 @@
 import { Router } from 'express'
 import { financeController } from './controller'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 import { validateRequest } from '../../middleware/validation'
 import { sensitiveLimiter, heavyLimiter, reportLimiter, mutationLimiter } from '../../middleware/rateLimiters'
 import { createAccountSchema, postJournalEntrySchema, postOpeningBalancesSchema } from './validation'
 
 export const financeRouter = Router()
 
-financeRouter.use(authenticate, loadUser)
+financeRouter.use(authenticate, loadUser, tenantMiddleware)
 
 financeRouter.get('/accounts', requirePermission('finance:read'), financeController.getAccounts)
 financeRouter.get('/accounts/tree', requirePermission('finance:read'), financeController.getRootAccounts)

@@ -1,12 +1,12 @@
 import { z } from 'zod'
 import { prisma } from '../../database'
-import { Prisma } from '@prisma/client'
 import { AppError } from '../../middleware/errorHandler'
 import { settingsService } from '../settings/service'
 import { inventoryService } from '../inventory/service'
 import { financeService } from '../finance/service'
 import { logger } from '../../logger'
 import { dateFromInput } from '../../utils/dates'
+import { getCurrentTenantId } from '../../context'
 
 export const productionJobSchema = z.object({
   salesOrderId: z.string().optional(),
@@ -26,7 +26,7 @@ export const productionJobSchema = z.object({
 
 export type ProductionJobInput = z.infer<typeof productionJobSchema>
 
-async function createRolls(tx: Prisma.TransactionClient, weights: number[], date: string | undefined, materialId: string, primaryParentId: string | null): Promise<any[]> {
+async function createRolls(tx: any, weights: number[], date: string | undefined, materialId: string, primaryParentId: string | null): Promise<any[]> {
   const lastRoll = await tx.roll.findFirst({
     where: { rollNumber: { startsWith: 'PR' } },
     orderBy: { rollNumber: 'desc' }
@@ -157,13 +157,14 @@ export const productionService = {
               startDate: dateFromInput(input.date),
               printedRolls: {
                 create: newRolls.map((newRoll) => ({
-                  rollId: newRoll.id,
+                  roll: { connect: { id: newRoll.id } },
                   weightUsed: newRoll.weight,
                   wasteWeight: 0,
-                  status: 'IN_STOCK'
+                  status: 'IN_STOCK',
+                  tenant: { connect: { id: getCurrentTenantId()! } },
                 }))
               }
-            },
+            } as any,
             include: {
               salesOrder: true,
               printedRolls: {
@@ -204,7 +205,7 @@ export const productionService = {
         rollId: firstRollId,
         weightUsed: weight,
         wasteWeight: 0
-      }))
+      })) as any
     })
 
     return this.getJobById(jobId)
@@ -686,8 +687,9 @@ export const productionService = {
               productionJobId: jobId,
               rollId: newRoll.id,
               weightUsed: newRoll.weight,
-              wasteWeight: idx === 0 ? (input.wasteWeight ?? 0) : 0
-            }))
+              wasteWeight: idx === 0 ? (input.wasteWeight ?? 0) : 0,
+              tenantId: getCurrentTenantId()!,
+            })) as any
           })
         })
       }
@@ -1196,7 +1198,7 @@ export const productionService = {
         }
       })
 
-      await tx.roll.create({
+      const newRoll = await tx.roll.create({
         data: {
           rollNumber: newRollNumber,
           materialId: material.id,
@@ -1205,7 +1207,7 @@ export const productionService = {
           status: 'AVAILABLE',
           notes: `Created from customer return of printed roll (${printedRoll.roll?.rollNumber || printedRollId})`
         }
-      })
+      } as any)
 
       const inventoryAccount = await financeService.getAccountIdByCode('1300')
       const otherIncomeAccount = await financeService.getAccountIdByCode('4200')
@@ -1225,7 +1227,7 @@ export const productionService = {
       if (data.condition === 'SCRAP') {
         const scrapAccount = await financeService.getAccountIdByCode('5300')
         await tx.roll.update({
-          where: { rollNumber: newRollNumber },
+          where: { id: newRoll.id },
           data: { status: 'WASTED', disposedAt: dateFromInput(data.date), disposedById: data.userId, disposalReason: `Customer return - ${data.reason}` }
         })
         await financeService.postJournalEntry({
@@ -1243,7 +1245,7 @@ export const productionService = {
       } else {
         const apAccount = await financeService.getAccountIdByCode('2000')
         await tx.roll.update({
-          where: { rollNumber: newRollNumber },
+          where: { id: newRoll.id },
           data: { status: 'RETURNED', disposedAt: dateFromInput(data.date), disposedById: data.userId, disposalReason: `Customer return - returned to supplier` }
         })
         await financeService.postJournalEntry({
@@ -1307,7 +1309,7 @@ export const productionService = {
               status: 'AVAILABLE',
               notes: `Replacement for returned roll ${roll.rollNumber}`
             }
-          })
+          } as any)
 
           const updateResult = await tx.roll.updateMany({
             where: { id: rollId, replacementReceived: false },

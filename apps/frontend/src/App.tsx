@@ -13,6 +13,7 @@ import { SalesOrdersPage } from './pages/SalesOrdersPage'
 import { SuppliersPage } from './pages/SuppliersPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { AdminPage } from './pages/AdminPage'
+import { PlatformPage } from './pages/PlatformPage'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { Toast } from './components/Toast'
 import { useAuthStore, hasPermission } from './stores/authStore'
@@ -64,6 +65,7 @@ function App() {
           <Route path="/suppliers" element={<ProtectedRoute requiredPermissions={['supplier:read']}><SuppliersPage /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute requiredPermissions={['report:read']}><ReportsPage /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute requiredPermissions={['auth:manage_users']}><AdminPage /></ProtectedRoute>} />
+          <Route path="/platform" element={<ProtectedRoute><PlatformPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute requiredPermissions={['settings:read']}><SettingsPage /></ProtectedRoute>} />
           <Route path="/*" element={<ProtectedRoute><Routes><Route path="/" element={<DashboardPage />} /></Routes></ProtectedRoute>} />
         </Routes>

@@ -1,5 +1,5 @@
 import { prisma } from '../../database'
-import { Prisma } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
 import { AuditLogQuery, AuditLogResult, AuditLogEntry } from './types'
 
 export const auditRepository = {
@@ -21,7 +21,7 @@ export const auditRepository = {
         description: data.description,
         metadata: data.metadata ?? undefined,
         ipAddress: data.ipAddress ?? null
-      }
+      } as any
     })
   },
 

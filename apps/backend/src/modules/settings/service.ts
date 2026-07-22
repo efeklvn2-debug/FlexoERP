@@ -1,6 +1,7 @@
 import { prisma } from '../../database'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
+import { getCurrentTenantId } from '../../context'
 
 const logger = createChildLogger('settings:service')
 
@@ -61,13 +62,11 @@ export interface OverheadRateHistoryEntry {
 
 export const settingsService = {
   async getSettings(): Promise<Settings> {
-    let settings = await prisma.settings.findUnique({
-      where: { id: 'default' }
-    })
+    let settings = await prisma.settings.findFirst()
 
     if (!settings) {
       settings = await prisma.settings.create({
-        data: { id: 'default' }
+        data: {} as any
       })
     }
 
@@ -109,7 +108,7 @@ export const settingsService = {
     console.log('BACKEND updateConsumptionRates RECEIVED:', JSON.stringify(input))
     
     const settings = await prisma.settings.upsert({
-      where: { id: 'default' },
+      where: { tenantId: getCurrentTenantId()! },
       update: {
         coreWeight: input.coreWeight,
         inkConsumptionRate: input.inkConsumptionRate,
@@ -118,13 +117,12 @@ export const settingsService = {
         coreDepositValue: input.coreDepositValue
       },
       create: {
-        id: 'default',
         coreWeight: input.coreWeight || 0.7,
         inkConsumptionRate: input.inkConsumptionRate || 0.7,
         ipaConsumptionRate: input.ipaConsumptionRate || 0.1,
         butanolConsumptionRate: input.butanolConsumptionRate || 0.1,
         coreDepositValue: input.coreDepositValue || 150
-      }
+      } as any
     })
 
     const result = {
@@ -151,12 +149,12 @@ export const settingsService = {
 
     await prisma.$transaction(async (tx) => {
       await tx.overheadRateHistory.upsert({
-        where: { month: monthStr },
+        where: { tenantId_month: { tenantId: getCurrentTenantId()!, month: monthStr } },
         create: {
           month: monthStr,
           ratePerKg: rate,
           createdBy: userId || null
-        },
+        } as any,
         update: {
           ratePerKg: rate,
           createdBy: userId || null
@@ -164,9 +162,9 @@ export const settingsService = {
       })
 
       await tx.settings.upsert({
-        where: { id: 'default' },
+        where: { tenantId: getCurrentTenantId()! },
         update: { overheadRatePerKg: rate },
-        create: { id: 'default', overheadRatePerKg: rate }
+        create: { overheadRatePerKg: rate } as any
       })
     })
 
@@ -175,18 +173,17 @@ export const settingsService = {
 
   async updateVatSettings(input: Partial<VatSettings>): Promise<Settings> {
     const settings = await prisma.settings.upsert({
-      where: { id: 'default' },
+      where: { tenantId: getCurrentTenantId()! },
       update: {
         vatRate: input.vatRate,
         businessTin: input.businessTin,
         businessAddress: input.businessAddress
       },
       create: {
-        id: 'default',
         vatRate: input.vatRate || 7.5,
         businessTin: input.businessTin,
         businessAddress: input.businessAddress
-      }
+      } as any
     })
     return this.getSettings()
   },
@@ -207,7 +204,7 @@ export const settingsService = {
 
   async updateInvoiceSettings(input: InvoiceSettings): Promise<InvoiceSettings> {
     await prisma.settings.upsert({
-      where: { id: 'default' },
+      where: { tenantId: getCurrentTenantId()! },
       update: {
         invoiceCompanyName: input.invoiceCompanyName,
         invoiceLogoUrl: input.invoiceLogoUrl,
@@ -219,7 +216,6 @@ export const settingsService = {
         receiptFooter: input.receiptFooter
       },
       create: {
-        id: 'default',
         invoiceCompanyName: input.invoiceCompanyName,
         invoiceLogoUrl: input.invoiceLogoUrl,
         invoicePrimaryColor: input.invoicePrimaryColor,
@@ -228,7 +224,7 @@ export const settingsService = {
         receiptCompanyName: input.receiptCompanyName,
         receiptLogoUrl: input.receiptLogoUrl,
         receiptFooter: input.receiptFooter
-      }
+      } as any
     })
     return this.getInvoiceSettings()
   },
@@ -244,7 +240,7 @@ export const settingsService = {
   async createInkColor(data: { name: string; mapping: string }): Promise<any> {
     try {
       return await prisma.$transaction(async (tx) => {
-        const color = await tx.inkColor.create({ data: { name: data.name, mapping: data.mapping } })
+        const color = await tx.inkColor.create({ data: { name: data.name, mapping: data.mapping } as any })
         const existingMat = await tx.material.findFirst({ where: { subCategory: data.mapping, category: 'INK_SOLVENTS' } })
         if (!existingMat) {
           await tx.material.create({
@@ -255,7 +251,7 @@ export const settingsService = {
               subCategory: data.mapping,
               unitOfMeasure: 'kg',
               isActive: true
-            }
+            } as any
           })
         }
         return color

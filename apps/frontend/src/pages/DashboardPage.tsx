@@ -4,7 +4,7 @@ import { useNotification } from '../contexts/NotificationContext'
 import { Layout } from '../components/Layout'
 import { financeApi, FinanceDashboard } from '../api/finance'
 import { salesOrderApi, SalesOrder, ORDER_STATUS_LABELS } from '../api/salesOrders'
-import { hasPermission } from '../stores/authStore'
+import { hasPermission, useAuthStore } from '../stores/authStore'
 import { productionApi, ProductionJob } from '../api/production'
 import { inventoryApi, MaterialWithStock } from '../api/inventory'
 
@@ -111,7 +111,14 @@ function periodLabel(p: DashboardPeriod): string {
 function DashboardPage() {
   const navigate = useNavigate()
   const notify = useNotification()
+  const currentUser = useAuthStore(s => s.user)
   const canViewFinance = hasPermission('finance:read')
+
+  useEffect(() => {
+    if (currentUser?.role === 'SUPER_ADMIN') {
+      navigate('/platform', { replace: true })
+    }
+  }, [currentUser, navigate])
 
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState<DashboardPeriod>('today')

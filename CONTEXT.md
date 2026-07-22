@@ -320,7 +320,76 @@ All in `auth` module, gated by `requirePermission('auth:manage_users')`:
 - Prisma `upsert` never deletes; updating role permissions requires manual `deleteMany` of stale `RolePermission` records
 - API client has `delete` not `del` — `api.delete<T>(url)`
 
-## TODO: Financial Accounts Setup Guide
-- Create a guide for new users setting up their chart of accounts, opening balances, and initial configuration
-- Should cover: required accounts, account codes, opening balance entry workflow, common mistakes
-- Not yet started
+## Multi-Tenancy — Prisma Extension + TS Conflicts
+- `$extends` return type is incompatible with `PrismaClient` due to `Exact<T, ...>` constraints. Fix: `return extended as unknown as PrismaClient`. Runtime works; TS sees base types.
+- Create/upsert calls need `as any` on data objects (~16 sites) since the extension auto-injects `tenantId` at runtime but TS can't infer it.
+- `$transaction` callback type `tx: Prisma.TransactionClient` works fine with the `as unknown as PrismaClient` cast.
+
+## Multi-Tenancy — Schema Changes
+- 12+ fields changed from global `@unique` to per-tenant `@@unique([tenantId, fieldName])`: Account.code/name, Material.code, InkColor.name/mapping, Supplier.code/name, Customer.code, Order/SalesOrder/Invoice/Receipt/JournalEntry/ProductionJob/PurchaseOrder/Roll/SupplierInvoice sequential numbers.
+- `Settings.id` changed from `@default("default")` to `@default(cuid())`; per-tenant uniqueness via `@@unique([tenantId])`.
+- `RefreshToken.tenantId` and `IdempotencyKey.tenantId` are `String?` (nullable) — created before tenant middleware runs.
+- `ProductionJob.salesOrderId` kept `@unique` globally (Prisma one-to-one FK requirement) — safe because SalesOrder CUIDs are globally unique anyway.
+- `Supplier.name` changed from global `@unique` to `@@unique([tenantId, name])` — BUT the existing DB had duplicate names across suppliers (nulls). Fixed by cleaning duplicates before migration.
+
+## Multi-Tenancy — Seed Script Challenge (FIXED)
+- Initial seed used `new PrismaClient()` inside `runWithTenant()` — but plain client doesn't read AsyncLocalStorage. Fixed by importing extended `prisma` from `src/database/index.ts` which has the `$extends` tenant injection.
+- Seed script also creates assets (InkColors) inside `tenant.defaults` in `platform/service.ts` using `runWithTenant()` — works because `seedTenantDefaults` passes tenantId and runs with the extended prisma inside the tenant context.
+
+## Multi-Tenancy — Raw SQL Queries (FIXED 22 Jul 2026)
+- 3 raw SQL queries bypassed the Prisma extension's auto-injection: `SELECT ... FOR UPDATE` in `salesOrders/service.ts:296` and `procurement/service.ts:176`, plus `$executeRaw UPDATE` in `inventory/service.ts:108`.
+- Fix: added `AND "tenantId" = ${getCurrentTenantId()}` to each WHERE clause.
+- Challenge: `getCurrentTenantId()` must be imported from `../../context` in each file and returns `string | undefined`. The raw SQL receives it as a parameterized value via `${}`.
+
+## Multi-Tenancy — Super Admin + Platform Module
+- Backend: `modules/platform/` — 5 endpoints at `GET|POST /api/platform/tenants`, `GET|PATCH /api/platform/tenants/:id`, `POST /api/platform/tenants/:id/users`. All gated by `requireSuperAdmin` middleware.
+- Tenant creation auto-seeds 3 ink colors, 27 chart of accounts, and default settings via `runWithTenant()`.
+- Frontend: `PlatformPage.tsx` — super admin manages all tenants (list, create, activate/deactivate, create users). Sidebar gated by `user.role === 'SUPER_ADMIN'`.
+- NavItem extended with optional `role?: 'SUPER_ADMIN'` field for role-based sidebar gating (separate from the existing permission-based filter).
+- Route `/platform` registered in `App.tsx` with no permission check (backend enforces SUPER_ADMIN).
+
+## PRODUCTION MIGRATION — Multi-Tenant SaaS (22 Jul 2026)
+
+### Status: Phase 1 ✅ COMPLETE, Phase 3 ✅ COMPLETE
+
+**Goal**: Convert single-tenant ERP to multi-tenant SaaS. Onboard 3 companies immediately.
+
+### Stack
+- Frontend: React (Vercel free) | Backend: Express (Render free) | DB: PostgreSQL (Supabase free) | Payments: Paystack | Email: Brevo
+
+### Phase 1 Progress (Multi-Tenancy)
+- ✅ Schema: `Tenant` model + `tenantId` on all 33 models + per-tenant `@@unique` constraints
+- ✅ AsyncLocalStorage context (`src/context.ts`)
+- ✅ Prisma client extension auto-injects `tenantId` (cast as `PrismaClient`)
+- ✅ Tenant middleware (per-route, after `loadUser`)
+- ✅ Auth: `tenantId` in JWT, login returns tenant info, register scoped to tenant
+- ✅ All 12 route files updated with `tenantMiddleware`
+- ✅ Seed script: creates SUPER_ADMIN + Demo Factory tenant (uses extended prisma, not plain client)
+- ✅ Frontend auth store: `User` interface has `tenantId?`, `tenantName?`, `tenantSlug?`
+- ✅ Layout header shows tenant name badge
+- ✅ End-to-end flow tested: superadmin login → create tenant → tenant admin login → tenant-scoped data
+- ✅ 3 raw SQL queries fixed with `AND "tenantId" = ${getCurrentTenantId()}`
+- ✅ Zero TypeScript errors (backend + frontend)
+
+### Phase 3 Progress (Platform Management)
+- ✅ Backend platform module with 5 endpoints (list/create/update tenants, create tenant users)
+- ✅ Tenant creation auto-seeds defaults (3 ink colors, 27 accounts, settings)
+- ✅ Frontend PlatformPage.tsx: table, create tenant modal, create user modal, activate/deactivate
+- ✅ Sidebar "Platform" item gated by `user.role === 'SUPER_ADMIN'`
+- ✅ Route registered at `/platform` (backend `requireSuperAdmin` provides security)
+
+### Key Decisions
+- `User.tenantId` is OPTIONAL (SUPER_ADMIN has no tenant)
+- `User.username` stays globally `@unique` (simplifies login — no tenant selector needed)
+- `IdempotencyKey.tenantId` is optional (runs before tenant middleware)
+- `InkColor` is per-tenant (each factory has own color catalog, seeded with 3 blues)
+- No subdomains for V1 — tenant resolved from JWT
+- SUPER_ADMIN role: creates tenants, cross-tenant management
+
+### Remaining Phases
+2. Supabase migration (DATABASE_URL swap, RLS policies)
+4. Deploy to Vercel + Render + Supabase
+5. Paystack + Brevo integrations
+6. Onboard 3 companies
+7. CI/CD (GitHub Actions)
+8. Post-launch hardening

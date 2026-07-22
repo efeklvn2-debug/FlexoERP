@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client'
 
 export const financeRepository = {
   async findAccountByCode(code: string) {
-    return prisma.account.findUnique({ where: { code } })
+    return prisma.account.findFirst({ where: { code } })
   },
 
   async findAccountById(id: string) {
@@ -53,7 +53,7 @@ export const financeRepository = {
     return prisma.account.update({ where: { id }, data })
   },
 
-  async getNextEntryNumber(db?: Prisma.TransactionClient) {
+  async getNextEntryNumber(db?: any) {
     const client = db || prisma
     const year = new Date().getFullYear()
     const prefix = `JE-${year}-`
@@ -182,9 +182,9 @@ export const financeRepository = {
   },
 
   async getRevenueByPeriod(dateFrom: Date, dateTo: Date) {
-    const salesAccount = await prisma.account.findUnique({ where: { code: '4000' } })
-    const packingAccount = await prisma.account.findUnique({ where: { code: '4100' } })
-    const otherIncomeAccount = await prisma.account.findUnique({ where: { code: '4200' } })
+    const salesAccount = await prisma.account.findFirst({ where: { code: '4000' } })
+    const packingAccount = await prisma.account.findFirst({ where: { code: '4100' } })
+    const otherIncomeAccount = await prisma.account.findFirst({ where: { code: '4200' } })
 
     const result: Record<string, number> = { sales: 0, packing: 0, otherIncome: 0 }
 
@@ -248,8 +248,8 @@ export const financeRepository = {
   },
 
   async getCogsByPeriod(dateFrom: Date, dateTo: Date) {
-    const cogsAccount = await prisma.account.findUnique({ where: { code: '5000' } })
-    const productionCostsAccount = await prisma.account.findUnique({ where: { code: '5200' } })
+    const cogsAccount = await prisma.account.findFirst({ where: { code: '5000' } })
+    const productionCostsAccount = await prisma.account.findFirst({ where: { code: '5200' } })
 
     let total = 0
 
@@ -320,7 +320,7 @@ export const financeRepository = {
   },
 
   async getOutputVat(dateFrom: Date, dateTo: Date) {
-    const vatOutputAccount = await prisma.account.findUnique({ where: { code: '2100' } })
+    const vatOutputAccount = await prisma.account.findFirst({ where: { code: '2100' } })
     if (!vatOutputAccount) return 0
 
     const result = await prisma.journalLine.aggregate({
@@ -335,7 +335,7 @@ export const financeRepository = {
   },
 
   async getInputVat(dateFrom: Date, dateTo: Date) {
-    const vatInputAccount = await prisma.account.findUnique({ where: { code: '1400' } })
+    const vatInputAccount = await prisma.account.findFirst({ where: { code: '1400' } })
     if (!vatInputAccount) return 0
 
     const result = await prisma.journalLine.aggregate({

@@ -1,10 +1,11 @@
 import { Router } from 'express'
 import { transactionController } from './controller'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 
 export const transactionRouter = Router()
 
-transactionRouter.use(authenticate, loadUser)
+transactionRouter.use(authenticate, loadUser, tenantMiddleware)
 
 transactionRouter.get('/', requirePermission('customer:read'), transactionController.getTransactions)
 transactionRouter.get('/available-rolls', requirePermission('inventory:read'), transactionController.getAvailableRolls)

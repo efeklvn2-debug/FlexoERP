@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { salesOrderController, paymentController, invoiceController, coreBuybackController } from './controller'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 import { validateRequest } from '../../middleware/validation'
 import { mutationLimiter } from '../../middleware/rateLimiters'
 import {
@@ -14,7 +15,7 @@ import {
 
 export const salesOrderRouter = Router()
 
-salesOrderRouter.use(authenticate, loadUser)
+salesOrderRouter.use(authenticate, loadUser, tenantMiddleware)
 
 // Sales Orders
 salesOrderRouter.get('/orders', requirePermission('sales_order:read'), salesOrderController.getOrders)

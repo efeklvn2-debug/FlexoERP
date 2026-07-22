@@ -2,8 +2,10 @@ import { prisma } from '../../database'
 import { AppError } from '../../middleware/errorHandler'
 import { createChildLogger } from '../../logger'
 import { financeRepository } from './repository'
-import { Prisma, Account, JournalEntry } from '@prisma/client'
+import { Prisma } from '@prisma/client'
+import { Account, JournalEntry } from '@prisma/client'
 import { dateFromInput, dateStartOfDay, dateEndOfDay } from '../../utils/dates'
+import { getCurrentTenantId } from '../../context'
 
 const logger = createChildLogger('finance:service')
 
@@ -48,7 +50,7 @@ export const financeService = {
     return account.id
   },
 
-  async getEarliestJournalDate(tx?: Prisma.TransactionClient): Promise<Date> {
+  async getEarliestJournalDate(tx?: any): Promise<Date> {
     const client = tx || prisma
     const earliest = await client.journalEntry.findFirst({
       orderBy: { date: 'asc' },
@@ -57,7 +59,7 @@ export const financeService = {
     return earliest?.date || new Date(new Date().getFullYear() - 5, 0, 1)
   },
 
-  async validateJournalDate(date: Date, tx?: Prisma.TransactionClient): Promise<void> {
+  async validateJournalDate(date: Date, tx?: any): Promise<void> {
     const earliestDate = await this.getEarliestJournalDate(tx)
     if (new Date(date) < earliestDate) {
       throw new AppError(400, 'INVALID_DATE', 
@@ -105,7 +107,7 @@ export const financeService = {
     postedById?: string
     date?: string
     lines: { accountId: string; debit: number; credit: number; memo?: string }[]
-  }, tx?: Prisma.TransactionClient) {
+  }, tx?: any) {
     const { lines, description, sourceModule, sourceId, reference, postedById, date } = input
     const db = tx || prisma
 
@@ -132,7 +134,7 @@ export const financeService = {
     const entryDate = dateFromInput(date)
     await this.validateJournalDate(entryDate, db)
 
-    const createEntry = async (client: Prisma.TransactionClient, number: string) => {
+    const createEntry = async (client: any, number: string) => {
       const entry = await client.journalEntry.create({
         data: {
           entryNumber: number,
@@ -144,11 +146,12 @@ export const financeService = {
           postedById,
           lines: {
             create: lines.map(l => ({
-              accountId: l.accountId,
+              account: { connect: { id: l.accountId } },
               debit: new Prisma.Decimal(l.debit.toFixed(2)),
               credit: new Prisma.Decimal(l.credit.toFixed(2)),
-              memo: l.memo
-            }))
+              memo: l.memo,
+              tenant: { connect: { id: getCurrentTenantId()! } },
+            })) as any
           }
         },
         include: { lines: { include: { account: true } } }
@@ -487,8 +490,9 @@ export const financeService = {
 
     let created = 0
     for (const acc of accounts) {
+      const tenantId = getCurrentTenantId()
       await prisma.account.upsert({
-        where: { code: acc.code },
+        where: { tenantId_code: { tenantId: tenantId!, code: acc.code } },
         create: acc as any,
         update: {}
       })
@@ -658,7 +662,7 @@ export const financeService = {
         }
 
         // Add consumables and overhead
-        const settings = await tx.settings.findUnique({ where: { id: 'default' } })
+        const settings = await tx.settings.findFirst()
         if (settings) {
           const inkRate = Number(settings.inkConsumptionRate) || 0.2
           const ipaRate = Number(settings.ipaConsumptionRate) || 0.1

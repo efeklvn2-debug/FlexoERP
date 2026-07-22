@@ -118,5 +118,9 @@ export const authApi = {
 
   deleteUserPermissionOverride: async (userId: string, permissionId: string) => {
     return api.delete(`/auth/users/${userId}/permissions/${permissionId}`)
+  },
+
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    return api.patch('/auth/password', { currentPassword, newPassword })
   }
 }

@@ -12,7 +12,7 @@ export const inventoryRepository = {
   },
 
   async findMaterialByCode(code: string): Promise<Material | null> {
-    const material = await prisma.material.findUnique({ where: { code } })
+    const material = await prisma.material.findFirst({ where: { code } })
     return material as Material | null
   },
 
@@ -83,7 +83,7 @@ export const inventoryRepository = {
         unitOfMeasure: data.unitOfMeasure,
         minStock: data.minStock,
         costPrice: data.costPrice
-      }
+      } as any
     })
     logger.info({ materialId: material.id, code: material.code }, 'Material created')
     return { ...material, costPrice: material.costPrice ? Number(material.costPrice) : null } as Material
@@ -103,11 +103,11 @@ export const inventoryRepository = {
     return prisma.stock.findMany({ where: { materialId } }) as Promise<Stock[]>
   },
 
-  async getOrCreateStock(materialId: string, location?: string, tx?: Prisma.TransactionClient): Promise<Stock> {
+  async getOrCreateStock(materialId: string, location?: string, tx?: any): Promise<Stock> {
     const client = tx || prisma
     const stock = await client.stock.upsert({
       where: { materialId_location: { materialId, location: location || '' } },
-      create: { materialId, quantity: 0, location: location || '' },
+      create: { materialId, quantity: 0, location: location || '' } as any,
       update: {},
       include: { material: true }
     })
@@ -122,8 +122,8 @@ export const inventoryRepository = {
     reference?: string
     notes?: string
     createdById?: string
-  }, tx?: Prisma.TransactionClient): Promise<StockMovement> {
-    const execute = async (client: Prisma.TransactionClient) => {
+  }, tx?: any): Promise<StockMovement> {
+    const execute = async (client: any) => {
       const movement = await client.stockMovement.create({
         data: {
           materialId: data.materialId,
@@ -133,7 +133,7 @@ export const inventoryRepository = {
           reference: data.reference,
           notes: data.notes,
           createdById: data.createdById
-        }
+        } as any
       })
 
       if (data.stockId) {

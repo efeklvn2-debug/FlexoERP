@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../../database'
 import { PurchaseOrder, Roll } from './types'
 import { createChildLogger } from '../../logger'
+import { getCurrentTenantId } from '../../context'
 
 const logger = createChildLogger('procurement:repository')
 
@@ -81,7 +82,7 @@ export const procurementRepository = {
     createdById?: string
   }): Promise<PurchaseOrder> {
     const po = await prisma.purchaseOrder.create({
-      data,
+      data: data as any,
       include: { rolls: true, items: { include: { material: true } } }
     })
     logger.info({ poId: po.id, poNumber: po.poNumber }, 'Purchase order created')
@@ -115,14 +116,15 @@ export const procurementRepository = {
         totalAmount: data.totalAmount,
         items: {
           create: data.items.map(item => ({
-            materialId: item.materialId,
+            material: { connect: { id: item.materialId } },
             quantity: item.quantity,
             totalWeight: item.totalWeight,
             unitPrice: item.unitPrice,
-            rollWeights: item.rollWeights
-          }))
+            rollWeights: item.rollWeights,
+            tenant: { connect: { id: getCurrentTenantId()! } },
+          })) as any
         }
-      },
+      } as any,
       include: { 
         rolls: true,
         items: { include: { material: true } }
@@ -132,10 +134,10 @@ export const procurementRepository = {
     return convertPO(po)
   },
 
-  async createRollsFromWeights(purchaseOrderId: string, materialId: string, weights: number[], receivedDate?: Date, txClient?: Prisma.TransactionClient): Promise<Roll[]> {
+  async createRollsFromWeights(purchaseOrderId: string, materialId: string, weights: number[], receivedDate?: Date, txClient?: any): Promise<Roll[]> {
     const createdRolls: Roll[] = []
     
-    const doCreate = async (tx: Prisma.TransactionClient) => {
+    const doCreate = async (tx: any) => {
       const today = receivedDate || new Date()
       const prefix = `RL-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}-`
       
@@ -160,7 +162,7 @@ export const procurementRepository = {
             status: 'AVAILABLE',
             receivedDate: today,
             notes: ''
-          },
+          } as any,
           include: { material: true }
         })
         
@@ -197,7 +199,7 @@ export const procurementRepository = {
   },
 
   async findRollByNumber(rollNumber: string): Promise<Roll | null> {
-    const roll = await prisma.roll.findUnique({
+    const roll = await prisma.roll.findFirst({
       where: { rollNumber },
       include: { material: true, purchaseOrder: true }
     })
@@ -253,7 +255,7 @@ export const procurementRepository = {
         remainingWeight: data.weight,
         status: 'AVAILABLE' as any,
         receivedDate: new Date()
-      },
+      } as any,
       include: { material: true }
     })
     logger.info({ rollId: roll.id, rollNumber: roll.rollNumber }, 'Roll created')
@@ -276,7 +278,7 @@ export const procurementRepository = {
         remainingWeight: d.weight,
         status: 'AVAILABLE' as any,
         receivedDate: new Date()
-      })),
+      })) as any,
       include: { material: true }
     })
     logger.info({ count: rolls.length }, 'Rolls created')

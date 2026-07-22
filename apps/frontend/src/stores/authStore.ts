@@ -6,8 +6,11 @@ import { api } from '../api/client'
 interface User {
   id: string
   username: string
-  role: 'ADMIN' | 'MANAGER' | 'OPERATOR' | 'VIEWER'
+  role: 'ADMIN' | 'MANAGER' | 'OPERATOR' | 'VIEWER' | 'SUPER_ADMIN'
   isActive: boolean
+  tenantId?: string | null
+  tenantName?: string
+  tenantSlug?: string
 }
 
 interface AuthState {

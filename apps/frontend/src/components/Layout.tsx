@@ -2,14 +2,17 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore, hasPermission } from '../stores/authStore'
 import { api } from '../api/client'
+import { authApi } from '../api/auth'
 import { PhlexMark } from './PhlexMark'
 import { BrandWordmark } from './BrandWordmark'
+import { useNotification } from '../contexts/NotificationContext'
 
 interface NavItem {
   name: string
   path: string
   icon: React.ReactNode
   permission?: string
+  role?: 'SUPER_ADMIN'
 }
 
 /** Thin modern stroke icons (Lucide-style, stroke 1.5) */
@@ -120,6 +123,14 @@ const navigation: NavItem[] = [
       'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
     ])
   },
+  {
+    name: 'Platform',
+    path: '/platform',
+    role: 'SUPER_ADMIN',
+    icon: ic([
+      'M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z',
+    ])
+  },
 ]
 
 interface LayoutProps {
@@ -129,8 +140,14 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
+  const notify = useNotification()
 
   useEffect(() => {
     const handler = (e: WheelEvent) => {
@@ -143,13 +160,32 @@ export function Layout({ children }: LayoutProps) {
     return () => document.removeEventListener('wheel', handler as EventListener, { passive: false } as AddEventListenerOptions)
   }, [])
 
-  const user = useAuthStore(s => s.user) ?? { username: 'User', role: 'Unknown' as const }
+  const user = useAuthStore(s => s.user) ?? { username: 'User', role: 'Unknown' as const, tenantName: undefined as string | undefined }
   const logout = useAuthStore(s => s.logout)
 
   const handleLogout = async () => {
     api.clearTokens()
     await logout()
     navigate('/login')
+  }
+
+  const handleChangePassword = async () => {
+    if (newPassword !== confirmPassword) { notify.error('New passwords do not match'); return }
+    setChangingPassword(true)
+    try {
+      const res = await authApi.changePassword(currentPassword, newPassword)
+      if (res.error) { notify.error(res.error.message); setChangingPassword(false); return }
+      notify.success('Password changed successfully. Please log in again.')
+      setPasswordModalOpen(false)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setChangingPassword(false)
+      handleLogout()
+    } catch (err: any) {
+      notify.error(err.message || 'Failed to change password')
+      setChangingPassword(false)
+    }
   }
 
   return (
@@ -171,6 +207,11 @@ export function Layout({ children }: LayoutProps) {
                 <PhlexMark className="w-5 h-5" />
               </div>
               <BrandWordmark size="md" className="text-slate-800" />
+              {user.tenantName && (
+                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                  {user.tenantName}
+                </span>
+              )}
             </div>
           </div>
 
@@ -197,7 +238,16 @@ export function Layout({ children }: LayoutProps) {
                   <div className="px-4 py-2 border-b border-slate-100">
                     <p className="text-sm font-medium text-slate-900">{user.username}</p>
                     <p className="text-xs text-slate-500">{user.role}</p>
+                    {user.tenantName && (
+                      <p className="text-xs text-blue-600 mt-0.5">{user.tenantName}</p>
+                    )}
                   </div>
+                  <button
+                    onClick={() => { setDropdownOpen(false); setPasswordModalOpen(true) }}
+                    className="w-full px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
+                  >
+                    Change Password
+                  </button>
                   <button
                     onClick={handleLogout}
                     className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
@@ -218,7 +268,11 @@ export function Layout({ children }: LayoutProps) {
         }`}
       >
         <nav className="p-4 space-y-1">
-          {navigation.filter(item => !item.permission || hasPermission(item.permission)).map((item) => {
+          {navigation.filter(item => {
+            if (item.role === 'SUPER_ADMIN') return user.role === 'SUPER_ADMIN'
+            if (user.role === 'SUPER_ADMIN') return false
+            return !item.permission || hasPermission(item.permission)
+          }).map((item) => {
             const isActive = location.pathname === item.path || 
               (item.path !== '/' && location.pathname.startsWith(item.path + '/'))
             return (
@@ -254,6 +308,36 @@ export function Layout({ children }: LayoutProps) {
           {children}
         </div>
       </main>
+
+      {/* Change Password Modal */}
+      {passwordModalOpen && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={() => { setPasswordModalOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword('') }}>
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-slate-800 mb-4">Change Password</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Current Password</label>
+                <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">New Password</label>
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                <p className="text-xs text-slate-400 mt-1">Min 8 chars, 1 uppercase letter, 1 number</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Confirm New Password</label>
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => { setPasswordModalOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword('') }} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              <button onClick={handleChangePassword} disabled={changingPassword || !currentPassword || !newPassword || !confirmPassword} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                {changingPassword ? 'Changing...' : 'Change Password'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

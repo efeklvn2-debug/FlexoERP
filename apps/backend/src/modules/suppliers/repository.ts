@@ -20,7 +20,7 @@ export const supplierRepository = {
   },
 
   async findByCode(code: string): Promise<Supplier | null> {
-    return prisma.supplier.findUnique({ where: { code } })
+    return prisma.supplier.findFirst({ where: { code } })
   },
 
   async findByName(name: string): Promise<Supplier | null> {
@@ -28,7 +28,7 @@ export const supplierRepository = {
   },
 
   async create(data: { name: string; code: string; email?: string; phone?: string; address?: string; notes?: string }): Promise<Supplier> {
-    return prisma.supplier.create({ data })
+    return prisma.supplier.create({ data: data as any })
   },
 
   async update(id: string, data: { name?: string; email?: string; phone?: string; address?: string; notes?: string; isActive?: boolean }): Promise<Supplier> {

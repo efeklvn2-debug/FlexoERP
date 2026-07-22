@@ -12,9 +12,16 @@ const PORT = process.env.PORT || 3000
 const app = createApp()
 
 async function seedInitialData() {
-  const { PrismaClient } = await import('@prisma/client')
   const { default: bcrypt } = await import('bcryptjs')
-  
+
+  let tenant = await prisma.tenant.findFirst({ where: { slug: 'demo' } })
+  if (!tenant) {
+    tenant = await (prisma.tenant as any).create({
+      data: { slug: 'demo', name: 'Demo Factory' }
+    })
+    logger.info('Created default tenant: Demo Factory')
+  }
+
   const adminExists = await prisma.user.findUnique({
     where: { username: 'admin' }
   })
@@ -29,10 +36,28 @@ async function seedInitialData() {
       data: {
         username: 'admin',
         passwordHash,
-        role: 'ADMIN'
+        role: 'ADMIN',
+        tenantId: tenant!.id,
       }
     })
-    logger.info('Created default admin user (username: admin)')
+    logger.info('Created default admin user (username: admin) for Demo Factory')
+  }
+
+  const superAdminExists = await prisma.user.findUnique({
+    where: { username: 'superadmin' }
+  })
+
+  if (!superAdminExists) {
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123'
+    const passwordHash = await bcrypt.hash(adminPassword, 12)
+    await prisma.user.create({
+      data: {
+        username: 'superadmin',
+        passwordHash,
+        role: 'SUPER_ADMIN',
+      }
+    })
+    logger.info('Created SUPER_ADMIN user (username: superadmin)')
   }
 }
 
@@ -56,6 +81,6 @@ start()
 
 process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully')
-  await prisma.$disconnect()
+  await (prisma as any).$disconnect()
   process.exit(0)
 })

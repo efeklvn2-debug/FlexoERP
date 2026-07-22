@@ -1,10 +1,11 @@
 import { Router } from 'express'
 import { pricingController } from './controller'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 
 export const pricingRouter = Router()
 
-pricingRouter.use(authenticate, loadUser)
+pricingRouter.use(authenticate, loadUser, tenantMiddleware)
 
 pricingRouter.get('/materials-prices', requirePermission('pricing:read'), pricingController.getMaterialsWithPrices)
 pricingRouter.get('/', requirePermission('pricing:read'), pricingController.getPriceLists)

@@ -38,7 +38,12 @@ export const authController = {
   async register(req: Request, res: Response, next: NextFunction) {
     try {
       const input = req.body
-      const user = await authService.register(input)
+      const tenantId = (req as any).user?.tenantId || (req as any).tenant?.id
+      if (!tenantId) {
+        res.status(400).json({ error: { code: 'TENANT_REQUIRED', message: 'Tenant context required' } })
+        return
+      }
+      const user = await authService.register(input, tenantId)
       auditService.record({
         userId: (req as any).user?.id,
         action: 'auth.register',
@@ -211,6 +216,23 @@ export const authController = {
       res.status(204).send()
     } catch (error) {
       sendError(res, error, 'auth.deleteUserPermissionOverride')
+    }
+  },
+
+  async changePassword(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      await authService.changePassword(req.user!.id, req.body)
+      auditService.record({
+        userId: req.user!.id,
+        action: 'auth.change_password',
+        entityType: 'User',
+        entityId: req.user!.id,
+        description: 'User changed their password',
+        ipAddress: req.ip
+      })
+      res.json({ data: { message: 'Password changed successfully' } })
+    } catch (error) {
+      sendError(res, error, 'auth.changePassword')
     }
   }
 }

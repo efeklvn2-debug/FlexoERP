@@ -28,7 +28,7 @@ export const supplierService = {
       let supplier = await tx.supplier.findFirst({ where: { name } })
       if (!supplier) {
         const code = generateCode(name)
-        supplier = await tx.supplier.create({ data: { name, code } })
+        supplier = await tx.supplier.create({ data: { name, code } as any })
         logger.info({ name, code }, 'Auto-created supplier')
       }
       return { ...supplier, isActive: supplier.isActive } as any as Supplier
@@ -44,7 +44,7 @@ export const supplierService = {
       logger.info({ ...input, code }, 'Creating supplier')
 
       try {
-        return await tx.supplier.create({ data: { ...input, code } }) as unknown as Supplier
+        return await tx.supplier.create({ data: { ...input, code } as any }) as unknown as Supplier
       } catch (error: any) {
         if (error?.code === 'P2002') {
           const fields: string[] = error?.meta?.target || error?.meta?.fields || []
@@ -53,7 +53,7 @@ export const supplierService = {
           }
           // Code collision (extremely rare with random suffix) — retry once
           const retryCode = generateCode(input.name)
-          return await tx.supplier.create({ data: { ...input, code: retryCode } }) as unknown as Supplier
+          return await tx.supplier.create({ data: { ...input, code: retryCode } as any }) as unknown as Supplier
         }
         throw error
       }

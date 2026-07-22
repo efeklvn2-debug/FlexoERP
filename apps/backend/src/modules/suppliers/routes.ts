@@ -1,11 +1,13 @@
 import { Router } from 'express'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 import { supplierController } from './controller'
 
 export const supplierRouter = Router()
 
 supplierRouter.use(authenticate)
 supplierRouter.use(loadUser)
+supplierRouter.use(tenantMiddleware)
 
 supplierRouter.get('/', requirePermission('supplier:read'), supplierController.getAll)
 supplierRouter.get('/:id', requirePermission('supplier:read'), supplierController.getById)

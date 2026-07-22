@@ -1,11 +1,12 @@
 import { Router } from 'express'
 import { productionController } from './controller'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 import { mutationLimiter } from '../../middleware/rateLimiters'
 
 export const productionRouter = Router()
 
-productionRouter.use(authenticate, loadUser)
+productionRouter.use(authenticate, loadUser, tenantMiddleware)
 
 productionRouter.get('/', requirePermission('production:read'), productionController.getJobs)
 productionRouter.get('/rolls', requirePermission('inventory:read'), productionController.getAvailableRolls)
@@ -19,9 +20,9 @@ productionRouter.post('/:id/printed-rolls', requirePermission('production:create
 productionRouter.post('/:id/complete', mutationLimiter, requirePermission('production:complete'), productionController.completeJob)
 productionRouter.delete('/:id', requirePermission('production:delete'), productionController.deleteJob)
 
-productionRouter.post('/parent-roll/:id/dispose', mutationLimiter, authenticate, loadUser, requirePermission('inventory:dispose'), productionController.disposeRoll)
-productionRouter.post('/parent-roll/:id/return', mutationLimiter, authenticate, loadUser, requirePermission('inventory:adjust'), productionController.returnRoll)
-productionRouter.post('/parent-roll/:id/consume', mutationLimiter, authenticate, loadUser, requirePermission('inventory:dispose'), productionController.markRollConsumed)
-productionRouter.post('/parent-roll/:id/receive-replacement', authenticate, loadUser, requirePermission('inventory:adjust'), productionController.receiveReplacement)
-productionRouter.post('/printed-roll/:id/customer-return', authenticate, loadUser, requirePermission('sales_order:pickup'), productionController.customerReturnRoll)
-productionRouter.post('/printed-rolls/archive', authenticate, loadUser, requirePermission('production:delete'), productionController.archiveOldPrintedRolls)
+productionRouter.post('/parent-roll/:id/dispose', mutationLimiter, authenticate, loadUser, tenantMiddleware, requirePermission('inventory:dispose'), productionController.disposeRoll)
+productionRouter.post('/parent-roll/:id/return', mutationLimiter, authenticate, loadUser, tenantMiddleware, requirePermission('inventory:adjust'), productionController.returnRoll)
+productionRouter.post('/parent-roll/:id/consume', mutationLimiter, authenticate, loadUser, tenantMiddleware, requirePermission('inventory:dispose'), productionController.markRollConsumed)
+productionRouter.post('/parent-roll/:id/receive-replacement', authenticate, loadUser, tenantMiddleware, requirePermission('inventory:adjust'), productionController.receiveReplacement)
+productionRouter.post('/printed-roll/:id/customer-return', authenticate, loadUser, tenantMiddleware, requirePermission('sales_order:pickup'), productionController.customerReturnRoll)
+productionRouter.post('/printed-rolls/archive', authenticate, loadUser, tenantMiddleware, requirePermission('production:delete'), productionController.archiveOldPrintedRolls)

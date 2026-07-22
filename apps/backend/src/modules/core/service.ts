@@ -130,7 +130,7 @@ export const coreManagementService = {
     // Record the core buyback transaction (company buying from random person)
     const coreBuyback = await prisma.coreBuyback.create({
       data: {
-        sellerName: notes || 'Random Person', // Use notes for seller name if provided
+        sellerName: notes || 'Random Person',
         coresQuantity,
         ratePerCore: new Prisma.Decimal(String(ratePerCore)),
         totalValue: new Prisma.Decimal(String(totalValue)),
@@ -138,7 +138,7 @@ export const coreManagementService = {
         paidAmount: new Prisma.Decimal(String(totalValue)),
         recordedById: userId,
         notes: notes || `Core purchase from random person`
-      }
+      } as any
     })
     
     // Also create a payment transaction for this purchase (money out)

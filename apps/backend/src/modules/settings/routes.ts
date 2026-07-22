@@ -3,10 +3,11 @@ import { settingsController } from './controller'
 import { validateRequest } from '../../middleware/validation'
 import { inkColorSchema, updateInkColorSchema, consumptionRatesSchema, overheadRateSchema, vatSettingsSchema, invoiceSettingsSchema } from './validation'
 import { authenticate, loadUser, requirePermission } from '../../middleware/auth'
+import { tenantMiddleware } from '../../middleware/tenant'
 
 export const settingsRouter = Router()
 
-settingsRouter.use(authenticate, loadUser)
+settingsRouter.use(authenticate, loadUser, tenantMiddleware)
 
 settingsRouter.get('/', requirePermission('settings:read'), settingsController.getSettings)
 settingsRouter.get('/consumption-rates', requirePermission('settings:read'), settingsController.getConsumptionRates)

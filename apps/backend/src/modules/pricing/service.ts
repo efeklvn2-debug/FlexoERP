@@ -55,7 +55,7 @@ export const pricingService = {
         pricePerKg: pricePerKg ?? null,
         pricePerPack: pricePerPack ?? null,
         effectiveFrom: dateFromInput(effectiveFrom)
-      },
+      } as any,
       include: { material: true }
     })
     
@@ -83,7 +83,7 @@ export const pricingService = {
           pricePerKg: input.pricePerKg ?? existing.pricePerKg,
           pricePerPack: input.pricePerPack ?? existing.pricePerPack,
           effectiveFrom: new Date()
-        },
+        } as any,
         include: { material: true }
       })
       
