@@ -86,24 +86,24 @@ export function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="username" className="block text-sm font-semibold text-slate-700 mb-2">
-                Username
+              <label htmlFor="email" className="block text-sm font-semibold text-slate-700 mb-2">
+                Email
               </label>
               <div className="relative">
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                   </svg>
                 </span>
                 <input
-                  id="username"
-                  type="text"
+                  id="email"
+                  type="email"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full pl-11 pr-4 py-3.5 text-base border border-slate-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  placeholder="Enter your username"
+                  placeholder="Enter your email"
                   required
-                  autoComplete="username"
+                  autoComplete="email"
                 />
               </div>
             </div>

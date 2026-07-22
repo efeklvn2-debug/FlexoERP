@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const loginSchema = z.object({
-  username: z.string().min(1, 'Username is required'),
+  username: z.string().email('Valid email is required'),
   password: z.string().min(1, 'Password is required')
 })
 
@@ -10,7 +10,7 @@ export const refreshTokenSchema = z.object({
 })
 
 export const registerSchema = z.object({
-  username: z.string().min(3, 'Username must be at least 3 characters'),
+  username: z.string().email('Valid email is required'),
   password: z
     .string()
     .min(8, 'Password must be at least 8 characters')

@@ -10,15 +10,15 @@ async function main() {
   // ── SUPER ADMIN (no tenant) ───────────────────────────────────────
   const superAdminHash = await bcrypt.hash(adminPassword, 12)
   await prisma.user.upsert({
-    where: { username: 'superadmin' },
+    where: { username: 'superadmin@flexoprint.local' },
     update: {},
     create: {
-      username: 'superadmin',
+      username: 'superadmin@flexoprint.local',
       passwordHash: superAdminHash,
       role: 'SUPER_ADMIN',
     }
   })
-  console.log('Created SUPER_ADMIN user (superadmin/' + adminPassword + ')')
+  console.log('Created SUPER_ADMIN user (superadmin@flexoprint.local / ' + adminPassword + ')')
 
   // ── Default Tenant ────────────────────────────────────────────────
   let tenant = await prisma.tenant.findUnique({ where: { slug: 'demo' } })
@@ -35,16 +35,16 @@ async function main() {
 
     // Admin user for this tenant
     await prisma.user.upsert({
-      where: { username: 'admin' },
+      where: { username: 'admin@flexoprint.local' },
       update: {},
       create: {
-        username: 'admin',
+        username: 'admin@flexoprint.local',
         passwordHash,
         role: 'ADMIN',
         tenantId: tenant!.id,
       }
     })
-    console.log('Created admin user (admin/' + adminPassword + ') for Demo Factory')
+    console.log('Created admin user (admin@flexoprint.local / ' + adminPassword + ') for Demo Factory')
 
     const makeUser = async (username: string, role: string) => {
       const h = await bcrypt.hash('test123', 10)
@@ -55,9 +55,9 @@ async function main() {
       })
       console.log(`Created ${role.toLowerCase()} user (${username}/test123)`)
     }
-    await makeUser('manager', 'MANAGER')
-    await makeUser('operator', 'OPERATOR')
-    await makeUser('viewer', 'VIEWER')
+    await makeUser('manager@flexoprint.local', 'MANAGER')
+    await makeUser('operator@flexoprint.local', 'OPERATOR')
+    await makeUser('viewer@flexoprint.local', 'VIEWER')
 
     // ── Permissions (global) ──────────────────────────────────────
     const permDefs = [

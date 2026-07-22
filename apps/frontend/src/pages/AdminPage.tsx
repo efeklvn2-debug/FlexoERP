@@ -266,7 +266,7 @@ export function AdminPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200">
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Username</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Email</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Role</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Overrides</th>

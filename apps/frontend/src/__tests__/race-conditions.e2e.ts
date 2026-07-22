@@ -70,7 +70,7 @@ let ctx: {
 } = { customerId: '', orderId: '', order2Id: '', jobId: '', job2Id: '', parentRollIds: [], materialId: '', stockMaterialId: '' }
 
 async function ensureLoggedIn() {
-  const r = await axios.post(`${BASE}/auth/login`, { username: 'admin', password: 'admin123' })
+  const r = await axios.post(`${BASE}/auth/login`, { username: 'admin@flexoprint.local', password: 'admin123' })
   _token = r.data?.data?.tokens?.accessToken || r.data?.tokens?.accessToken
   if (!_token) throw new Error('Login failed: no token in response')
   console.log(`  Logged in, token: ${_token.substring(0, 20)}...`)

@@ -38,7 +38,7 @@ function body(resp: { data: any }): any {
 }
 
 async function login(client: AxiosInstance): Promise<void> {
-  const resp = await client.post('/auth/login', { username: 'admin', password: 'admin123' })
+  const resp = await client.post('/auth/login', { username: 'admin@flexoprint.local', password: 'admin123' })
   const d = body(resp)
   client.defaults.headers.common['Authorization'] = `Bearer ${d.tokens.accessToken}`
   console.log(`  User: ${d.user?.username} (${d.user?.role})`)
